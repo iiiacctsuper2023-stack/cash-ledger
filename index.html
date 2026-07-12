@@ -787,7 +787,7 @@ function renderHeader(){
         <input type="file" id="import-file-input" accept="application/json,.json" style="display:none;">
         ${fsApiSupported() ? (
           fsFileHandle
-            ? `<button class="secondary" data-action="disconnect-file" title="Auto-saving to ${escapeHtml(fsFileName)}">&#128190; ${escapeHtml(fsFileName)} &mdash; Disconnect</button>`
+            ? `<span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Every change is being saved directly to this file">&#128994; Auto-saving to ${escapeHtml(fsFileName)}</span><button class="secondary" data-action="disconnect-file">Disconnect</button>`
             : `<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
         ) : ''}
         ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
@@ -1907,6 +1907,22 @@ function setCell(ws, addr, {value, formula, size=11, bold=false, center=false, n
    label, and the amount goes in EITHER C or D depending on valueCol - the
    other of the two is left as a blank bordered filler (valueCol='D') or left
    completely untouched with no border (valueCol='C'), exactly like the sample. */
+/* Excel doesn't auto-fit a row's height once we set one explicitly - even
+   with wrap text turned on - so a long description just gets visually
+   clipped until someone manually double-clicks the row border. We
+   estimate how many wrapped lines the text needs (given the column's
+   character width and font size) and size the row for that ourselves. */
+function estimateWrappedRowHeight(text, colWidthChars, fontSize=11, minHeight=18.75){
+  if(!text) return minHeight;
+  const charsPerLine = Math.max(6, Math.round((colWidthChars*0.85) * (11/Math.max(fontSize,8))));
+  const paragraphs = String(text).split('\n');
+  let lines = 0;
+  paragraphs.forEach(p=>{ lines += Math.max(1, Math.ceil(p.length / charsPerLine)); });
+  const lineHeight = 15 * (fontSize/11);
+  const height = lines*lineHeight + 6;
+  return Math.max(minHeight, Math.ceil(height*1.15)); // 15% safety margin against estimation error
+}
+
 function writeRow(ws, r, {voucher='', label='', size=11, bold=false, valueCol='C', value, formula}={}){
   setCell(ws, `A${r}`, {value:voucher, size:11, bold:false});
   setCell(ws, `B${r}`, {value:label, size, bold, center:true});
@@ -1916,7 +1932,7 @@ function writeRow(ws, r, {voucher='', label='', size=11, bold=false, valueCol='C
   } else {
     setCell(ws, `C${r}`, {value, formula, size, bold, numFmt:ASIAN_NUMFMT});
   }
-  ws.getRow(r).height = 18.75;
+  ws.getRow(r).height = estimateWrappedRowHeight(label, 58, size);
   return r;
 }
 
@@ -2094,8 +2110,9 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   const startRow = r;
   items.forEach(it=>{
     put(`C${r}`, it.voucher, {size:11});
-    put(`D${r}`, it.desc, {size:11});
+    put(`D${r}`, it.desc, {size:11, wrap:true});
     put(`E${r}`, it.amount, {size:10, name:'Arial', numFmt:ASIAN_NUMFMT});
+    ws.getRow(r).height = estimateWrappedRowHeight(it.desc, 47, 11);
     r++;
   });
   const endRow = r-1;
