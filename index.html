@@ -18,97 +18,182 @@
     --ink-soft:#5B6459;
     --primary:#1B4B43;
     --primary-dark:#0F332C;
+    --primary-tint:#DCE8E2;
     --accent:#B8863B;
+    --accent-deep:#8C6423;
     --accent-soft:#EADFC5;
     --danger:#A23B2E;
     --danger-soft:#F3DFDA;
     --line:#D7D2C0;
     --line-soft:#E6E2D3;
-    --radius:10px;
+    --radius:12px;
+    --ease:cubic-bezier(.19,.85,.32,1.05);
+    --shadow-sm:0 1px 2px rgba(15,51,44,.05), 0 1px 1px rgba(15,51,44,.04);
+    --shadow-md:0 4px 14px rgba(15,51,44,.07), 0 1px 3px rgba(15,51,44,.05);
+    --shadow-lg:0 14px 34px rgba(15,51,44,.14), 0 3px 10px rgba(15,51,44,.08);
   }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;}
-  body{padding:28px 18px 80px;}
+  html{scroll-behavior:smooth;}
+  html,body{margin:0;padding:0;color:var(--ink);font-family:'IBM Plex Sans',sans-serif;}
+  body{
+    padding:32px 18px 90px;
+    background:
+      radial-gradient(1100px 520px at 12% -8%, rgba(184,134,59,.07), transparent 55%),
+      radial-gradient(900px 480px at 100% 0%, rgba(27,75,67,.06), transparent 50%),
+      var(--paper);
+    min-height:100vh;
+  }
+  body::before{
+    content:'';position:fixed;top:0;left:0;right:0;height:3px;z-index:999;
+    background:linear-gradient(90deg, var(--primary) 0%, var(--accent) 52%, var(--primary) 100%);
+    background-size:200% 100%;
+    animation:sheen 9s linear infinite;
+  }
+  @keyframes sheen{0%{background-position:0% 0;}100%{background-position:200% 0;}}
   .wrap{max-width:980px;margin:0 auto;}
 
-  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;color:var(--primary-dark);}
-  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600;}
-  .mono{font-family:'IBM Plex Mono',monospace;}
+  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;color:var(--primary-dark);letter-spacing:-.01em;}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-deep);font-weight:600;display:inline-flex;align-items:center;gap:7px;}
+  .eyebrow::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
 
-  header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:22px;border-bottom:2px solid var(--primary-dark);padding-bottom:16px;}
-  header.top h1{font-size:26px;}
-  header.top p{margin:4px 0 0;color:var(--ink-soft);font-size:13.5px;}
-  .top-actions{display:flex;gap:8px;flex-wrap:wrap;}
+  header.top{display:flex;flex-direction:column;gap:14px;margin-bottom:26px;padding-bottom:18px;position:relative;animation:fadeDown .5s var(--ease) both;}
+  header.top::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg, var(--primary-dark) 0%, var(--line) 65%, transparent 100%);}
+  .top-title h1{font-size:27px;margin-top:3px;}
+  .top-title p{margin:5px 0 0;color:var(--ink-soft);font-size:13.5px;}
 
-  button{font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:600;border-radius:7px;border:1px solid var(--primary-dark);padding:8px 14px;cursor:pointer;background:var(--primary);color:#fff;transition:transform .08s ease, background .15s ease;}
-  button:hover{background:var(--primary-dark);}
-  button:active{transform:scale(.97);}
+  .toolbar{display:flex;align-items:center;gap:2px;flex-wrap:wrap;background:#fff;border:1px solid var(--line-soft);border-radius:12px;padding:6px;box-shadow:var(--shadow-sm);width:fit-content;max-width:100%;}
+  .toolbar-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+  .toolbar-divider{width:1px;align-self:stretch;background:var(--line-soft);margin:4px 6px;}
+  .toolbar button{padding:7px 12px;font-size:12.5px;border-radius:7px;}
+  .toolbar button.secondary{border-color:transparent;background:transparent;box-shadow:none;}
+  .toolbar button.secondary:hover{background:var(--paper);border-color:var(--line-soft);box-shadow:none;transform:none;}
+  .toolbar .tag{margin-left:2px;}
+  @media (max-width:640px){ .toolbar{width:100%;} }
+
+  button{font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:600;border-radius:8px;border:1px solid var(--primary-dark);padding:8px 14px;cursor:pointer;background:var(--primary);color:#fff;transition:transform .16s var(--ease), background-color .18s ease, box-shadow .18s ease, border-color .18s ease;box-shadow:var(--shadow-sm);}
+  button:hover{background:var(--primary-dark);box-shadow:var(--shadow-md);transform:translateY(-1px);}
+  button:active{transform:translateY(0) scale(.97);box-shadow:var(--shadow-sm);}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
   button.secondary{background:var(--card);color:var(--primary-dark);border-color:var(--line);}
-  button.secondary:hover{background:var(--line-soft);}
+  button.secondary:hover{background:#fff;border-color:var(--primary);}
   button.danger{background:var(--card);color:var(--danger);border-color:var(--danger-soft);}
-  button.danger:hover{background:var(--danger-soft);}
-  button.small{padding:5px 10px;font-size:12px;}
-  button:disabled{opacity:.45;cursor:not-allowed;}
+  button.danger:hover{background:var(--danger-soft);border-color:var(--danger);}
+  button.small{padding:5px 10px;font-size:12px;border-radius:6px;}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important;}
 
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;}
-  .card > h3{font-size:16px;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
-  .card > h3 .num{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);border:1px solid var(--accent-soft);background:var(--accent-soft);border-radius:5px;padding:2px 7px;}
-  .subnote{font-size:12px;color:var(--ink-soft);margin:-6px 0 12px;}
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-left:3px solid var(--accent-soft);
+    border-radius:var(--radius);
+    padding:20px 22px;
+    margin-bottom:16px;
+    box-shadow:var(--shadow-sm);
+    animation:cardRise .5s var(--ease) both;
+    transition:box-shadow .25s ease, border-left-color .25s ease;
+  }
+  .card:hover{box-shadow:var(--shadow-md);border-left-color:var(--accent);}
+  @keyframes cardRise{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fadeDown{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
+  .card > h3{font-size:16.5px;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+  .card > h3 .num{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent-deep);border:1px solid var(--accent-soft);background:var(--accent-soft);border-radius:5px;padding:2px 7px;}
+  .subnote{font-size:12px;color:var(--ink-soft);margin:-6px 0 12px;line-height:1.5;}
 
-  label{font-size:12px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;}
-  input[type=text], input[type=number], input[type=date], select{
-    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;background:#fff;color:var(--ink);
+  label{font-size:12px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;letter-spacing:.01em;}
+  input[type=text], input[type=number], input[type=date], input[type=password], select{
+    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;background:#fff;color:var(--ink);
+    transition:border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
   }
   input[type=number]{font-family:'IBM Plex Mono',monospace;}
-  input:focus, select:focus{outline:2px solid var(--primary);outline-offset:1px;}
+  input:hover, select:hover{border-color:#c3bda6;}
+  input:focus, select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-tint);background:#fff;}
   .row{display:flex;gap:10px;flex-wrap:wrap;}
   .row > *{flex:1;min-width:140px;}
 
   .field{margin-bottom:10px;}
 
-  .line-item{display:flex;gap:8px;align-items:flex-end;background:#fff;border:1px solid var(--line-soft);border-radius:7px;padding:8px 10px;margin-bottom:8px;}
+  .line-item{display:flex;gap:8px;align-items:flex-end;background:#fff;border:1px solid var(--line-soft);border-radius:8px;padding:9px 10px;margin-bottom:8px;transition:box-shadow .18s ease, border-color .18s ease;animation:rowIn .3s var(--ease) both;}
+  .line-item:hover{box-shadow:var(--shadow-sm);border-color:var(--line);}
+  @keyframes rowIn{from{opacity:0;transform:translateX(-4px);}to{opacity:1;transform:translateX(0);}}
   .line-item .voucher-badge{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--primary-dark);color:#fff;border-radius:5px;padding:5px 8px;white-space:nowrap;align-self:center;}
+  .status-badge{font-size:10.5px;font-weight:600;border-radius:20px;padding:5px 10px;white-space:nowrap;align-self:center;border:1px solid transparent;cursor:pointer;transition:background .15s var(--ease),transform .1s var(--ease);letter-spacing:.02em;}
+  .status-badge:active{transform:scale(.95);}
+  .status-badge:disabled{cursor:not-allowed;opacity:.6;}
+  .status-badge.status-draft{background:#EDEEF1;color:#5B6270;border-color:#DADDE3;}
+  .status-badge.status-reviewed{background:#DCEBFB;color:#1D5FA8;border-color:#BBDAF5;}
+  .status-badge.status-approved{background:#DDEEE3;color:var(--primary-dark);border-color:#BFE0CC;}
+  .day-panel.locked{position:relative;}
+  .day-panel.locked::after{
+    content:'\1F512';
+    position:fixed;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%) rotate(-18deg);
+    font-size:min(30vw,320px);
+    opacity:.035;
+    pointer-events:none;
+    z-index:0;
+    filter:grayscale(1);
+  }
+  .day-panel.locked > .card{position:relative;z-index:1;}
   .line-item .desc{flex:3;}
   .line-item .amt{flex:1;min-width:100px;}
   .line-item .bank-sel{flex:1.4;min-width:120px;}
 
-  .computed{background:var(--accent-soft);border:1px dashed var(--accent);border-radius:6px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--primary-dark);display:flex;justify-content:space-between;margin-top:4px;}
+  .computed{background:var(--accent-soft);border:1px dashed var(--accent);border-radius:7px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--primary-dark);display:flex;justify-content:space-between;margin-top:4px;transition:background-color .2s ease;}
   .computed .lbl{font-family:'IBM Plex Sans',sans-serif;font-weight:600;font-size:12.5px;color:var(--ink-soft);}
-  .computed.total{background:var(--primary);color:#fff;border:none;}
+  .computed.total{background:var(--primary);color:#fff;border:none;box-shadow:var(--shadow-sm);}
   .computed.total .lbl{color:#e7efe9;}
+  .value-pop{display:inline-block;animation:valuePop .38s var(--ease);}
+  @keyframes valuePop{0%{transform:scale(1.1);color:var(--accent-deep);}100%{transform:scale(1);}}
 
   .tag{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;background:var(--line-soft);color:var(--ink-soft);border-radius:4px;padding:2px 6px;margin-left:6px;}
+  mark.search-hit{background:var(--accent-soft);color:var(--accent-deep);padding:0 2px;border-radius:3px;font-weight:700;}
+  .locked-day{position:relative;pointer-events:none;opacity:.55;user-select:none;}
+  .locked-day::after{content:'\1F512 Locked';position:absolute;top:12px;right:14px;font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--danger);background:var(--danger-soft);padding:2px 8px;border-radius:5px;}
 
-  .day-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;}
-  .day-tab{flex:none;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12.5px;white-space:nowrap;color:var(--ink-soft);}
-  .day-tab.active{background:var(--primary-dark);border-color:var(--primary-dark);color:#fff;}
+  .day-tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 8px;margin-bottom:16px;scrollbar-width:thin;}
+  .day-tabs::-webkit-scrollbar{height:6px;}
+  .day-tabs::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .day-tabs::-webkit-scrollbar-track{background:transparent;}
+  .day-tab{flex:none;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12.5px;white-space:nowrap;color:var(--ink-soft);transition:all .16s var(--ease);}
+  .day-tab:hover{border-color:var(--primary);color:var(--primary-dark);transform:translateY(-1px);}
+  .day-tab.active{background:var(--primary-dark);border-color:var(--primary-dark);color:#fff;box-shadow:var(--shadow-sm);}
 
   .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
-  .summary-box{background:#fff;border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;}
-  .summary-box .lbl{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;font-family:'IBM Plex Mono',monospace;}
-  .summary-box .val{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--primary-dark);margin-top:2px;}
-  .summary-box.grand{background:var(--primary-dark);}
+  .summary-box{background:#fff;border:1px solid var(--line-soft);border-radius:9px;padding:11px 13px;transition:box-shadow .2s ease, transform .2s ease;}
+  .summary-box:hover{box-shadow:var(--shadow-md);transform:translateY(-2px);}
+  .summary-box .lbl{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em;font-family:'IBM Plex Mono',monospace;}
+  .summary-box .val{font-family:'IBM Plex Mono',monospace;font-size:18.5px;font-weight:600;color:var(--primary-dark);margin-top:3px;font-variant-numeric:tabular-nums;}
+  .summary-box.grand{background:var(--primary-dark);box-shadow:var(--shadow-md);}
   .summary-box.grand .lbl{color:#cfe0d7;}
   .summary-box.grand .val{color:#fff;}
 
-  .empty{color:var(--ink-soft);font-size:13px;font-style:italic;padding:6px 2px;}
+  .empty{color:var(--ink-soft);font-size:13px;font-style:italic;padding:8px 2px;}
 
   .setup-banks .bank-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
-  .divider{height:1px;background:var(--line);margin:18px 0;}
+  .divider{height:1px;background:linear-gradient(90deg, var(--line), transparent);margin:18px 0;}
 
   .coa-desc{font-size:12px;color:var(--ink-soft);margin-bottom:10px;}
 
-  footer.dl{position:sticky;bottom:0;background:linear-gradient(0deg,var(--paper) 70%, transparent);padding:16px 0 4px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+  footer.dl{position:sticky;bottom:0;background:linear-gradient(0deg,var(--paper) 65%, transparent);padding:18px 0 4px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
 
   @media (max-width:640px){
     header.top{flex-direction:column;align-items:flex-start;}
     .line-item{flex-wrap:wrap;}
   }
 
-  .modal-overlay{position:fixed;inset:0;background:rgba(15,51,44,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;}
-  .modal-box{background:#fff;border-radius:10px;padding:20px 22px;max-width:400px;box-shadow:0 12px 34px rgba(0,0,0,.28);}
-  .modal-box p{margin:0 0 18px;color:var(--ink);font-size:14px;line-height:1.55;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(15,51,44,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;animation:overlayIn .18s ease both;backdrop-filter:blur(1px);}
+  .modal-box{background:#fff;border-radius:14px;padding:22px 24px;max-width:400px;box-shadow:var(--shadow-lg);animation:modalIn .28s var(--ease) both;}
+  .modal-box p{margin:0 0 18px;color:var(--ink);font-size:14px;line-height:1.6;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;}
+  @keyframes overlayIn{from{opacity:0;}to{opacity:1;}}
+  @keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(.97);}to{opacity:1;transform:translateY(0) scale(1);}}
+
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important;}
+    body::before{animation:none;}
+  }
 </style>
 </head>
 <body>
@@ -146,9 +231,16 @@ let searchOpen = false;
 let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
 let summaryOpen = false;
 let summaryFilters = { catKey:'', mode:'month', year:'', fromDate:'', toDate:'' };
+let templatesOpen = false;
+let dashboardOpen = false;
 let locked = false;            // true = show the lock screen instead of the app
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
+let lastUndo = null;      // {label, restore} - the most recent undoable delete
+let lastUndoTimer = null;
+let duplicateWarning = null;   // string message, or null - shown as a dismissible toast
+let duplicateWarningTimer = null; // auto-clears the undo offer after a short window
 let passwordFormOpen = false;  // true = show the set/change-password mini form
+let dayLockPasswordFormOpen = false; // true = show the set/change day-lock-password mini form
 let lockError = '';            // error text shown on a failed unlock attempt
 
 function defaultState(){
@@ -172,7 +264,9 @@ function defaultState(){
     days:[],
     iouRegistry:[],
     lockPasswordHash:null,
-    archive:[]
+    dayLockPasswordHash:null,
+    archive:[],
+    templates:[]
   };
 }
 function newDay(dateStr){
@@ -187,12 +281,16 @@ function newDay(dateStr){
     deposits:[],
     coa:coaEmpty,
     banksDaily:{},
-    bankTransfers:[]
+    bankTransfers:[],
+    locked:false
   };
 }
 function ensureBankDaily(day, bankId){
-  if(!day.banksDaily[bankId]) day.banksDaily[bankId] = {sslDeposit:0, fees:0, salaryAccount:0, salaryCash:0};
-  return day.banksDaily[bankId];
+  if(!day.banksDaily[bankId]) day.banksDaily[bankId] = {sslDeposit:0, fees:0, salaryAccount:0, salaryCash:0, reconciledBalance:null, reconcileNote:''};
+  const bd = day.banksDaily[bankId];
+  if(bd.reconciledBalance===undefined) bd.reconciledBalance = null;
+  if(bd.reconcileNote===undefined) bd.reconcileNote = '';
+  return bd;
 }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
@@ -237,28 +335,138 @@ function parseAmountInput(displayValue){
   const num = parseFloat(String(displayValue||'').replace(/,/g,''));
   return isNaN(num) ? 0 : num;
 }
+/* Lets someone type a quick sum right into an amount box, e.g. "1500-500"
+   resolves to 1000 the moment they leave the field (blur/Enter) - handy
+   for things like "IOU was 1500, 500 came back, net 1000" without needing
+   a calculator on the side. Only digits, spaces, a decimal point, and
+   + - * / ( ) are ever accepted; anything else is stripped as typed. */
+function looksLikePlainNumber(s){ return /^-?\d*\.?\d*$/.test(s); }
+function evalAmountExpression(expr){
+  const cleaned = String(expr||'').replace(/,/g,'').trim();
+  if(!cleaned) return null;
+  if(!/^[\d\s+\-*/().]+$/.test(cleaned)) return null; // reject anything not a plain arithmetic expression
+  if(!/\d/.test(cleaned)) return null; // must contain at least one digit
+  try{
+    const result = Function('"use strict"; return (' + cleaned + ')')();
+    return (typeof result==='number' && isFinite(result)) ? result : null;
+  }catch(e){ return null; }
+}
+function resolveAmountField(inputEl, onChange, fallbackValue){
+  const raw = inputEl.value.replace(/,/g,'').trim();
+  if(raw===''){ inputEl.value=''; onChange(0); return; }
+  if(looksLikePlainNumber(raw)) return; // already a plain number - nothing to resolve
+  const result = evalAmountExpression(raw);
+  if(result===null){
+    const m = raw.match(/^-?\d+(\.\d+)?/);
+    const num = m ? parseFloat(m[0]) : (fallbackValue||0);
+    inputEl.value = formatAsianAmount(num);
+    onChange(num);
+    return;
+  }
+  inputEl.value = formatAsianAmount(result);
+  onChange(result);
+}
 /* Wires a text input to live-format with Asian comma grouping as the
-   person types, preserving caret position, and reports the parsed numeric
-   value back via onChange on every edit. */
+   person types a plain number, preserving caret position, and reports
+   the parsed numeric value back via onChange on every edit. If what's
+   typed looks like an arithmetic expression instead (has a +, *, /, or a
+   non-leading -), it's left as raw text while typing and only resolved
+   into a final number on blur or Enter. */
 function wireAmountInput(inputEl, onChange){
+  const fallbackValue = parseAmountInput(inputEl.value);
   inputEl.addEventListener('input', ()=>{
-    const digitsBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart).replace(/[^0-9.]/g,'').length;
-    let raw = inputEl.value.replace(/[^0-9.]/g,'');
-    const firstDot = raw.indexOf('.');
-    if(firstDot!==-1){ raw = raw.slice(0,firstDot+1) + raw.slice(firstDot+1).replace(/\./g,''); }
-    const num = (raw===''||raw==='.') ? 0 : parseFloat(raw);
-    const formatted = formatAsianAmount(raw);
-    inputEl.value = formatted;
-    let seen = 0, pos = 0;
-    for(; pos<formatted.length; pos++){
-      if(/[0-9.]/.test(formatted[pos])) seen++;
-      if(seen>=digitsBeforeCursor){ pos++; break; }
+    const raw = inputEl.value.replace(/,/g,'');
+    if(looksLikePlainNumber(raw)){
+      const digitsBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart).replace(/[^0-9.]/g,'').length;
+      let clean = raw.replace(/[^0-9.]/g,'');
+      const firstDot = clean.indexOf('.');
+      if(firstDot!==-1){ clean = clean.slice(0,firstDot+1) + clean.slice(firstDot+1).replace(/\./g,''); }
+      const num = (clean===''||clean==='.') ? 0 : parseFloat(clean);
+      const formatted = formatAsianAmount(clean);
+      inputEl.value = formatted;
+      let seen = 0, pos = 0;
+      for(; pos<formatted.length; pos++){
+        if(/[0-9.]/.test(formatted[pos])) seen++;
+        if(seen>=digitsBeforeCursor){ pos++; break; }
+      }
+      inputEl.setSelectionRange(pos, pos);
+      onChange(isNaN(num)?0:num);
+    } else {
+      const pos = inputEl.selectionStart;
+      const sanitized = inputEl.value.replace(/[^0-9+\-*/(). ]/g,'');
+      if(sanitized !== inputEl.value){
+        inputEl.value = sanitized;
+        inputEl.setSelectionRange(pos, pos);
+      }
+      // a math expression is mid-typing - wait for blur/Enter to resolve it
     }
-    inputEl.setSelectionRange(pos, pos);
-    onChange(isNaN(num)?0:num);
+  });
+  inputEl.addEventListener('blur', ()=>{ resolveAmountField(inputEl, onChange, fallbackValue); });
+  inputEl.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ e.preventDefault(); resolveAmountField(inputEl, onChange, fallbackValue); inputEl.blur(); }
   });
 }
 function findDay(id){ return state.days.find(d=>d.id===id); }
+
+/* --- Soft-delete / Undo -------------------------------------------------
+   Every delete action calls pushUndo() with a closure that restores
+   exactly what was removed. A small toast offers "Undo" for a short
+   window (10s) or until another delete replaces it. */
+function pushUndo(label, restoreFn){
+  lastUndo = {label, restore: restoreFn};
+  if(lastUndoTimer) clearTimeout(lastUndoTimer);
+  lastUndoTimer = setTimeout(()=>{ lastUndo = null; render(); }, 10000);
+}
+function performUndo(){
+  if(!lastUndo) return;
+  lastUndo.restore();
+  if(lastUndoTimer) clearTimeout(lastUndoTimer);
+  lastUndo = null;
+  saveState();
+  render();
+}
+function renderUndoToast(){
+  return el(`
+    <div style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--primary-dark);color:#fff;padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:14px;z-index:500;font-size:13px;animation:modalIn .25s var(--ease);max-width:92vw;">
+      <span>${escapeHtml(lastUndo.label)}</span>
+      <button type="button" data-action="perform-undo" style="background:var(--accent);border-color:var(--accent);white-space:nowrap;">Undo</button>
+    </div>
+  `);
+}
+
+/* --- Duplicate-amount warning ------------------------------------------
+   A gentle heads-up (not a block) when the same amount shows up more than
+   once in the same day - catches accidental double entry without getting
+   in the way of legitimate repeats (e.g. two genuinely equal payments). */
+function checkDuplicateAmount(day, amount, excludeItemId){
+  if(!amount || amount<=0) return null;
+  const matches = [];
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(it=>{
+      if(it.id!==excludeItemId && Number(it.amount)===Number(amount)){
+        matches.push({label: cat.label, desc: it.desc||'', voucher: it.voucher});
+      }
+    });
+  });
+  if(matches.length===0) return null;
+  const m = matches[0];
+  const where = m.desc ? `"${m.desc}" (${m.label}, ${m.voucher})` : `${m.label} (${m.voucher})`;
+  return `Heads up: ${formatAsianAmount(amount)} was already entered today under ${where}${matches.length>1?` and ${matches.length-1} more`:''}. Might be a duplicate - or just two genuine entries.`;
+}
+function showDuplicateWarning(message){
+  duplicateWarning = message;
+  if(duplicateWarningTimer) clearTimeout(duplicateWarningTimer);
+  duplicateWarningTimer = setTimeout(()=>{ duplicateWarning = null; render(); }, 7000);
+  render();
+}
+function renderDuplicateWarningToast(){
+  return el(`
+    <div style="position:fixed;left:50%;bottom:${lastUndo?'78px':'22px'};transform:translateX(-50%);background:#7A5B12;color:#fff;padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:14px;z-index:500;font-size:13px;animation:modalIn .25s var(--ease);max-width:92vw;">
+      <span>&#9888; ${escapeHtml(duplicateWarning)}</span>
+      <button type="button" data-action="dismiss-dup-warning" style="background:transparent;border-color:rgba(255,255,255,.5);color:#fff;white-space:nowrap;">Dismiss</button>
+    </div>
+  `);
+}
 
 /* Every day ever recorded, current month + everything archived by past
    "Refresh - new month" clears, so Search and Category Summary can see
@@ -600,7 +808,15 @@ function migrateState(){
   }
   (state.days||[]).forEach(day=>{ if(!day.bankTransfers) day.bankTransfers = []; });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
+  if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(!state.archive) state.archive = [];
+  if(!state.templates) state.templates = [];
+  (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
+  const stampStatus = (day)=>{
+    COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(it=>{ if(it.status===undefined) it.status = 'draft'; }); });
+  };
+  (state.days||[]).forEach(stampStatus);
+  (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(stampStatus); });
 }
 async function loadState(){
   try{
@@ -713,6 +929,24 @@ function computeAll(){
    ====================================================================== */
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
 function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+/* Wraps every case-insensitive occurrence of query in <mark>, escaping
+   everything safely (matching is done on the raw text, then each segment
+   is escaped separately, so this never breaks on &, <, > etc. in text). */
+function highlightMatches(text, query){
+  const raw = (text||'').toString();
+  if(!query) return escapeHtml(raw);
+  const q = query.toLowerCase();
+  const lower = raw.toLowerCase();
+  let out = '', i = 0;
+  while(i < raw.length){
+    const idx = lower.indexOf(q, i);
+    if(idx===-1){ out += escapeHtml(raw.slice(i)); break; }
+    out += escapeHtml(raw.slice(i, idx));
+    out += '<mark class="search-hit">' + escapeHtml(raw.slice(idx, idx+q.length)) + '</mark>';
+    i = idx + q.length;
+  }
+  return out;
+}
 
 /* Native confirm()/alert() are often blocked inside a sandboxed artifact
    iframe (they silently no-op). These custom modals work everywhere. */
@@ -739,6 +973,50 @@ function showModal({message, confirmText='OK', cancelText=null, danger=false, on
 function showAlert(message){ showModal({message, confirmText:'OK'}); }
 function showConfirm(message, onConfirm, confirmText='Delete'){ showModal({message, confirmText, cancelText:'Cancel', danger:true, onConfirm}); }
 
+/* Password-gated confirmation, used for unlocking a finalized/locked day.
+   Checks the entered password against the screen-lock password hash before
+   calling onConfirm. If no screen-lock password has been set at all, this
+   falls back to a plain confirm so the feature doesn't dead-end users who
+   never set one. */
+function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToCheck){
+  if(hashToCheck===undefined) hashToCheck = state.lockPasswordHash;
+  if(!hashToCheck){ showConfirm(message, onConfirm, confirmText); return; }
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p>${escapeHtml(message)}</p>
+        <input type="password" id="pw-prompt-input" autocomplete="current-password" placeholder="Password" style="margin:2px 0 4px;">
+        <div id="pw-prompt-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">${escapeHtml(confirmText)}</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#pw-prompt-input');
+  const errorEl = overlay.querySelector('#pw-prompt-error');
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const cancelBtn = buttons[0], confirmBtn = buttons[1];
+  const attempt = async ()=>{
+    const hash = await sha256Hex(input.value||'');
+    if(hash === hashToCheck){
+      overlay.remove();
+      onConfirm();
+    } else {
+      errorEl.textContent = 'Incorrect password.';
+      input.value = '';
+      input.focus();
+    }
+  };
+  confirmBtn.onclick = attempt;
+  cancelBtn.onclick = ()=> overlay.remove();
+  input.onkeydown = (e)=>{ if(e.key==='Enter') attempt(); };
+  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  setTimeout(()=>input.focus(), 30);
+}
+
 /* ======================================================================
    Rendering
    ====================================================================== */
@@ -751,12 +1029,15 @@ function render(){
   }
   app.appendChild(renderHeader());
   if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
+  if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
   if(!state.setupDone){
     app.appendChild(renderSetup());
     return;
   }
+  if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
   if(summaryOpen) app.appendChild(renderCategorySummaryCard());
+  if(templatesOpen) app.appendChild(renderTemplatesCard());
   app.appendChild(renderDayTabs());
   const computed = computeAll();
   if(state.days.length===0){
@@ -765,34 +1046,48 @@ function render(){
     if(!selectedDayId || !findDay(selectedDayId)) selectedDayId = state.days[state.days.length-1].id;
     app.appendChild(renderDayPanel(selectedDayId, computed));
     app.appendChild(renderNotesheetCard());
+    app.appendChild(renderAnnualSummaryCard());
   }
   app.appendChild(renderFooter());
+  if(lastUndo) app.appendChild(renderUndoToast());
+  if(duplicateWarning) app.appendChild(renderDuplicateWarningToast());
 }
 
 function renderHeader(){
   const header = el(`
     <header class="top">
-      <div>
+      <div class="top-title">
         <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
         <h1>Daily Cash &amp; Bank Ledger</h1>
         <p>${state.setupDone ? `Recording for <strong>${state.month} ${state.year}</strong>` : 'Set up the month before recording daily entries'}</p>
       </div>
-      <div class="top-actions">
-        ${state.setupDone ? '<button class="secondary" data-action="edit-setup">Edit setup</button>' : ''}
-        ${state.setupDone ? `<button class="secondary" data-action="toggle-search">&#128269; ${searchOpen?'Hide':'Advanced'} Search</button>` : ''}
-        ${state.setupDone ? `<button class="secondary" data-action="toggle-summary">&#128202; ${summaryOpen?'Hide':'Category'} Summary</button>` : ''}
-        ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
-        <button class="secondary" data-action="export-backup">&#11015; Export backup</button>
-        <button class="secondary" data-action="import-backup">&#11014; Import backup</button>
-        <input type="file" id="import-file-input" accept="application/json,.json" style="display:none;">
-        ${fsApiSupported() ? (
-          fsFileHandle
-            ? `<span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Every change is being saved directly to this file">&#128994; Auto-saving to ${escapeHtml(fsFileName)}</span><button class="secondary" data-action="disconnect-file">Disconnect</button>`
-            : `<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
-        ) : ''}
-        ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
-        ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
-        <button class="danger" data-action="refresh">Refresh &middot; new month</button>
+      <div class="toolbar">
+        ${state.setupDone ? `
+        <div class="toolbar-group">
+          <button class="secondary" data-action="edit-setup">&#9881; Edit setup</button>
+          <button class="secondary" data-action="toggle-dashboard">&#127968; ${dashboardOpen?'Hide':''} Dashboard</button>
+          <button class="secondary" data-action="toggle-search">&#128269; ${searchOpen?'Hide':'Advanced'} Search</button>
+          <button class="secondary" data-action="toggle-summary">&#128202; ${summaryOpen?'Hide':'Category'} Summary</button>
+          <button class="secondary" data-action="toggle-templates">&#128203; ${templatesOpen?'Hide':''} Templates</button>
+        </div>
+        <div class="toolbar-divider"></div>` : ''}
+        <div class="toolbar-group">
+          <button class="secondary" data-action="export-backup">&#11015; Export backup</button>
+          <button class="secondary" data-action="import-backup">&#11014; Import backup</button>
+          <input type="file" id="import-file-input" accept="application/json,.json" style="display:none;">
+          ${fsApiSupported() ? (
+            fsFileHandle
+              ? `<span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Every change is being saved directly to this file">&#128994; Auto-saving to ${escapeHtml(fsFileName)}</span><button class="secondary" data-action="disconnect-file">Disconnect</button>`
+              : `<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
+          ) : ''}
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
+          ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
+          ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : '<button class="secondary" data-action="remove-daylock-password">&#128273; Remove day-lock password</button>'}
+          ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
+        </div>
       </div>
     </header>
   `);
@@ -844,6 +1139,48 @@ function renderPasswordForm(){
     showAlert('Password saved. Use "Lock now" any time you want to lock the screen.');
   };
   card.querySelector('#pw-cancel').onclick = ()=>{ passwordFormOpen = false; render(); };
+  return card;
+}
+
+/* Inline mini-form for setting a separate password used only to unlock a
+   finalized/locked day (distinct from the screen-lock password above). */
+function renderDayLockPasswordForm(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128273;</span> Set Day-Lock Password</h3>
+      <p class="subnote">This password is only asked for when unlocking a finalized day &mdash; separate from the screen-lock password. Once set, it can only be removed (not changed) from here &mdash; use "Remove day-lock password" and set a new one if you need to update it.</p>
+      <div class="row">
+        <div class="field">
+          <label>New day-lock password</label>
+          <input type="password" id="dlpw-new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm new password</label>
+          <input type="password" id="dlpw-confirm" autocomplete="new-password">
+        </div>
+      </div>
+      <div id="dlpw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button type="button" id="dlpw-save">Set day-lock password</button>
+        <button class="secondary" type="button" id="dlpw-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  const newInp = card.querySelector('#dlpw-new');
+  const confirmInp = card.querySelector('#dlpw-confirm');
+  const errBox = card.querySelector('#dlpw-error');
+  card.querySelector('#dlpw-save').onclick = async ()=>{
+    const a = newInp.value, b = confirmInp.value;
+    if(!a){ errBox.textContent = 'Enter a password.'; return; }
+    if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
+    if(a!==b){ errBox.textContent = 'Passwords do not match.'; return; }
+    state.dayLockPasswordHash = await sha256Hex(a);
+    dayLockPasswordFormOpen = false;
+    await saveState();
+    render();
+    showAlert('Day-lock password saved. Unlocking a finalized day will now ask for it.');
+  };
+  card.querySelector('#dlpw-cancel').onclick = ()=>{ dayLockPasswordFormOpen = false; render(); };
   return card;
 }
 
@@ -984,13 +1321,35 @@ function refreshComputedOnly(){
   COA.forEach(cat=>{ setText('coa-cat-total-'+cat.key, money(c.coaTotals[cat.key]||0)); });
   saveState();
 }
-function setText(id, text){ const e=document.getElementById(id); if(e) e.textContent = text; }
+function setText(id, text){
+  const e=document.getElementById(id);
+  if(!e) return;
+  const changed = e.textContent !== text;
+  e.textContent = text;
+  if(changed){
+    e.classList.remove('value-pop');
+    void e.offsetWidth; // restart the animation
+    e.classList.add('value-pop');
+  }
+}
 
 function renderDayPanel(dayId, computed){
   const day = findDay(dayId);
   const c = computed[dayId];
   const idx = state.days.findIndex(d=>d.id===dayId);
-  const wrap = el(`<div></div>`);
+  const wrap = el(`<div class="day-panel${day.locked?' locked':''}"></div>`);
+
+  /* --- Period lock banner --- */
+  const lockBar = el(`
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;${day.locked?'border-left-color:var(--danger);':''}">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:15px;">${day.locked?'&#128274;':'&#128275;'}</span>
+        <span style="font-size:13px;color:var(--ink-soft);">${day.locked ? ('This day is locked - entries can\'t be edited until it\'s unlocked'+((state.dayLockPasswordHash||state.lockPasswordHash)?' with the password':'')+'.') : 'Once a day is finalized, lock it to prevent accidental edits.'}</span>
+      </div>
+      <button class="${day.locked?'danger':'secondary'} small" type="button" data-action="${day.locked?'unlock-day':'lock-day'}" data-day="${day.id}">${day.locked?'Unlock this day':'Lock this day'}</button>
+    </div>
+  `);
+  wrap.appendChild(lockBar);
 
   /* --- 01 Cash received --- */
   const cashCard = el(`
@@ -1031,6 +1390,7 @@ function renderDayPanel(dayId, computed){
   cashCard.querySelector('#day-date').oninput = (e)=>{ day.date = e.target.value; refreshComputedOnly(); render(); };
   wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ day.serviceRevenue = num; refreshComputedOnly(); });
   drawTransferList(cashCard.querySelector('#withdraw-list'), day, 'withdrawals', 'No withdrawals today.');
+  if(day.locked) cashCard.classList.add('locked-day');
   wrap.appendChild(cashCard);
 
   /* --- 02 CoA disbursements --- */
@@ -1073,6 +1433,7 @@ function renderDayPanel(dayId, computed){
   };
   COA.forEach((cat, ci)=>{
     const items = day.coa[cat.key];
+    const catTemplates = state.templates.filter(t=>t.catKey===cat.key);
     const section = el(`
       <div style="margin-bottom:14px;padding-bottom:12px;${ci<COA.length-1?'border-bottom:1px solid var(--line-soft);':''}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -1082,11 +1443,13 @@ function renderDayPanel(dayId, computed){
         <div class="coa-desc">${cat.desc}</div>
         <div id="coa-list-${cat.key}"></div>
         <button class="secondary small" data-action="add-coa" data-day="${day.id}" data-cat="${cat.key}">+ Add ${cat.label} voucher</button>
+        ${catTemplates.map(tpl=>`<button class="secondary small" type="button" data-action="add-coa-from-template" data-day="${day.id}" data-tpl="${tpl.id}" title="${escapeHtml(tpl.desc)}${tpl.amount?' - '+money(tpl.amount):''}">&#128203; ${escapeHtml(tpl.desc)}</button>`).join('')}
       </div>
     `);
     drawCoaList(section.querySelector('#coa-list-'+cat.key), day, cat.key, items);
     coaCard.appendChild(section);
   });
+  if(day.locked) coaCard.classList.add('locked-day');
   wrap.appendChild(coaCard);
 
   /* --- 03 Deposits + IOU --- */
@@ -1112,6 +1475,7 @@ function renderDayPanel(dayId, computed){
   `);
   drawTransferList(depIouCard.querySelector('#deposit-list'), day, 'deposits', 'No deposits today.');
   drawIouList(depIouCard.querySelector('#iou-list'), day);
+  if(day.locked) depIouCard.classList.add('locked-day');
   wrap.appendChild(depIouCard);
 
   /* --- 04+ Bank accounts --- */
@@ -1152,12 +1516,36 @@ function renderDayPanel(dayId, computed){
         <div class="computed"><span class="lbl">Total in (opening + deposits + transfers in)</span><span id="bc-totalIn-${b.id}">${money(bc.totalIn)}</span></div>
         <div class="computed"><span class="lbl">Total out (fees + salary + transfers out)</span><span id="bc-totalOut-${b.id}">${money(bc.totalOut)}</span></div>
         <div class="computed total"><span class="lbl">Closing balance &mdash; ${escapeHtml(b.name)}</span><span id="bc-closing-${b.id}">${money(bc.closing)}</span></div>
+        <div class="divider"></div>
+        <label>Bank Reconciliation <span class="tag">optional</span></label>
+        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.</p>
+        <div class="row">
+          <div class="field">
+            <label>Bank statement balance</label>
+            <input type="text" inputmode="decimal" class="amt-input" id="recon-bal-${b.id}" value="${bd.reconciledBalance!=null?formatAsianAmount(bd.reconciledBalance):''}" placeholder="Not checked yet">
+          </div>
+          <div class="field">
+            <label>Note <span class="tag">optional</span></label>
+            <input type="text" id="recon-note-${b.id}" value="${escapeHtml(bd.reconcileNote)}" placeholder="e.g. matches statement dated...">
+          </div>
+        </div>
+        ${bd.reconciledBalance!=null ? (()=>{
+          const diff = Math.round((bc.closing - bd.reconciledBalance)*100)/100;
+          return diff===0
+            ? `<div class="computed" style="background:#DDEEE3;border-style:solid;border-color:var(--primary);"><span class="lbl">&#9989; Reconciled &mdash; matches the bank statement</span><span>${money(bc.closing)}</span></div>`
+            : `<div class="computed" style="background:var(--danger-soft);border-style:solid;border-color:var(--danger);"><span class="lbl">&#9888; Difference (ledger &minus; statement)</span><span style="color:var(--danger);font-weight:700;">${money(diff)}</span></div>`;
+        })() : ''}
       </div>
     `);
     bankCard.querySelectorAll('input[data-field]').forEach(inp=>{
       wireAmountInput(inp, (num)=>{ bd[inp.dataset.field] = num; refreshComputedOnly(); });
     });
+    const reconInput = bankCard.querySelector('#recon-bal-'+b.id);
+    wireAmountInput(reconInput, (num)=>{ bd.reconciledBalance = (reconInput.value.trim()==='') ? null : num; refreshComputedOnly(); });
+    reconInput.addEventListener('blur', ()=>{ saveState(); render(); });
+    bankCard.querySelector('#recon-note-'+b.id).oninput = (e)=>{ bd.reconcileNote = e.target.value; saveState(); };
     drawBankTransferList(bankCard.querySelector('#bank-xfer-list-'+b.id), day);
+    if(day.locked) bankCard.classList.add('locked-day');
     wrap.appendChild(bankCard);
   });
 
@@ -1175,7 +1563,7 @@ function renderDayPanel(dayId, computed){
         <div class="summary-box grand"><div class="lbl">Grand total (Closing amount + banks)</div><div class="val" id="c-grandTotal">${money(c.grandTotal)}</div></div>
       </div>
       <div class="divider"></div>
-      <button class="danger small" data-action="delete-day" data-day="${day.id}">Delete this day</button>
+      <button class="danger small" data-action="delete-day" data-day="${day.id}" ${day.locked?'disabled title="Unlock this day first"':''}>Delete this day</button>
     </div>
   `);
   wrap.appendChild(summary);
@@ -1186,6 +1574,103 @@ function renderDayPanel(dayId, computed){
 /* --- Advanced Search: find any Cash Disbursed voucher across every
    recorded day (current month + archived months), by category, year,
    month, a specific date range, description/voucher text, and amount. --- */
+/* --- Dashboard: at-a-glance overview - latest Cash in Hand, bank
+   balances, this month's spend by category, and outstanding IOUs. --- */
+function renderDashboardCard(){
+  const computed = computeAll();
+  const latestDay = state.days.length ? state.days[state.days.length-1] : null;
+  const latestComputed = latestDay ? computed[latestDay.id] : null;
+
+  const catTotals = {};
+  COA.forEach(c=>{ catTotals[c.key] = 0; });
+  let monthRevenue = 0;
+  state.days.forEach(day=>{
+    COA.forEach(cat=>{
+      (day.coa[cat.key]||[]).forEach(item=>{ catTotals[cat.key] += Number(item.amount)||0; });
+    });
+    monthRevenue += Number(day.serviceRevenue)||0;
+  });
+  const monthTotal = Object.values(catTotals).reduce((s,v)=>s+v,0);
+  const topCats = COA.map(c=>({cat:c, total:catTotals[c.key]})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+
+  const today = new Date().toISOString().slice(0,10);
+  const outstandingIous = (state.iouRegistry||[]).filter(i=> i.toDate===null || i.toDate>=today);
+  const outstandingTotal = outstandingIous.reduce((s,i)=>s+(Number(i.amount)||0),0);
+
+  const bankBoxes = latestComputed ? state.banks.map(b=>{
+    const bc = latestComputed.banks[b.id];
+    return `<div class="summary-box"><div class="lbl">${escapeHtml(b.name)}</div><div class="val">${money(bc.closing)}</div></div>`;
+  }).join('') : '';
+
+  const trendDays = state.days.slice(-14);
+  const trendValues = trendDays.map(day=>{
+    let t = 0;
+    COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(item=>{ t += Number(item.amount)||0; }); });
+    return t;
+  });
+  const sparkline = trendValues.length>1 ? buildSparklineSvg(trendValues, trendDays.map(d=>dayLabel(d.date))) : '';
+
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#127968;</span> Dashboard</h3>
+      <p class="subnote">${latestDay ? `As of ${dayLabelFull(latestDay.date)} ${state.year}` : 'No days recorded yet this month'}</p>
+      <div class="summary-grid">
+        <div class="summary-box grand"><div class="lbl">Cash in hand</div><div class="val">${latestComputed?money(latestComputed.cashInHand):'&mdash;'}</div></div>
+        ${bankBoxes}
+        <div class="summary-box" style="border-color:var(--primary);"><div class="lbl">This month's revenue collected</div><div class="val" style="color:var(--primary-dark);">${money(monthRevenue)}</div></div>
+        <div class="summary-box"><div class="lbl">This month's total expenditure</div><div class="val">${money(monthTotal)}</div></div>
+        <div class="summary-box" style="${outstandingTotal>0?'border-color:var(--danger);':''}"><div class="lbl">Outstanding IOUs</div><div class="val" style="${outstandingTotal>0?'color:var(--danger);':''}">${money(outstandingTotal)}</div></div>
+      </div>
+      ${sparkline ? `
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Daily spend trend <span style="font-weight:400;color:var(--ink-soft);">(last ${trendValues.length} recorded days)</span></h3>
+      ${sparkline}
+      ` : ''}
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">This month by category</h3>
+      ${topCats.length===0 ? '<p class="empty">No expenses recorded yet this month.</p>' : topCats.map(x=>`
+        <div class="computed"><span class="lbl">${escapeHtml(x.cat.label)}</span><span>${money(x.total)}</span></div>
+      `).join('')}
+      ${outstandingIous.length>0 ? `
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Outstanding IOUs</h3>
+      ${outstandingIous.map(i=>`<div class="computed"><span class="lbl">${escapeHtml(i.desc||'IOU')} &middot; since ${dayLabel(i.fromDate)}</span><span>${money(i.amount)}</span></div>`).join('')}
+      ` : ''}
+    </div>
+  `);
+  return card;
+}
+
+/* Builds a compact inline SVG line-chart of daily spend for the Dashboard.
+   Deliberately simple (no library) - just enough to show a trend at a
+   glance, with the last point picked out and a light fill under the line. */
+function buildSparklineSvg(values, labels){
+  const w = 100, h = 34, pad = 3;
+  const max = Math.max(...values, 1);
+  const min = 0;
+  const stepX = values.length>1 ? (w-2*pad)/(values.length-1) : 0;
+  const yFor = (v)=> h-pad - ((v-min)/(max-min||1))*(h-2*pad);
+  const pts = values.map((v,i)=> [pad+i*stepX, yFor(v)]);
+  const line = pts.map(p=>p.join(',')).join(' ');
+  const fillPath = `M${pad},${h-pad} L` + line.split(' ').join(' L') + ` L${pad+(values.length-1)*stepX},${h-pad} Z`;
+  const last = pts[pts.length-1];
+  const titleParts = values.map((v,i)=> `${labels[i]}: ${formatAsianAmount(v)}`);
+  return `
+    <div style="background:var(--card-alt,#F7F8F4);border-radius:8px;padding:8px 10px;">
+      <svg viewBox="0 0 ${w} ${h}" width="100%" height="52" preserveAspectRatio="none" style="display:block;overflow:visible;">
+        <title>${escapeHtml(titleParts.join(' | '))}</title>
+        <path d="${fillPath}" fill="var(--primary)" opacity="0.08"></path>
+        <polyline points="${line}" fill="none" stroke="var(--primary)" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+        <circle cx="${last[0]}" cy="${last[1]}" r="1.8" fill="var(--primary-dark)"></circle>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-soft);margin-top:2px;">
+        <span>${escapeHtml(labels[0])}</span>
+        <span>${escapeHtml(labels[labels.length-1])}</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderSearchCard(){
   const years = voucherYearsPresent();
   const card = el(`
@@ -1258,8 +1743,8 @@ function renderSearchCard(){
         <tr style="border-bottom:1px solid var(--line-soft);">
           <td style="padding:6px 8px; white-space:nowrap;" class="mono">${dayLabelFull(v.date)} ${v.date.slice(0,4)}</td>
           <td style="padding:6px 8px;">${escapeHtml(v.cat.label)}</td>
-          <td style="padding:6px 8px;" class="mono">${escapeHtml(v.voucher)}</td>
-          <td style="padding:6px 8px;">${escapeHtml(v.desc)}</td>
+          <td style="padding:6px 8px;" class="mono">${highlightMatches(v.voucher, searchFilters.text)}</td>
+          <td style="padding:6px 8px;">${highlightMatches(v.desc, searchFilters.text)}</td>
           <td style="padding:6px 8px; text-align:right;" class="mono">${money(v.amount)}</td>
         </tr>
       `));
@@ -1380,6 +1865,90 @@ function renderCategorySummaryCard(){
   return card;
 }
 
+/* --- Recurring Entry Templates: save a category+description+amount combo
+   once, then add it as a new voucher with one click - handy for monthly
+   recurring costs like rent, internet, or a fixed salary top-up. --- */
+function renderTemplatesCard(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128203;</span> Recurring Entry Templates</h3>
+      <p class="subnote">Save a category + description + amount once. Each one then shows as a quick-add button under that category in the day panel below.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:150px;">
+          <label>Category</label>
+          <select id="tpl-cat">${COA.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}</select>
+        </div>
+        <div class="field" style="min-width:180px;">
+          <label>Description</label>
+          <input type="text" id="tpl-desc" placeholder="e.g. Monthly internet bill">
+        </div>
+        <div class="field" style="min-width:130px;">
+          <label>Amount <span class="tag">optional</span></label>
+          <input type="text" inputmode="decimal" class="amt-input" id="tpl-amt" value="">
+        </div>
+      </div>
+      <button type="button" id="tpl-add">+ Save template</button>
+      <div class="divider"></div>
+      <div id="tpl-list"></div>
+    </div>
+  `);
+  let tplAmt = 0;
+  wireAmountInput(card.querySelector('#tpl-amt'), (num)=>{ tplAmt = num; });
+  function drawList(){
+    const box = card.querySelector('#tpl-list');
+    box.innerHTML = '';
+    if(state.templates.length===0){ box.appendChild(el(`<p class="empty">No templates saved yet.</p>`)); return; }
+    state.templates.forEach(tpl=>{
+      const cat = COA.find(c=>c.key===tpl.catKey);
+      const row = el(`
+        <div class="line-item">
+          <div class="voucher-badge mono">${escapeHtml(cat?cat.short:tpl.catKey)}</div>
+          <div class="field desc" style="margin-bottom:0;"><label>Description</label><div class="mono" style="padding:8px 0;">${escapeHtml(tpl.desc)||'<span class=\"empty\">(blank)</span>'}</div></div>
+          <div class="field amt" style="margin-bottom:0;"><label>Amount</label><div class="mono" style="padding:8px 0;">${tpl.amount?money(tpl.amount):'<span class=\"empty\">(set each time)</span>'}</div></div>
+          <button class="danger small" type="button" data-action="remove-template" data-item="${tpl.id}" title="Remove template">&times;</button>
+        </div>
+      `);
+      box.appendChild(row);
+    });
+  }
+  drawList();
+  card.querySelector('#tpl-add').onclick = ()=>{
+    const catKey = card.querySelector('#tpl-cat').value;
+    const desc = card.querySelector('#tpl-desc').value.trim();
+    if(!desc){ showAlert('Give the template a description.'); return; }
+    state.templates.push({id:uid(), catKey, desc, amount:tplAmt});
+    saveState();
+    card.querySelector('#tpl-desc').value = '';
+    card.querySelector('#tpl-amt').value = '';
+    tplAmt = 0;
+    drawList();
+  };
+  return card;
+}
+
+/* --- Annual Summary Export card --- */
+function renderAnnualSummaryCard(){
+  let years = voucherYearsPresent();
+  if(years.length===0) years = [state.year];
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128197;</span> Annual Summary</h3>
+      <p class="subnote">A full year's expenses in one grid &mdash; every category down the side, every month across the top &mdash; across this month and everything archived.</p>
+      <div class="row">
+        <div class="field" style="max-width:160px;">
+          <label>Year</label>
+          <select id="ann-year">${years.map(y=>`<option value="${y}" ${y===state.year?'selected':''}>${y}</option>`).join('')}</select>
+        </div>
+      </div>
+      <button type="button" id="ann-download">Download Annual Summary (Excel)</button>
+    </div>
+  `);
+  let selectedYear = card.querySelector('#ann-year').value;
+  card.querySelector('#ann-year').onchange = (e)=>{ selectedYear = e.target.value; };
+  card.querySelector('#ann-download').onclick = ()=>{ exportAnnualSummary(selectedYear); };
+  return card;
+}
+
 function renderNotesheetCard(){
   const sortedDates = state.days.map(d=>d.date).sort();
   const minDate = sortedDates[0], maxDate = sortedDates[sortedDates.length-1];
@@ -1490,13 +2059,16 @@ function drawTransferList(container, day, field, emptyText){
   const arr = day[field];
   container.innerHTML = '';
   if(arr.length===0){ container.appendChild(el(`<p class="empty">${emptyText}</p>`)); return; }
+  const suggestions = transferNoteSuggestions(field);
+  const datalistId = `note-suggest-${field}`;
+  container.appendChild(el(`<datalist id="${datalistId}">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
   arr.forEach((item)=>{
     const row = el(`
       <div class="line-item">
         <div class="field bank-sel" style="margin-bottom:0;"><label>Bank</label>
           <select>${state.banks.map(b=>`<option value="${b.id}" ${b.id===item.bankId?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
         </div>
-        <div class="field desc" style="margin-bottom:0;"><label>Note</label><input type="text" class="note-input" value="${escapeHtml(item.note)}" placeholder="optional"></div>
+        <div class="field desc" style="margin-bottom:0;"><label>Note</label><input type="text" class="note-input" list="${datalistId}" value="${escapeHtml(item.note)}" placeholder="optional"></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
         <button class="danger small" type="button" data-action="${field==='withdrawals'?'remove-withdraw':'remove-deposit'}" data-day="${day.id}" data-item="${item.id}" title="Remove">&times;</button>
       </div>
@@ -1546,14 +2118,67 @@ function drawBankTransferList(container, day){
   });
 }
 
+/* Every description ever typed for a given CoA category, so the browser's
+   native autocomplete can suggest it again - e.g. type "b" in Transport
+   and "Bank conveyance bill" shows up if it's been used before. */
+function descriptionSuggestions(catKey){
+  const seen = new Set();
+  allVouchers().forEach(v=>{
+    if(v.catKey===catKey && v.desc && v.desc.trim()) seen.add(v.desc.trim());
+  });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+function iouDescSuggestions(){
+  const seen = new Set();
+  (state.iouRegistry||[]).forEach(i=>{ if(i.desc && i.desc.trim()) seen.add(i.desc.trim()); });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+function transferNoteSuggestions(field){
+  const seen = new Set();
+  allDaysEverywhere().forEach(day=>{
+    (day[field]||[]).forEach(item=>{ if(item.note && item.note.trim()) seen.add(item.note.trim()); });
+  });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+
+/* Adds a new blank voucher line to a category and returns it - shared by
+   the "+ Add voucher" button and Enter-key quick entry so numbering stays
+   consistent between both paths. */
+/* Draft -> Reviewed -> Approved review workflow for CoA vouchers. Purely
+   a personal checklist (this tool is single-user) - no sign-off identity
+   is attached, just a quick visual cue for what's been double-checked
+   before a day gets locked. */
+const STATUS_ORDER = ['draft','reviewed','approved'];
+const STATUS_LABELS = {draft:'Draft', reviewed:'Reviewed', approved:'Approved'};
+function statusLabel(s){ return STATUS_LABELS[s] || STATUS_LABELS.draft; }
+function nextStatus(s){
+  const i = STATUS_ORDER.indexOf(s);
+  return STATUS_ORDER[(i+1) % STATUS_ORDER.length] || 'draft';
+}
+
+function addCoaVoucher(day, catKey){
+  const cat = COA.find(c=>c.key===catKey);
+  state.voucherCounters[catKey] += 1;
+  const yearShort = String(state.year).slice(-2);
+  const monthNum = MONTHS.indexOf(state.month)+1;
+  const voucher = `${cat.short}${state.voucherCounters[catKey]}/${monthNum}/${yearShort}`;
+  const item = {id:uid(), voucher, desc:'', amount:0, status:'draft'};
+  day.coa[catKey].push(item);
+  return item;
+}
+
 function drawCoaList(container, day, catKey, arr){
   container.innerHTML = '';
   if(arr.length===0){ container.appendChild(el(`<p class="empty">No vouchers yet.</p>`)); return; }
+  const suggestions = descriptionSuggestions(catKey);
+  const datalistId = `desc-suggest-${catKey}`;
+  container.appendChild(el(`<datalist id="${datalistId}">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
   arr.forEach((item)=>{
     const row = el(`
       <div class="line-item">
         <div class="voucher-badge mono">${item.voucher}</div>
-        <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="desc-input" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?"></div>
+        <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
+        <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?"></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
         <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
       </div>
@@ -1562,6 +2187,31 @@ function drawCoaList(container, day, catKey, arr){
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    amtInp.addEventListener('blur', ()=>{
+      const msg = checkDuplicateAmount(day, item.amount, item.id);
+      if(msg) showDuplicateWarning(msg);
+    });
+    /* Keyboard quick entry: Enter in Description jumps to Amount; Enter in
+       Amount (once resolved) adds a new line in the same category and
+       focuses its Description field, for fast heads-down data entry. */
+    descInp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); amtInp.focus(); amtInp.select(); }
+    });
+    amtInp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){
+        e.preventDefault();
+        if(day.locked) return;
+        addCoaVoucher(day, catKey);
+        saveState();
+        render();
+        const freshContainer = document.getElementById('coa-list-'+catKey);
+        if(freshContainer){
+          const descInputs = freshContainer.querySelectorAll('.desc-input');
+          const last = descInputs[descInputs.length-1];
+          if(last) last.focus();
+        }
+      }
+    });
     container.appendChild(row);
   });
 }
@@ -1570,13 +2220,15 @@ function drawIouList(container, day){
   const arr = activeIousForDay(day.date);
   container.innerHTML = '';
   if(arr.length===0){ container.appendChild(el(`<p class="empty">No IOUs today.</p>`)); return; }
+  const suggestions = iouDescSuggestions();
+  container.appendChild(el(`<datalist id="iou-desc-suggest">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
   arr.forEach((item)=>{
     const carried = item.fromDate < day.date;
     const row = el(`
       <div class="line-item">
         <div class="field desc" style="margin-bottom:0;">
           <label>Description ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
-          <input type="text" class="desc-input" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load">
+          <input type="text" class="desc-input" list="iou-desc-suggest" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load">
         </div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
         <button class="danger small" type="button" data-action="remove-iou" data-day="${day.id}" data-item="${item.id}" title="Remove (stops it carrying forward)">&times;</button>
@@ -1612,8 +2264,16 @@ function wireDelegation(){
     const dayId = t.dataset.day;
     const day = dayId ? findDay(dayId) : null;
 
-    if(action==='refresh'){ onRefresh(); return; }
     if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
+    if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
+    if(action==='remove-daylock-password'){
+      showPasswordPrompt('Enter the current day-lock password to remove it.', ()=>{
+        state.dayLockPasswordHash = null;
+        saveState(); render();
+        showAlert('Day-lock password removed.');
+      }, 'Remove', state.dayLockPasswordHash);
+      return;
+    }
     if(action==='lock-now'){
       if(!state.lockPasswordHash){ showAlert('Set a password first.'); return; }
       locked = true; lockError = ''; render();
@@ -1633,6 +2293,16 @@ function wireDelegation(){
     if(action==='edit-setup'){ state.setupDone=false; render(); return; }
     if(action==='toggle-search'){ searchOpen = !searchOpen; render(); return; }
     if(action==='toggle-summary'){ summaryOpen = !summaryOpen; render(); return; }
+    if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
+    if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
+    if(action==='remove-template'){
+      const idx = state.templates.findIndex(x=>x.id===t.dataset.item);
+      const removed = state.templates[idx];
+      state.templates = state.templates.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Template "'+removed.desc+'" removed.', ()=>{ state.templates.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
 
     if(action==='add-bank'){
       state.banks.push({id:uid(), name:'', opening:0});
@@ -1662,32 +2332,85 @@ function wireDelegation(){
       return;
     }
     if(action==='delete-day'){
-      showConfirm('Delete '+dayLabel(day.date)+'? This cannot be undone.', ()=>{
+      if(day.locked){ showAlert('This day is locked. Unlock it first to delete it.'); return; }
+      showConfirm('Delete '+dayLabel(day.date)+'?', ()=>{
         const i = state.days.findIndex(d=>d.id===dayId);
+        const removedDay = state.days[i];
         state.days.splice(i,1);
         selectedDayId = state.days.length ? state.days[Math.max(0,i-1)].id : null;
+        pushUndo(dayLabel(removedDay.date)+' deleted.', ()=>{
+          state.days.splice(i,0,removedDay);
+          selectedDayId = removedDay.id;
+        });
         saveState(); render();
       });
       return;
     }
+    if(action==='lock-day'){
+      const pending = COA.reduce((n,cat)=> n + (day.coa[cat.key]||[]).filter(it=>(it.status||'draft')!=='approved' && Number(it.amount)>0).length, 0);
+      const note = pending>0 ? ` Note: ${pending} voucher${pending>1?'s are':' is'} not yet marked Approved.` : '';
+      showConfirm('Lock '+dayLabel(day.date)+'? Its entries can\'t be edited again until you unlock it.'+note, ()=>{
+        day.locked = true; saveState(); render();
+      }, 'Lock this day');
+      return;
+    }
+    if(action==='unlock-day'){
+      const gateHash = state.dayLockPasswordHash || state.lockPasswordHash;
+      showPasswordPrompt('Enter password to unlock '+dayLabel(day.date)+' for editing.', ()=>{
+        day.locked = false; saveState(); render();
+      }, 'Unlock', gateHash);
+      return;
+    }
+    if(action==='perform-undo'){ performUndo(); return; }
+    if(action==='cycle-status'){
+      if(day.locked) return;
+      const catKey = t.dataset.cat;
+      const item = (day.coa[catKey]||[]).find(x=>x.id===t.dataset.item);
+      if(item){ item.status = nextStatus(item.status||'draft'); saveState(); render(); }
+      return;
+    }
+    if(action==='dismiss-dup-warning'){ if(duplicateWarningTimer) clearTimeout(duplicateWarningTimer); duplicateWarning=null; render(); return; }
 
     if(!day && action!=='dl-day' && action!=='dl-month'){ return; }
 
-    if(action==='add-withdraw'){ day.withdrawals.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
-    if(action==='remove-withdraw'){ day.withdrawals = day.withdrawals.filter(x=>x.id!==t.dataset.item); render(); return; }
-    if(action==='add-deposit'){ day.deposits.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
-    if(action==='remove-deposit'){ day.deposits = day.deposits.filter(x=>x.id!==t.dataset.item); render(); return; }
-    if(action==='add-iou'){ state.iouRegistry.push({id:uid(), desc:'', amount:0, fromDate:day.date, toDate:null}); render(); return; }
+    if(action==='add-withdraw'){ if(day.locked) return; day.withdrawals.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
+    if(action==='remove-withdraw'){
+      if(day.locked) return;
+      const idx = day.withdrawals.findIndex(x=>x.id===t.dataset.item);
+      const removed = day.withdrawals[idx];
+      day.withdrawals = day.withdrawals.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Withdrawal removed.', ()=>{ day.withdrawals.splice(idx,0,removed); });
+      saveState(); render(); return;
+    }
+    if(action==='add-deposit'){ if(day.locked) return; day.deposits.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
+    if(action==='remove-deposit'){
+      if(day.locked) return;
+      const idx = day.deposits.findIndex(x=>x.id===t.dataset.item);
+      const removed = day.deposits[idx];
+      day.deposits = day.deposits.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Deposit removed.', ()=>{ day.deposits.splice(idx,0,removed); });
+      saveState(); render(); return;
+    }
+    if(action==='add-iou'){ if(day.locked) return; state.iouRegistry.push({id:uid(), desc:'', amount:0, fromDate:day.date, toDate:null}); render(); return; }
     if(action==='remove-iou'){
+      if(day.locked) return;
       const item = state.iouRegistry.find(x=>x.id===t.dataset.item);
       if(item){
-        if(item.fromDate===day.date){ state.iouRegistry = state.iouRegistry.filter(x=>x.id!==item.id); }
-        else{ item.toDate = addDaysStr(day.date, -1); }
+        if(item.fromDate===day.date){
+          const idx = state.iouRegistry.findIndex(x=>x.id===item.id);
+          state.iouRegistry = state.iouRegistry.filter(x=>x.id!==item.id);
+          pushUndo('IOU removed.', ()=>{ state.iouRegistry.splice(idx,0,item); });
+        } else {
+          const prevToDate = item.toDate;
+          item.toDate = addDaysStr(day.date, -1);
+          pushUndo('IOU stopped carrying forward.', ()=>{ item.toDate = prevToDate; });
+        }
       }
-      render();
+      saveState(); render();
       return;
     }
     if(action==='add-bank-transfer'){
+      if(day.locked) return;
       if(state.banks.length<2){ showAlert('Add at least two bank accounts to make a transfer.'); return; }
       if(!day.bankTransfers) day.bankTransfers = [];
       const from = state.banks[0], to = state.banks[1];
@@ -1696,26 +2419,42 @@ function wireDelegation(){
       return;
     }
     if(action==='remove-bank-transfer'){
+      if(day.locked) return;
+      const idx = (day.bankTransfers||[]).findIndex(x=>x.id===t.dataset.item);
+      const removed = day.bankTransfers[idx];
       day.bankTransfers = (day.bankTransfers||[]).filter(x=>x.id!==t.dataset.item);
-      render();
+      pushUndo('Bank transfer removed.', ()=>{ day.bankTransfers.splice(idx,0,removed); });
+      saveState(); render();
       return;
     }
 
     if(action==='add-coa'){
-      const catKey = t.dataset.cat;
-      const cat = COA.find(c=>c.key===catKey);
-      state.voucherCounters[catKey] += 1;
+      if(day.locked) return;
+      addCoaVoucher(day, t.dataset.cat);
+      render();
+      return;
+    }
+    if(action==='add-coa-from-template'){
+      if(day.locked) return;
+      const tpl = state.templates.find(x=>x.id===t.dataset.tpl);
+      if(!tpl) return;
+      const cat = COA.find(c=>c.key===tpl.catKey);
+      state.voucherCounters[tpl.catKey] += 1;
       const yearShort = String(state.year).slice(-2);
       const monthNum = MONTHS.indexOf(state.month)+1;
-      const voucher = `${cat.short}${state.voucherCounters[catKey]}/${monthNum}/${yearShort}`;
-      day.coa[catKey].push({id:uid(), voucher, desc:'', amount:0});
+      const voucher = `${cat.short}${state.voucherCounters[tpl.catKey]}/${monthNum}/${yearShort}`;
+      day.coa[tpl.catKey].push({id:uid(), voucher, desc:tpl.desc, amount:tpl.amount, status:'draft'});
       render();
       return;
     }
     if(action==='remove-coa'){
+      if(day.locked) return;
       const catKey = t.dataset.cat;
+      const idx = day.coa[catKey].findIndex(x=>x.id===t.dataset.item);
+      const removed = day.coa[catKey][idx];
       day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==t.dataset.item);
-      render();
+      pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{ day.coa[catKey].splice(idx,0,removed); });
+      saveState(); render();
       return;
     }
 
@@ -1724,23 +2463,7 @@ function wireDelegation(){
   });
 }
 
-function onRefresh(){
-  showConfirm(
-    "This clears every day, voucher counter and bank balance so you can start a brand-new month. Have you downloaded the current month's Excel already? (This month's entries are archived first, so Search and Category Summary can still see them.) This cannot be undone.",
-    ()=>{
-      const archive = state.archive || [];
-      if(state.days.length>0){
-        archive.push({month: state.month, year: state.year, days: JSON.parse(JSON.stringify(state.days))});
-      }
-      state = defaultState();
-      state.archive = archive;
-      selectedDayId = null;
-      saveState();
-      render();
-    },
-    'Clear & start new month'
-  );
-}
+
 
 /* ======================================================================
    Excel export (ExcelJS) — mirrors the original workbook's layout:
@@ -2064,6 +2787,61 @@ function writeDaySheet(ws, day, cmp, beginRefs){
 function sheetNameFor(day, used){
   return uniqueSheetName(dayLabel(day.date).replace(/[\\\/\?\*\[\]:]/g,'').slice(0,28), used);
 }
+/* --- Annual Summary: a Category x Month matrix for a full year, across
+   both the current month and everything archived. --- */
+async function exportAnnualSummary(year){
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+  const vouchers = allVouchers().filter(v=>v.date.slice(0,4)===year);
+  if(vouchers.length===0){ showAlert('No expenses recorded for '+year+' yet.'); return; }
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(`Annual ${year}`);
+  ws.getColumn(1).width = 26;
+  for(let m=2;m<=13;m++) ws.getColumn(m).width = 12;
+  ws.getColumn(14).width = 14;
+
+  function put(addr, value, {size=11, bold=false, numFmt}={}){
+    const c = ws.getCell(addr);
+    c.value = (value===''||value===undefined) ? '' : value;
+    c.font = {name:FONT, size, bold};
+    c.border = BORDER_ALL;
+    c.alignment = {horizontal:'center', vertical:'center'};
+    if(numFmt) c.numFmt = numFmt;
+    return c;
+  }
+
+  ws.mergeCells('A1:N1');
+  put('A1', `Annual Category Summary - ${year}`, {size:16, bold:true});
+  ws.getRow(1).height = 24;
+
+  let r = 3;
+  put(`A${r}`, 'Category', {bold:true});
+  for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, MONTHS[m].slice(0,3), {bold:true}); }
+  put('N'+r, 'Total', {bold:true});
+  r++;
+
+  const monthColTotals = new Array(12).fill(0);
+  SUMMARY_ORDER.forEach(catKey=>{
+    const cat = COA.find(c=>c.key===catKey);
+    put(`A${r}`, cat.label);
+    let rowTotal = 0;
+    for(let m=0;m<12;m++){
+      const mm = String(m+1).padStart(2,'0');
+      const total = vouchers.filter(v=>v.catKey===catKey && v.date.slice(5,7)===mm).reduce((s,v)=>s+v.amount,0);
+      put(String.fromCharCode(66+m)+r, total||'', {numFmt:ASIAN_NUMFMT});
+      rowTotal += total;
+      monthColTotals[m] += total;
+    }
+    put('N'+r, rowTotal, {bold:true, numFmt:ASIAN_NUMFMT});
+    r++;
+  });
+  put(`A${r}`, 'Total', {bold:true});
+  for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, monthColTotals[m], {bold:true, numFmt:ASIAN_NUMFMT}); }
+  put('N'+r, monthColTotals.reduce((s,v)=>s+v,0), {bold:true, numFmt:ASIAN_NUMFMT});
+
+  await downloadWorkbook(wb, `Annual_Summary_${year}.xlsx`);
+}
+
 function uniqueSheetName(base, used){
   base = (base||'Sheet').slice(0,31);
   let name = base, n=2;
