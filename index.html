@@ -1085,7 +1085,7 @@ function renderHeader(){
         <div class="toolbar-group">
           ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
           ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
-          ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : '<button class="secondary" data-action="remove-daylock-password">&#128273; Remove day-lock password</button>'}
+          ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : ''}
           ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
         </div>
       </div>
@@ -1148,7 +1148,7 @@ function renderDayLockPasswordForm(){
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128273;</span> Set Day-Lock Password</h3>
-      <p class="subnote">This password is only asked for when unlocking a finalized day &mdash; separate from the screen-lock password. Once set, it can only be removed (not changed) from here &mdash; use "Remove day-lock password" and set a new one if you need to update it.</p>
+      <p class="subnote">This password is only asked for when unlocking a finalized day &mdash; separate from the screen-lock password. Once set, it stays set and can't be changed or removed from within the app.</p>
       <div class="row">
         <div class="field">
           <label>New day-lock password</label>
@@ -2266,14 +2266,6 @@ function wireDelegation(){
 
     if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
     if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
-    if(action==='remove-daylock-password'){
-      showPasswordPrompt('Enter the current day-lock password to remove it.', ()=>{
-        state.dayLockPasswordHash = null;
-        saveState(); render();
-        showAlert('Day-lock password removed.');
-      }, 'Remove', state.dayLockPasswordHash);
-      return;
-    }
     if(action==='lock-now'){
       if(!state.lockPasswordHash){ showAlert('Set a password first.'); return; }
       locked = true; lockError = ''; render();
