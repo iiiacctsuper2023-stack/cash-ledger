@@ -1,0 +1,3125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Cash & Bank Ledger</title>
+<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIkRhaWx5IENhc2ggJiBCYW5rIExlZGdlciIsICJzaG9ydF9uYW1lIjogIkNhc2ggTGVkZ2VyIiwgImRlc2NyaXB0aW9uIjogIkRhaWx5IENhc2ggJiBCYW5rIExlZGdlciBmb3IgdGhlIEludGVybmF0aW9uYWwgSXNsYW1pYyBJbnN0aXR1dGUiLCAic3RhcnRfdXJsIjogIi4iLCAic2NvcGUiOiAiLiIsICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLCAiYmFja2dyb3VuZF9jb2xvciI6ICIjRUVGMEU2IiwgInRoZW1lX2NvbG9yIjogIiMxQjRCNDMiLCAiaWNvbnMiOiBbeyJzcmMiOiAiZGF0YTppbWFnZS9zdmcreG1sO2Jhc2U2NCxQSE4yWnlCNGJXeHVjejBpYUhSMGNEb3ZMM2QzZHk1M015NXZjbWN2TWpBd01DOXpkbWNpSUhacFpYZENiM2c5SWpBZ01DQXlNREFnTWpBd0lqNEtQSEpsWTNRZ2QybGtkR2c5SWpJd01DSWdhR1ZwWjJoMFBTSXlNREFpSUhKNFBTSXlPQ0lnWm1sc2JEMGlJekZDTkVJME15SXZQZ284ZEdWNGRDQjRQU0l4TURBaUlIazlJakV6T0NJZ1ptOXVkQzFtWVcxcGJIazlJa2RsYjNKbmFXRXNJQ2RVYVcxbGN5Qk9aWGNnVW05dFlXNG5MQ0J6WlhKcFppSWdabTl1ZEMxemFYcGxQU0l4TWpBaUlHWnZiblF0ZDJWcFoyaDBQU0kzTURBaUlHWnBiR3c5SWlORlFVUkdRelVpSUhSbGVIUXRZVzVqYUc5eVBTSnRhV1JrYkdVaVB1Q25zend2ZEdWNGRENEtQQzl6ZG1jKyIsICJzaXplcyI6ICJhbnkiLCAidHlwZSI6ICJpbWFnZS9zdmcreG1sIiwgInB1cnBvc2UiOiAiYW55IG1hc2thYmxlIn1dfQ==">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj4KPHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIHJ4PSIyOCIgZmlsbD0iIzFCNEI0MyIvPgo8dGV4dCB4PSIxMDAiIHk9IjEzOCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSIxMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNFQURGQzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuCnszwvdGV4dD4KPC9zdmc+">
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj4KPHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIHJ4PSIyOCIgZmlsbD0iIzFCNEI0MyIvPgo8dGV4dCB4PSIxMDAiIHk9IjEzOCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSIxMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNFQURGQzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuCnszwvdGV4dD4KPC9zdmc+">
+<meta name="theme-color" content="#1B4B43">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#EEF0E6;
+    --card:#FBFAF5;
+    --ink:#1F2A23;
+    --ink-soft:#5B6459;
+    --primary:#1B4B43;
+    --primary-dark:#0F332C;
+    --primary-tint:#DCE8E2;
+    --accent:#B8863B;
+    --accent-deep:#8C6423;
+    --accent-soft:#EADFC5;
+    --danger:#A23B2E;
+    --danger-soft:#F3DFDA;
+    --line:#D7D2C0;
+    --line-soft:#E6E2D3;
+    --radius:12px;
+    --ease:cubic-bezier(.19,.85,.32,1.05);
+    --shadow-sm:0 1px 2px rgba(15,51,44,.05), 0 1px 1px rgba(15,51,44,.04);
+    --shadow-md:0 4px 14px rgba(15,51,44,.07), 0 1px 3px rgba(15,51,44,.05);
+    --shadow-lg:0 14px 34px rgba(15,51,44,.14), 0 3px 10px rgba(15,51,44,.08);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  html,body{margin:0;padding:0;color:var(--ink);font-family:'IBM Plex Sans',sans-serif;}
+  body{
+    padding:32px 18px 90px;
+    background:
+      radial-gradient(1100px 520px at 12% -8%, rgba(184,134,59,.07), transparent 55%),
+      radial-gradient(900px 480px at 100% 0%, rgba(27,75,67,.06), transparent 50%),
+      var(--paper);
+    min-height:100vh;
+  }
+  body::before{
+    content:'';position:fixed;top:0;left:0;right:0;height:3px;z-index:999;
+    background:linear-gradient(90deg, var(--primary) 0%, var(--accent) 52%, var(--primary) 100%);
+    background-size:200% 100%;
+    animation:sheen 9s linear infinite;
+  }
+  @keyframes sheen{0%{background-position:0% 0;}100%{background-position:200% 0;}}
+  .wrap{max-width:980px;margin:0 auto;}
+
+  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;color:var(--primary-dark);letter-spacing:-.01em;}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-deep);font-weight:600;display:inline-flex;align-items:center;gap:7px;}
+  .eyebrow::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+
+  header.top{display:flex;flex-direction:column;gap:14px;margin-bottom:26px;padding-bottom:18px;position:relative;animation:fadeDown .5s var(--ease) both;}
+  header.top::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg, var(--primary-dark) 0%, var(--line) 65%, transparent 100%);}
+  .top-title h1{font-size:27px;margin-top:3px;}
+  .top-title p{margin:5px 0 0;color:var(--ink-soft);font-size:13.5px;}
+
+  .toolbar{display:flex;align-items:center;gap:2px;flex-wrap:wrap;background:#fff;border:1px solid var(--line-soft);border-radius:12px;padding:6px;box-shadow:var(--shadow-sm);width:fit-content;max-width:100%;}
+  .toolbar-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+  .toolbar-divider{width:1px;align-self:stretch;background:var(--line-soft);margin:4px 6px;}
+  .toolbar button{padding:7px 12px;font-size:12.5px;border-radius:7px;}
+  .toolbar button.secondary{border-color:transparent;background:transparent;box-shadow:none;}
+  .toolbar button.secondary:hover{background:var(--paper);border-color:var(--line-soft);box-shadow:none;transform:none;}
+  .toolbar .tag{margin-left:2px;}
+  @media (max-width:640px){ .toolbar{width:100%;} }
+
+  button{font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:600;border-radius:8px;border:1px solid var(--primary-dark);padding:8px 14px;cursor:pointer;background:var(--primary);color:#fff;transition:transform .16s var(--ease), background-color .18s ease, box-shadow .18s ease, border-color .18s ease;box-shadow:var(--shadow-sm);}
+  button:hover{background:var(--primary-dark);box-shadow:var(--shadow-md);transform:translateY(-1px);}
+  button:active{transform:translateY(0) scale(.97);box-shadow:var(--shadow-sm);}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  button.secondary{background:var(--card);color:var(--primary-dark);border-color:var(--line);}
+  button.secondary:hover{background:#fff;border-color:var(--primary);}
+  button.danger{background:var(--card);color:var(--danger);border-color:var(--danger-soft);}
+  button.danger:hover{background:var(--danger-soft);border-color:var(--danger);}
+  button.small{padding:5px 10px;font-size:12px;border-radius:6px;}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important;}
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-left:3px solid var(--accent-soft);
+    border-radius:var(--radius);
+    padding:20px 22px;
+    margin-bottom:16px;
+    box-shadow:var(--shadow-sm);
+    animation:cardRise .5s var(--ease) both;
+    transition:box-shadow .25s ease, border-left-color .25s ease;
+  }
+  .card:hover{box-shadow:var(--shadow-md);border-left-color:var(--accent);}
+  @keyframes cardRise{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fadeDown{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
+  .card > h3{font-size:16.5px;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+  .card > h3 .num{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent-deep);border:1px solid var(--accent-soft);background:var(--accent-soft);border-radius:5px;padding:2px 7px;}
+  .subnote{font-size:12px;color:var(--ink-soft);margin:-6px 0 12px;line-height:1.5;}
+
+  label{font-size:12px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;letter-spacing:.01em;}
+  input[type=text], input[type=number], input[type=date], input[type=password], select{
+    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;background:#fff;color:var(--ink);
+    transition:border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
+  }
+  input[type=number]{font-family:'IBM Plex Mono',monospace;}
+  input:hover, select:hover{border-color:#c3bda6;}
+  input:focus, select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-tint);background:#fff;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;}
+  .row > *{flex:1;min-width:140px;}
+
+  .field{margin-bottom:10px;}
+
+  .line-item{display:flex;gap:8px;align-items:flex-end;background:#fff;border:1px solid var(--line-soft);border-radius:8px;padding:9px 10px;margin-bottom:8px;transition:box-shadow .18s ease, border-color .18s ease;animation:rowIn .3s var(--ease) both;}
+  .line-item:hover{box-shadow:var(--shadow-sm);border-color:var(--line);}
+  @keyframes rowIn{from{opacity:0;transform:translateX(-4px);}to{opacity:1;transform:translateX(0);}}
+  .line-item .voucher-badge{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--primary-dark);color:#fff;border-radius:5px;padding:5px 8px;white-space:nowrap;align-self:center;}
+  .status-badge{font-size:10.5px;font-weight:600;border-radius:20px;padding:5px 10px;white-space:nowrap;align-self:center;border:1px solid transparent;cursor:pointer;transition:background .15s var(--ease),transform .1s var(--ease);letter-spacing:.02em;}
+  .status-badge:active{transform:scale(.95);}
+  .status-badge:disabled{cursor:not-allowed;opacity:.6;}
+  .status-badge.status-draft{background:#EDEEF1;color:#5B6270;border-color:#DADDE3;}
+  .status-badge.status-reviewed{background:#DCEBFB;color:#1D5FA8;border-color:#BBDAF5;}
+  .status-badge.status-approved{background:#DDEEE3;color:var(--primary-dark);border-color:#BFE0CC;}
+  .day-panel.locked{position:relative;}
+  .day-panel.locked::after{
+    content:'\1F512';
+    position:fixed;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%) rotate(-18deg);
+    font-size:min(30vw,320px);
+    opacity:.035;
+    pointer-events:none;
+    z-index:0;
+    filter:grayscale(1);
+  }
+  .day-panel.locked > .card{position:relative;z-index:1;}
+  .line-item .desc{flex:3;}
+  .line-item .amt{flex:1;min-width:100px;}
+  .line-item .bank-sel{flex:1.4;min-width:120px;}
+
+  .computed{background:var(--accent-soft);border:1px dashed var(--accent);border-radius:7px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--primary-dark);display:flex;justify-content:space-between;margin-top:4px;transition:background-color .2s ease;}
+  .computed .lbl{font-family:'IBM Plex Sans',sans-serif;font-weight:600;font-size:12.5px;color:var(--ink-soft);}
+  .computed.total{background:var(--primary);color:#fff;border:none;box-shadow:var(--shadow-sm);}
+  .computed.total .lbl{color:#e7efe9;}
+  .value-pop{display:inline-block;animation:valuePop .38s var(--ease);}
+  @keyframes valuePop{0%{transform:scale(1.1);color:var(--accent-deep);}100%{transform:scale(1);}}
+
+  .tag{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;background:var(--line-soft);color:var(--ink-soft);border-radius:4px;padding:2px 6px;margin-left:6px;}
+  mark.search-hit{background:var(--accent-soft);color:var(--accent-deep);padding:0 2px;border-radius:3px;font-weight:700;}
+  .locked-day{position:relative;pointer-events:none;opacity:.55;user-select:none;}
+  .locked-day::after{content:'\1F512 Locked';position:absolute;top:12px;right:14px;font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--danger);background:var(--danger-soft);padding:2px 8px;border-radius:5px;}
+
+  .day-tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 8px;margin-bottom:16px;scrollbar-width:thin;}
+  .day-tabs::-webkit-scrollbar{height:6px;}
+  .day-tabs::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .day-tabs::-webkit-scrollbar-track{background:transparent;}
+  .day-tab{flex:none;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12.5px;white-space:nowrap;color:var(--ink-soft);transition:all .16s var(--ease);}
+  .day-tab:hover{border-color:var(--primary);color:var(--primary-dark);transform:translateY(-1px);}
+  .day-tab.active{background:var(--primary-dark);border-color:var(--primary-dark);color:#fff;box-shadow:var(--shadow-sm);}
+
+  .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
+  .summary-box{background:#fff;border:1px solid var(--line-soft);border-radius:9px;padding:11px 13px;transition:box-shadow .2s ease, transform .2s ease;}
+  .summary-box:hover{box-shadow:var(--shadow-md);transform:translateY(-2px);}
+  .summary-box .lbl{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em;font-family:'IBM Plex Mono',monospace;}
+  .summary-box .val{font-family:'IBM Plex Mono',monospace;font-size:18.5px;font-weight:600;color:var(--primary-dark);margin-top:3px;font-variant-numeric:tabular-nums;}
+  .summary-box.grand{background:var(--primary-dark);box-shadow:var(--shadow-md);}
+  .summary-box.grand .lbl{color:#cfe0d7;}
+  .summary-box.grand .val{color:#fff;}
+
+  .empty{color:var(--ink-soft);font-size:13px;font-style:italic;padding:8px 2px;}
+
+  .setup-banks .bank-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
+  .divider{height:1px;background:linear-gradient(90deg, var(--line), transparent);margin:18px 0;}
+
+  .coa-desc{font-size:12px;color:var(--ink-soft);margin-bottom:10px;}
+
+  footer.dl{position:sticky;bottom:0;background:linear-gradient(0deg,var(--paper) 65%, transparent);padding:18px 0 4px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+
+  @media (max-width:640px){
+    header.top{flex-direction:column;align-items:flex-start;}
+    .line-item{flex-wrap:wrap;}
+  }
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(15,51,44,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;animation:overlayIn .18s ease both;backdrop-filter:blur(1px);}
+  .modal-box{background:#fff;border-radius:14px;padding:22px 24px;max-width:400px;box-shadow:var(--shadow-lg);animation:modalIn .28s var(--ease) both;}
+  .modal-box p{margin:0 0 18px;color:var(--ink);font-size:14px;line-height:1.6;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;}
+  @keyframes overlayIn{from{opacity:0;}to{opacity:1;}}
+  @keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(.97);}to{opacity:1;transform:translateY(0) scale(1);}}
+
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important;}
+    body::before{animation:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+/* ======================================================================
+   Chart of Accounts
+   ====================================================================== */
+const COA = [
+  {key:'Trans',   short:'Trans',    label:'Transport',                 desc:'Microbus-related expenses: gas/octane, servicing, parts',                       notesheetLabel:'Transport',                  expensePhrase:'Transport',                     summaryLabel:'Transport Expense'},
+  {key:'Tailor',  short:'Tailor',   label:'Tailor',                    desc:'Student uniform / dress making',                                                 notesheetLabel:'Tailor',                     expensePhrase:'Tailor/Uniform',                summaryLabel:'Tailor/Uniform Expense'},
+  {key:'Utility', short:'Utility',  label:'Utility',                   desc:'Electricity meter load, internet bill, WASA (water) bill',                      notesheetLabel:'Utility',                    expensePhrase:'Utility',                       summaryLabel:'Utility Expense'},
+  {key:'BooksSty',short:'BooksSty', label:'Books & Stationery',        desc:'Student books/khata, stationery purchases',                                      notesheetLabel:'Books & Stationery',         expensePhrase:'Books & Stationery',            summaryLabel:'Books & Stationery Expense'},
+  {key:'Hons',    short:'Hons',     label:'Honourarium',               desc:'Payments to Director, examiners, or others for interviews/meetings',            notesheetLabel:'Honourarium',                expensePhrase:'Honourarium',                   summaryLabel:'Honourarium Expense'},
+  {key:'EduAssist',short:'EduAssist',label:'Education & Assistance Fund',desc:'Fee compromise for a student (booked here as a cash expenditure)',             notesheetLabel:'Education & Assistance Fund',expensePhrase:'Education & Assistance Fund',   summaryLabel:'Education & Assistance Fund Expense'},
+  {key:'PayAllce',short:'PayAllce', label:'Pay & Allowance',           desc:'Ad-hoc / emergency salary-related payments outside the normal salary sheet',    notesheetLabel:'Pay & Allowance',            expensePhrase:'Pay & Allowance',               summaryLabel:'Pay & Allowance Expense'},
+  {key:'Loan',    short:'Loan',     label:'Loan',                      desc:'Loan disbursed from Madrasa account to the main company',                       notesheetLabel:'Loan',                       expensePhrase:'Loan',                          summaryLabel:'Loan Expense'},
+  {key:'Event',   short:'Event',    label:'Event',                     desc:'The 4 annual events: Sports, Cultural Competition, Science Fair, Study Tour',   notesheetLabel:'Event',                      expensePhrase:'Event',                         summaryLabel:'Event Expense'},
+  {key:'Misc',    short:'Misc',     label:'Miscellaneous',             desc:'Any cost that does not fit the above categories',                                notesheetLabel:'Misc',                       expensePhrase:'misc',                          summaryLabel:'Miscellaneous Expense'},
+];
+/* Order categories appear in on the Withdraw Summary sheet & notesheet generation pass */
+const SUMMARY_ORDER = ['Misc','Trans','Tailor','Utility','BooksSty','Hons','EduAssist','PayAllce','Loan','Event'];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+/* ======================================================================
+   State
+   ====================================================================== */
+let state = null;
+let selectedDayId = null;
+let notesheetRange = null; // {start, end} - lazily defaulted to the full recorded month
+let notesheetSettingsOpen = false;
+let voucherCounterSettingsOpen = false;
+let searchOpen = false;
+let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
+let summaryOpen = false;
+let summaryFilters = { catKey:'', mode:'month', year:'', fromDate:'', toDate:'' };
+let templatesOpen = false;
+let dashboardOpen = false;
+let locked = false;            // true = show the lock screen instead of the app
+let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
+let lastUndo = null;      // {label, restore} - the most recent undoable delete
+let lastUndoTimer = null;
+let duplicateWarning = null;   // string message, or null - shown as a dismissible toast
+let duplicateWarningTimer = null; // auto-clears the undo offer after a short window
+let passwordFormOpen = false;  // true = show the set/change-password mini form
+let dayLockPasswordFormOpen = false; // true = show the set/change day-lock-password mini form
+let lockError = '';            // error text shown on a failed unlock attempt
+
+function defaultState(){
+  const coaEmpty = {};
+  const counters = {};
+  COA.forEach(c=>{coaEmpty[c.key]=[]; counters[c.key]=0;});
+  const notesheetCounters = {Misc:71, Trans:64, Tailor:38, Utility:59, BooksSty:0, Hons:0, EduAssist:0, PayAllce:0, Loan:0, Event:0};
+  return {
+    setupDone:false,
+    month:'', year:'',
+    banks:[],
+    voucherCounters:counters,
+    notesheetCounters,
+    summaryCounterYear:'26',
+    summaryCounterNum:13,
+    signatories:{
+      accountant:'Mulham Haider Chowdhury', accountantRole:'Accountant',
+      adminManager:'Sgt Helal Uddin Sarker(Retd)', adminManagerRole:'Admin Manager',
+      principal:'Brig Gen Md Abu Naser(Retd)', principalRole:'Principal'
+    },
+    days:[],
+    iouRegistry:[],
+    lockPasswordHash:null,
+    dayLockPasswordHash:null,
+    archive:[],
+    templates:[]
+  };
+}
+function newDay(dateStr){
+  const coaEmpty = {};
+  COA.forEach(c=>{coaEmpty[c.key]=[];});
+  return {
+    id:uid(),
+    date:dateStr,
+    openingCashManual:0,
+    serviceRevenue:0,
+    withdrawals:[],
+    deposits:[],
+    coa:coaEmpty,
+    banksDaily:{},
+    bankTransfers:[],
+    locked:false
+  };
+}
+function ensureBankDaily(day, bankId){
+  if(!day.banksDaily[bankId]) day.banksDaily[bankId] = {sslDeposit:0, fees:0, salaryAccount:0, salaryCash:0, reconciledBalance:null, reconcileNote:''};
+  const bd = day.banksDaily[bankId];
+  if(bd.reconciledBalance===undefined) bd.reconciledBalance = null;
+  if(bd.reconcileNote===undefined) bd.reconcileNote = '';
+  return bd;
+}
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
+function dayLabel(dateStr){
+  if(!dateStr) return 'Untitled day';
+  const d = new Date(dateStr+'T00:00:00');
+  return ordinal(d.getDate())+' '+MONTHS[d.getMonth()].slice(0,3);
+}
+function dayLabelFull(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  return ordinal(d.getDate())+' '+MONTHS[d.getMonth()];
+}
+function money(n){
+  n = Number(n)||0;
+  const neg = n<0;
+  const abs = Math.abs(n).toLocaleString('en-IN',{maximumFractionDigits:2});
+  return (neg?'(':'')+abs+(neg?')':'');
+}
+
+/* --- Asian/Indian comma grouping (12,34,567 instead of 1,234,567) for the
+   amount input boxes themselves, formatted live as the person types. --- */
+function asianGroupDigits(intDigits){
+  if(intDigits.length<=3) return intDigits;
+  const lastThree = intDigits.slice(-3);
+  let other = intDigits.slice(0,-3).replace(/\B(?=(\d{2})+(?!\d))/g, ',');
+  return other + ',' + lastThree;
+}
+function formatAsianAmount(value){
+  if(value===''||value===null||value===undefined) return '';
+  const s = String(value);
+  const neg = s.trim().startsWith('-');
+  const cleaned = s.replace(/[^0-9.]/g,'');
+  if(cleaned===''||cleaned==='.') return '';
+  const dotIdx = cleaned.indexOf('.');
+  let intPart = dotIdx===-1 ? cleaned : cleaned.slice(0,dotIdx);
+  let decPart = dotIdx===-1 ? '' : cleaned.slice(dotIdx);
+  intPart = intPart.replace(/^0+(?=\d)/,'');
+  if(intPart==='') intPart='0';
+  return (neg?'-':'') + asianGroupDigits(intPart) + decPart;
+}
+function parseAmountInput(displayValue){
+  const num = parseFloat(String(displayValue||'').replace(/,/g,''));
+  return isNaN(num) ? 0 : num;
+}
+/* Lets someone type a quick sum right into an amount box, e.g. "1500-500"
+   resolves to 1000 the moment they leave the field (blur/Enter) - handy
+   for things like "IOU was 1500, 500 came back, net 1000" without needing
+   a calculator on the side. Only digits, spaces, a decimal point, and
+   + - * / ( ) are ever accepted; anything else is stripped as typed. */
+function looksLikePlainNumber(s){ return /^-?\d*\.?\d*$/.test(s); }
+function evalAmountExpression(expr){
+  const cleaned = String(expr||'').replace(/,/g,'').trim();
+  if(!cleaned) return null;
+  if(!/^[\d\s+\-*/().]+$/.test(cleaned)) return null; // reject anything not a plain arithmetic expression
+  if(!/\d/.test(cleaned)) return null; // must contain at least one digit
+  try{
+    const result = Function('"use strict"; return (' + cleaned + ')')();
+    return (typeof result==='number' && isFinite(result)) ? result : null;
+  }catch(e){ return null; }
+}
+function resolveAmountField(inputEl, onChange, fallbackValue){
+  const raw = inputEl.value.replace(/,/g,'').trim();
+  if(raw===''){ inputEl.value=''; onChange(0); return; }
+  if(looksLikePlainNumber(raw)) return; // already a plain number - nothing to resolve
+  const result = evalAmountExpression(raw);
+  if(result===null){
+    const m = raw.match(/^-?\d+(\.\d+)?/);
+    const num = m ? parseFloat(m[0]) : (fallbackValue||0);
+    inputEl.value = formatAsianAmount(num);
+    onChange(num);
+    return;
+  }
+  inputEl.value = formatAsianAmount(result);
+  onChange(result);
+}
+/* Wires a text input to live-format with Asian comma grouping as the
+   person types a plain number, preserving caret position, and reports
+   the parsed numeric value back via onChange on every edit. If what's
+   typed looks like an arithmetic expression instead (has a +, *, /, or a
+   non-leading -), it's left as raw text while typing and only resolved
+   into a final number on blur or Enter. */
+function wireAmountInput(inputEl, onChange){
+  const fallbackValue = parseAmountInput(inputEl.value);
+  inputEl.addEventListener('input', ()=>{
+    const raw = inputEl.value.replace(/,/g,'');
+    if(looksLikePlainNumber(raw)){
+      const digitsBeforeCursor = inputEl.value.slice(0, inputEl.selectionStart).replace(/[^0-9.]/g,'').length;
+      let clean = raw.replace(/[^0-9.]/g,'');
+      const firstDot = clean.indexOf('.');
+      if(firstDot!==-1){ clean = clean.slice(0,firstDot+1) + clean.slice(firstDot+1).replace(/\./g,''); }
+      const num = (clean===''||clean==='.') ? 0 : parseFloat(clean);
+      const formatted = formatAsianAmount(clean);
+      inputEl.value = formatted;
+      let seen = 0, pos = 0;
+      for(; pos<formatted.length; pos++){
+        if(/[0-9.]/.test(formatted[pos])) seen++;
+        if(seen>=digitsBeforeCursor){ pos++; break; }
+      }
+      inputEl.setSelectionRange(pos, pos);
+      onChange(isNaN(num)?0:num);
+    } else {
+      const pos = inputEl.selectionStart;
+      const sanitized = inputEl.value.replace(/[^0-9+\-*/(). ]/g,'');
+      if(sanitized !== inputEl.value){
+        inputEl.value = sanitized;
+        inputEl.setSelectionRange(pos, pos);
+      }
+      // a math expression is mid-typing - wait for blur/Enter to resolve it
+    }
+  });
+  inputEl.addEventListener('blur', ()=>{ resolveAmountField(inputEl, onChange, fallbackValue); });
+  inputEl.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ e.preventDefault(); resolveAmountField(inputEl, onChange, fallbackValue); inputEl.blur(); }
+  });
+}
+function findDay(id){ return state.days.find(d=>d.id===id); }
+
+/* --- Soft-delete / Undo -------------------------------------------------
+   Every delete action calls pushUndo() with a closure that restores
+   exactly what was removed. A small toast offers "Undo" for a short
+   window (10s) or until another delete replaces it. */
+function pushUndo(label, restoreFn){
+  lastUndo = {label, restore: restoreFn};
+  if(lastUndoTimer) clearTimeout(lastUndoTimer);
+  lastUndoTimer = setTimeout(()=>{ lastUndo = null; render(); }, 10000);
+}
+function performUndo(){
+  if(!lastUndo) return;
+  lastUndo.restore();
+  if(lastUndoTimer) clearTimeout(lastUndoTimer);
+  lastUndo = null;
+  saveState();
+  render();
+}
+function renderUndoToast(){
+  return el(`
+    <div style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--primary-dark);color:#fff;padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:14px;z-index:500;font-size:13px;animation:modalIn .25s var(--ease);max-width:92vw;">
+      <span>${escapeHtml(lastUndo.label)}</span>
+      <button type="button" data-action="perform-undo" style="background:var(--accent);border-color:var(--accent);white-space:nowrap;">Undo</button>
+    </div>
+  `);
+}
+
+/* --- Duplicate-amount warning ------------------------------------------
+   A gentle heads-up (not a block) when the same amount shows up more than
+   once in the same day - catches accidental double entry without getting
+   in the way of legitimate repeats (e.g. two genuinely equal payments). */
+function checkDuplicateAmount(day, amount, excludeItemId){
+  if(!amount || amount<=0) return null;
+  const matches = [];
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(it=>{
+      if(it.id!==excludeItemId && Number(it.amount)===Number(amount)){
+        matches.push({label: cat.label, desc: it.desc||'', voucher: it.voucher});
+      }
+    });
+  });
+  if(matches.length===0) return null;
+  const m = matches[0];
+  const where = m.desc ? `"${m.desc}" (${m.label}, ${m.voucher})` : `${m.label} (${m.voucher})`;
+  return `Heads up: ${formatAsianAmount(amount)} was already entered today under ${where}${matches.length>1?` and ${matches.length-1} more`:''}. Might be a duplicate - or just two genuine entries.`;
+}
+function showDuplicateWarning(message){
+  duplicateWarning = message;
+  if(duplicateWarningTimer) clearTimeout(duplicateWarningTimer);
+  duplicateWarningTimer = setTimeout(()=>{ duplicateWarning = null; render(); }, 7000);
+  render();
+}
+function renderDuplicateWarningToast(){
+  return el(`
+    <div style="position:fixed;left:50%;bottom:${lastUndo?'78px':'22px'};transform:translateX(-50%);background:#7A5B12;color:#fff;padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:14px;z-index:500;font-size:13px;animation:modalIn .25s var(--ease);max-width:92vw;">
+      <span>&#9888; ${escapeHtml(duplicateWarning)}</span>
+      <button type="button" data-action="dismiss-dup-warning" style="background:transparent;border-color:rgba(255,255,255,.5);color:#fff;white-space:nowrap;">Dismiss</button>
+    </div>
+  `);
+}
+
+/* Every day ever recorded, current month + everything archived by past
+   "Refresh - new month" clears, so Search and Category Summary can see
+   the full history rather than just what's currently loaded. */
+function allDaysEverywhere(){
+  const archived = (state.archive||[]).flatMap(m=>m.days||[]);
+  return archived.concat(state.days);
+}
+
+/* Flattens every Cash Disbursed (CoA) voucher across every recorded day
+   into one list of {date, cat, voucher, desc, amount}, for Search and
+   Category Summary to filter and group. */
+function allVouchers(){
+  const out = [];
+  allDaysEverywhere().forEach(day=>{
+    COA.forEach(cat=>{
+      (day.coa[cat.key]||[]).forEach(item=>{
+        const amt = Number(item.amount)||0;
+        if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:item.desc||'', amount:amt});
+      });
+    });
+  });
+  out.sort((a,b)=>a.date.localeCompare(b.date));
+  return out;
+}
+function voucherYearsPresent(){
+  const years = new Set(allVouchers().map(v=>v.date.slice(0,4)));
+  return Array.from(years).sort().reverse();
+}
+function filteredVouchers(f){
+  return allVouchers().filter(v=>{
+    if(f.catKey && v.catKey!==f.catKey) return false;
+    if(f.year && v.date.slice(0,4)!==f.year) return false;
+    if(f.month && v.date.slice(5,7)!==f.month) return false;
+    if(f.fromDate && v.date<f.fromDate) return false;
+    if(f.toDate && v.date>f.toDate) return false;
+    if(f.text){
+      const q = f.text.toLowerCase();
+      if(!v.desc.toLowerCase().includes(q) && !v.voucher.toLowerCase().includes(q)) return false;
+    }
+    if(f.minAmt!=='' && f.minAmt!==undefined && v.amount<Number(f.minAmt)) return false;
+    if(f.maxAmt!=='' && f.maxAmt!==undefined && v.amount>Number(f.maxAmt)) return false;
+    return true;
+  });
+}
+function groupSum(vouchers, keyFn, labelFn){
+  const map = new Map();
+  vouchers.forEach(v=>{
+    const k = keyFn(v);
+    map.set(k, (map.get(k)||0) + v.amount);
+  });
+  return Array.from(map.entries())
+    .sort((a,b)=>a[0].localeCompare(b[0]))
+    .map(([k,total])=>({key:k, label:labelFn?labelFn(k):k, total}));
+}
+
+/* --- Simple password lock screen -------------------------------------
+   This only gates the on-screen view; the underlying data in browser
+   storage is NOT encrypted, so it isn't real protection against someone
+   who opens dev tools - it's a screen lock, not a vault. We hash the
+   password (SHA-256) rather than store it in plain text, purely so it
+   isn't sitting in the open in state. */
+async function sha256Hex(text){
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function addDaysStr(dateStr, delta){
+  const d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+delta);
+  return d.toISOString().slice(0,10);
+}
+/* An IOU carries forward automatically from the day it's added until it's
+   removed - "removed" just closes off its toDate so it stops appearing on
+   later days, without touching the days it already appeared on. */
+function activeIousForDay(dateStr){
+  return state.iouRegistry.filter(r => r.fromDate<=dateStr && (r.toDate===null || dateStr<=r.toDate));
+}
+
+/* Bangladeshi (Indian numbering: Crore/Lakh/Thousand) taka-in-words formatter */
+const NUM_ONES = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten',
+  'Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+const NUM_TENS = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+function twoDigitWords(n){
+  if(n<20) return NUM_ONES[n];
+  const t=Math.floor(n/10), o=n%10;
+  return NUM_TENS[t] + (o? ' '+NUM_ONES[o] : '');
+}
+function threeDigitWords(n){
+  const h=Math.floor(n/100), r=n%100;
+  const parts=[];
+  if(h) parts.push(NUM_ONES[h]+' Hundred');
+  if(r) parts.push(twoDigitWords(r));
+  return parts.join(' ');
+}
+function takaInWords(amount){
+  let n = Math.round(Number(amount)||0);
+  if(n===0) return 'Zero Taka Only';
+  const neg = n<0; n = Math.abs(n);
+  const crore = Math.floor(n/10000000); n%=10000000;
+  const lakh = Math.floor(n/100000); n%=100000;
+  const thousand = Math.floor(n/1000); n%=1000;
+  const rest = n;
+  const parts=[];
+  if(crore) parts.push(threeDigitWords(crore)+' Crore');
+  if(lakh) parts.push(twoDigitWords(lakh)+' Lakh');
+  if(thousand) parts.push(twoDigitWords(thousand)+' Thousand');
+  if(rest) parts.push(threeDigitWords(rest));
+  return (neg?'Minus ':'')+parts.join(' ')+' Taka Only';
+}
+function monthYearAbbr(){
+  return (state.month||'').slice(0,3)+' '+String(state.year||'').slice(-2);
+}
+
+/* ======================================================================
+   Notesheet / Withdraw Summary generation
+   Gathers every CoA voucher across a chosen date range, grouped by
+   category (skipping categories with no expense in that range), so it
+   can be exported as one notesheet per category plus a Withdraw Summary,
+   in the same voucher-code, date-range and signature-block style used in
+   Rafsan's existing hand-built notesheets.
+   ====================================================================== */
+function collectNotesheetRange(startDate, endDate){
+  const days = state.days.filter(d=>d.date>=startDate && d.date<=endDate).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const cats = [];
+  SUMMARY_ORDER.forEach(key=>{
+    const cat = COA.find(c=>c.key===key);
+    const items = [];
+    days.forEach(day=>{
+      (day.coa[key]||[]).forEach(it=>{
+        const amt = Number(it.amount)||0;
+        if(amt>0){ items.push({voucher:it.voucher, desc:it.desc||cat.label, amount:amt, date:day.date}); }
+      });
+    });
+    if(items.length===0) return;
+    const total = items.reduce((s,it)=>s+it.amount,0);
+    cats.push({key, cat, items, total, firstDate:items[0].date, lastDate:items[items.length-1].date});
+  });
+  const grandTotal = cats.reduce((s,c)=>s+c.total,0);
+  return {cats, grandTotal};
+}
+
+/* ======================================================================
+   Storage
+   ====================================================================== */
+/* window.storage only exists inside Claude.ai. When this file is opened
+   directly in a browser (downloaded, double-clicked, or self-hosted),
+   window.storage isn't there at all, so we fall back to the browser's own
+   localStorage - which works fine in a normal tab - so data still
+   survives reloads. Claude.ai is always tried first so nothing changes
+   for artifact use. */
+const LOCAL_STORAGE_KEY = 'daily_cash_bank_ledger_state_v1';
+
+/* --- File System Access API: optional direct-to-disk auto-save ---------
+   Chrome/Edge only (Firefox/Safari don't implement it - the feature just
+   hides itself there and window.storage/localStorage remain the only
+   record). Lets the person link this tool to one real file on their
+   computer; every change then writes straight to that file, so the data
+   survives PC restarts and isn't tied to any one browser profile. The
+   FileSystemFileHandle itself is remembered in IndexedDB (localStorage
+   can't hold a handle object) so we can try to silently reconnect on the
+   next page load - though the browser may still require a fresh click to
+   re-grant permission, by design. */
+let fsFileHandle = null;
+let fsFileName = '';
+function fsApiSupported(){
+  return typeof window!=='undefined' && typeof window.showOpenFilePicker==='function' && typeof window.showSaveFilePicker==='function';
+}
+function idbGet(key){
+  return new Promise((resolve)=>{
+    try{
+      const req = indexedDB.open('ledger-fs-links', 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore('handles'); };
+      req.onsuccess = ()=>{
+        const tx = req.result.transaction('handles','readonly');
+        const g = tx.objectStore('handles').get(key);
+        g.onsuccess = ()=>resolve(g.result||null);
+        g.onerror = ()=>resolve(null);
+      };
+      req.onerror = ()=>resolve(null);
+    }catch(e){ resolve(null); }
+  });
+}
+function idbSet(key, value){
+  return new Promise((resolve)=>{
+    try{
+      const req = indexedDB.open('ledger-fs-links', 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore('handles'); };
+      req.onsuccess = ()=>{
+        const tx = req.result.transaction('handles','readwrite');
+        tx.objectStore('handles').put(value, key);
+        tx.oncomplete = ()=>resolve(true);
+        tx.onerror = ()=>resolve(false);
+      };
+      req.onerror = ()=>resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+function idbDelete(key){
+  return new Promise((resolve)=>{
+    try{
+      const req = indexedDB.open('ledger-fs-links', 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore('handles'); };
+      req.onsuccess = ()=>{
+        const tx = req.result.transaction('handles','readwrite');
+        tx.objectStore('handles').delete(key);
+        tx.oncomplete = ()=>resolve(true);
+        tx.onerror = ()=>resolve(false);
+      };
+      req.onerror = ()=>resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+async function writeStateToConnectedFile(){
+  if(!fsFileHandle) return;
+  try{
+    const perm = await fsFileHandle.queryPermission({mode:'readwrite'});
+    if(perm!=='granted') return; // don't block saving elsewhere; UI offers "Reconnect"
+    const writable = await fsFileHandle.createWritable();
+    await writable.write(JSON.stringify(state, null, 2));
+    await writable.close();
+  }catch(e){ /* disk write failed - window.storage/localStorage still has the data */ }
+}
+async function connectToFile(){
+  if(!fsApiSupported()){
+    showAlert("This browser can't connect directly to a file (needs Chrome or Edge). Use Export/Import backup instead.");
+    return;
+  }
+  let handle;
+  try{
+    [handle] = await window.showOpenFilePicker({
+      types:[{description:'Ledger backup', accept:{'application/json':['.json']}}]
+    });
+  }catch(e){
+    return; // person cancelled the picker
+  }
+  try{
+    const perm = await handle.requestPermission({mode:'readwrite'});
+    if(perm!=='granted'){ showAlert('Permission to read/write that file was not granted.'); return; }
+    const file = await handle.getFile();
+    const text = await file.text();
+    if(text && text.trim()){
+      let parsed;
+      try{ parsed = JSON.parse(text); }catch(e){ parsed = null; }
+      if(!parsed || typeof parsed!=='object' || !Array.isArray(parsed.days)){
+        showAlert("That file isn't a ledger backup. Pick an empty/new file, or one exported from this tool.");
+        return;
+      }
+      showConfirm(`"${handle.name}" already has ledger data in it. Load that data now (replacing what's currently shown here)?`, async ()=>{
+        state = parsed;
+        migrateState();
+        selectedDayId = null;
+        locked = !!state.lockPasswordHash;
+        fsFileHandle = handle; fsFileName = handle.name;
+        await idbSet('lastHandle', handle);
+        await saveState();
+        render();
+      }, 'Load from file');
+    } else {
+      fsFileHandle = handle; fsFileName = handle.name;
+      await idbSet('lastHandle', handle);
+      await writeStateToConnectedFile();
+      render();
+    }
+  }catch(e){ showAlert('Could not connect to that file.'); }
+}
+async function createNewFile(){
+  if(!fsApiSupported()){
+    showAlert("This browser can't connect directly to a file (needs Chrome or Edge). Use Export/Import backup instead.");
+    return;
+  }
+  let handle;
+  try{
+    handle = await window.showSaveFilePicker({
+      suggestedName: (state.month&&state.year?`Ledger_${state.month}${state.year}`:'Ledger_Data')+'.json',
+      types:[{description:'Ledger backup', accept:{'application/json':['.json']}}]
+    });
+  }catch(e){
+    return; // person cancelled the picker
+  }
+  try{
+    const perm = await handle.requestPermission({mode:'readwrite'});
+    if(perm!=='granted'){ showAlert('Permission to write that file was not granted.'); return; }
+    fsFileHandle = handle; fsFileName = handle.name;
+    await idbSet('lastHandle', handle);
+    await writeStateToConnectedFile();
+    render();
+  }catch(e){ showAlert('Could not create that file.'); }
+}
+async function disconnectFile(){
+  fsFileHandle = null;
+  fsFileName = '';
+  await idbDelete('lastHandle');
+  render();
+}
+async function tryReconnectFile(){
+  if(!fsApiSupported()) return;
+  const handle = await idbGet('lastHandle');
+  if(!handle) return;
+  try{
+    const perm = await handle.queryPermission({mode:'readwrite'});
+    if(perm==='granted'){ fsFileHandle = handle; fsFileName = handle.name; }
+    // if not granted, leave fsFileHandle null - the header offers a
+    // "Reconnect" button, since browsers require a fresh click to re-grant
+  }catch(e){ /* handle may be stale (file moved/deleted) */ }
+}
+
+async function saveState(){
+  const json = JSON.stringify(state);
+  let savedToCloud = false;
+  try{
+    const res = await window.storage.set('state', json);
+    if(res) savedToCloud = true;
+  }catch(e){ /* window.storage not available here */ }
+  if(!savedToCloud){
+    try{ localStorage.setItem(LOCAL_STORAGE_KEY, json); }
+    catch(e){ /* localStorage blocked too (e.g. private browsing) */ }
+  }
+  writeStateToConnectedFile();
+}
+function migrateState(){
+  const d = defaultState();
+  if(!state.notesheetCounters) state.notesheetCounters = d.notesheetCounters;
+  else COA.forEach(c=>{ if(!(c.key in state.notesheetCounters)) state.notesheetCounters[c.key] = 0; });
+  if(state.summaryCounterYear===undefined) state.summaryCounterYear = d.summaryCounterYear;
+  if(state.summaryCounterNum===undefined) state.summaryCounterNum = d.summaryCounterNum;
+  if(!state.signatories) state.signatories = d.signatories;
+  if(!state.iouRegistry){
+    /* Older saves kept IOUs as a plain per-day list with no carry-forward.
+       Bring each of those in as a single-day entry so historical Cash In
+       Hand figures for already-recorded days don't silently change. */
+    state.iouRegistry = [];
+    (state.days||[]).forEach(day=>{
+      (day.ious||[]).forEach(i=>{
+        state.iouRegistry.push({id:i.id||uid(), desc:i.desc, amount:i.amount, fromDate:day.date, toDate:day.date});
+      });
+      delete day.ious;
+    });
+  }
+  (state.days||[]).forEach(day=>{ if(!day.bankTransfers) day.bankTransfers = []; });
+  if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
+  if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
+  if(!state.archive) state.archive = [];
+  if(!state.templates) state.templates = [];
+  (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
+  const stampStatus = (day)=>{
+    COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(it=>{ if(it.status===undefined) it.status = 'draft'; }); });
+  };
+  (state.days||[]).forEach(stampStatus);
+  (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(stampStatus); });
+}
+async function loadState(){
+  try{
+    const res = await window.storage.get('state');
+    if(res && res.value){ state = JSON.parse(res.value); migrateState(); return; }
+  }catch(e){ /* window.storage not available here */ }
+  try{
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if(raw){ state = JSON.parse(raw); migrateState(); return; }
+  }catch(e){ /* localStorage not available either */ }
+  state = defaultState();
+}
+
+/* --- Portable JSON backup ---------------------------------------------
+   window.storage and localStorage are both tied to one Claude.ai chat or
+   one browser/file location. A downloaded backup file is the only copy
+   that survives a deleted chat, a different browser, or a different
+   computer - the person carries it themselves and re-imports it wherever
+   they open this tool next. */
+function exportBackupJson(){
+  const label = (state.month && state.year) ? `${state.month}${state.year}` : 'backup';
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Ledger_Backup_${label}_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function importBackupJson(file){
+  showConfirm('Importing a backup replaces all data currently in this ledger (in this browser/chat) with what\'s in the file. Continue?', ()=>{
+    const reader = new FileReader();
+    reader.onload = async ()=>{
+      try{
+        const parsed = JSON.parse(reader.result);
+        if(!parsed || typeof parsed!=='object' || !Array.isArray(parsed.days)){ throw new Error('not a ledger backup'); }
+        state = parsed;
+        migrateState();
+        selectedDayId = null;
+        notesheetRange = null;
+        locked = !!state.lockPasswordHash;
+        await saveState();
+        render();
+        showAlert('Backup imported successfully.');
+      }catch(e){
+        showAlert('That file could not be read as a valid Daily Cash & Bank Ledger backup.');
+      }
+    };
+    reader.readAsText(file);
+  }, 'Import & replace');
+}
+
+/* ======================================================================
+   Computation engine (single source of truth for every number shown
+   on screen AND every number written into the exported spreadsheets)
+   ====================================================================== */
+function computeAll(){
+  const results = {};
+  let prevCash = null;
+  let prevBankClose = {};
+  state.banks.forEach(b=>{ prevBankClose[b.id] = b.opening||0; });
+
+  state.days.forEach((day, idx)=>{
+    const openingCash = idx===0 ? (Number(day.openingCashManual)||0) : prevCash;
+    const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
+    const cashCollected = (Number(day.serviceRevenue)||0) + withdrawTotal;
+    const totalAmountCash = openingCash + cashCollected;
+
+    let coaTotal = 0;
+    const coaTotals = {};
+    COA.forEach(c=>{
+      const t = (day.coa[c.key]||[]).reduce((s,l)=>s+(Number(l.amount)||0),0);
+      coaTotals[c.key]=t; coaTotal += t;
+    });
+    const depositTotal = day.deposits.reduce((s,d)=>s+(Number(d.amount)||0),0);
+    const totalCashDisbursed = coaTotal + depositTotal;
+    const closingAmount = totalAmountCash - totalCashDisbursed;
+    const iouTotal = activeIousForDay(day.date).reduce((s,i)=>s+(Number(i.amount)||0),0);
+    const cashInHand = closingAmount - iouTotal;
+
+    const banks = {};
+    state.banks.forEach(b=>{
+      const bd = day.banksDaily[b.id] || {sslDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
+      const opening = prevBankClose[b.id];
+      const transferIn = day.deposits.filter(d=>d.bankId===b.id).reduce((s,d)=>s+(Number(d.amount)||0),0);
+      const transferOut = day.withdrawals.filter(w=>w.bankId===b.id).reduce((s,w)=>s+(Number(w.amount)||0),0);
+      const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
+      const bankXferIn = bankXfers.filter(t=>t.toBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
+      const bankXferOut = bankXfers.filter(t=>t.fromBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
+      const totalIn = opening + (Number(bd.sslDeposit)||0) + transferIn + bankXferIn;
+      const totalOut = (Number(bd.fees)||0) + (Number(bd.salaryAccount)||0) + (Number(bd.salaryCash)||0) + transferOut + bankXferOut;
+      const closing = totalIn - totalOut;
+      banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, transferIn, bankXferIn, totalIn,
+                      fees:Number(bd.fees)||0, salaryAccount:Number(bd.salaryAccount)||0, salaryCash:Number(bd.salaryCash)||0,
+                      transferOut, bankXferOut, totalOut, closing};
+      prevBankClose[b.id] = closing;
+    });
+
+    const grandTotal = closingAmount + Object.values(banks).reduce((s,b)=>s+b.closing,0);
+
+    results[day.id] = {openingCash, withdrawTotal, cashCollected, totalAmountCash, coaTotals, coaTotal,
+                        depositTotal, totalCashDisbursed, closingAmount, iouTotal, cashInHand, banks, grandTotal};
+    prevCash = closingAmount;
+  });
+  return results;
+}
+
+/* ======================================================================
+   Small DOM helper
+   ====================================================================== */
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+/* Wraps every case-insensitive occurrence of query in <mark>, escaping
+   everything safely (matching is done on the raw text, then each segment
+   is escaped separately, so this never breaks on &, <, > etc. in text). */
+function highlightMatches(text, query){
+  const raw = (text||'').toString();
+  if(!query) return escapeHtml(raw);
+  const q = query.toLowerCase();
+  const lower = raw.toLowerCase();
+  let out = '', i = 0;
+  while(i < raw.length){
+    const idx = lower.indexOf(q, i);
+    if(idx===-1){ out += escapeHtml(raw.slice(i)); break; }
+    out += escapeHtml(raw.slice(i, idx));
+    out += '<mark class="search-hit">' + escapeHtml(raw.slice(idx, idx+q.length)) + '</mark>';
+    i = idx + q.length;
+  }
+  return out;
+}
+
+/* Native confirm()/alert() are often blocked inside a sandboxed artifact
+   iframe (they silently no-op). These custom modals work everywhere. */
+function showModal({message, confirmText='OK', cancelText=null, danger=false, onConfirm}){
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p>${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          ${cancelText ? `<button class="secondary" type="button">${escapeHtml(cancelText)}</button>` : ''}
+          <button class="${danger?'danger':''}" type="button">${escapeHtml(confirmText)}</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const confirmBtn = buttons[buttons.length-1];
+  const cancelBtn = buttons.length>1 ? buttons[0] : null;
+  confirmBtn.onclick = ()=>{ overlay.remove(); if(onConfirm) onConfirm(); };
+  if(cancelBtn) cancelBtn.onclick = ()=> overlay.remove();
+  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+}
+function showAlert(message){ showModal({message, confirmText:'OK'}); }
+function showConfirm(message, onConfirm, confirmText='Delete'){ showModal({message, confirmText, cancelText:'Cancel', danger:true, onConfirm}); }
+
+/* Password-gated confirmation, used for unlocking a finalized/locked day.
+   Checks the entered password against the screen-lock password hash before
+   calling onConfirm. If no screen-lock password has been set at all, this
+   falls back to a plain confirm so the feature doesn't dead-end users who
+   never set one. */
+function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToCheck){
+  if(hashToCheck===undefined) hashToCheck = state.lockPasswordHash;
+  if(!hashToCheck){ showConfirm(message, onConfirm, confirmText); return; }
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p>${escapeHtml(message)}</p>
+        <input type="password" id="pw-prompt-input" autocomplete="current-password" placeholder="Password" style="margin:2px 0 4px;">
+        <div id="pw-prompt-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">${escapeHtml(confirmText)}</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#pw-prompt-input');
+  const errorEl = overlay.querySelector('#pw-prompt-error');
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const cancelBtn = buttons[0], confirmBtn = buttons[1];
+  const attempt = async ()=>{
+    const hash = await sha256Hex(input.value||'');
+    if(hash === hashToCheck){
+      overlay.remove();
+      onConfirm();
+    } else {
+      errorEl.textContent = 'Incorrect password.';
+      input.value = '';
+      input.focus();
+    }
+  };
+  confirmBtn.onclick = attempt;
+  cancelBtn.onclick = ()=> overlay.remove();
+  input.onkeydown = (e)=>{ if(e.key==='Enter') attempt(); };
+  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  setTimeout(()=>input.focus(), 30);
+}
+
+/* ======================================================================
+   Rendering
+   ====================================================================== */
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if(state.lockPasswordHash && locked){
+    app.appendChild(renderLockScreen());
+    return;
+  }
+  app.appendChild(renderHeader());
+  if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
+  if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
+  if(!state.setupDone){
+    app.appendChild(renderSetup());
+    return;
+  }
+  if(dashboardOpen) app.appendChild(renderDashboardCard());
+  if(searchOpen) app.appendChild(renderSearchCard());
+  if(summaryOpen) app.appendChild(renderCategorySummaryCard());
+  if(templatesOpen) app.appendChild(renderTemplatesCard());
+  app.appendChild(renderDayTabs());
+  const computed = computeAll();
+  if(state.days.length===0){
+    app.appendChild(el(`<div class="card"><p class="empty">No days added yet. Click "+ Add day" above to start entering the first day of ${state.month} ${state.year}.</p></div>`));
+  } else {
+    if(!selectedDayId || !findDay(selectedDayId)) selectedDayId = state.days[state.days.length-1].id;
+    app.appendChild(renderDayPanel(selectedDayId, computed));
+    app.appendChild(renderNotesheetCard());
+    app.appendChild(renderAnnualSummaryCard());
+  }
+  app.appendChild(renderFooter());
+  if(lastUndo) app.appendChild(renderUndoToast());
+  if(duplicateWarning) app.appendChild(renderDuplicateWarningToast());
+}
+
+function renderHeader(){
+  const header = el(`
+    <header class="top">
+      <div class="top-title">
+        <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
+        <h1>Daily Cash &amp; Bank Ledger</h1>
+        <p>${state.setupDone ? `Recording for <strong>${state.month} ${state.year}</strong>` : 'Set up the month before recording daily entries'}</p>
+      </div>
+      <div class="toolbar">
+        ${state.setupDone ? `
+        <div class="toolbar-group">
+          <button class="secondary" data-action="edit-setup">&#9881; Edit setup</button>
+          <button class="secondary" data-action="toggle-dashboard">&#127968; ${dashboardOpen?'Hide':''} Dashboard</button>
+          <button class="secondary" data-action="toggle-search">&#128269; ${searchOpen?'Hide':'Advanced'} Search</button>
+          <button class="secondary" data-action="toggle-summary">&#128202; ${summaryOpen?'Hide':'Category'} Summary</button>
+          <button class="secondary" data-action="toggle-templates">&#128203; ${templatesOpen?'Hide':''} Templates</button>
+        </div>
+        <div class="toolbar-divider"></div>` : ''}
+        <div class="toolbar-group">
+          <button class="secondary" data-action="export-backup">&#11015; Export backup</button>
+          <button class="secondary" data-action="import-backup">&#11014; Import backup</button>
+          <input type="file" id="import-file-input" accept="application/json,.json" style="display:none;">
+          ${fsApiSupported() ? (
+            fsFileHandle
+              ? `<span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Every change is being saved directly to this file">&#128994; Auto-saving to ${escapeHtml(fsFileName)}</span><button class="secondary" data-action="disconnect-file">Disconnect</button>`
+              : `<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
+          ) : ''}
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
+          ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
+          ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : '<button class="secondary" data-action="remove-daylock-password">&#128273; Remove day-lock password</button>'}
+          ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
+        </div>
+      </div>
+    </header>
+  `);
+  const fileInput = header.querySelector('#import-file-input');
+  fileInput.onchange = ()=>{
+    const file = fileInput.files[0];
+    if(file) importBackupJson(file);
+    fileInput.value = '';
+  };
+  return header;
+}
+
+/* Inline mini-form for setting, changing, or removing the screen-lock
+   password. Shown under the header while passwordFormOpen is true. */
+function renderPasswordForm(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128274;</span> Set Password</h3>
+      <p class="subnote">This only locks the on-screen view in this browser &mdash; the saved data itself isn't encrypted, so treat it as a screen lock, not a vault. Once set, it can only be removed (not changed) from here &mdash; use "Remove password" and set a new one if you need to update it.</p>
+      <div class="row">
+        <div class="field">
+          <label>New password</label>
+          <input type="password" id="pw-new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm new password</label>
+          <input type="password" id="pw-confirm" autocomplete="new-password">
+        </div>
+      </div>
+      <div id="pw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button type="button" id="pw-save">Set password</button>
+        <button class="secondary" type="button" id="pw-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  const newInp = card.querySelector('#pw-new');
+  const confirmInp = card.querySelector('#pw-confirm');
+  const errBox = card.querySelector('#pw-error');
+  card.querySelector('#pw-save').onclick = async ()=>{
+    const a = newInp.value, b = confirmInp.value;
+    if(!a){ errBox.textContent = 'Enter a password.'; return; }
+    if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
+    if(a!==b){ errBox.textContent = 'Passwords do not match.'; return; }
+    state.lockPasswordHash = await sha256Hex(a);
+    passwordFormOpen = false;
+    await saveState();
+    render();
+    showAlert('Password saved. Use "Lock now" any time you want to lock the screen.');
+  };
+  card.querySelector('#pw-cancel').onclick = ()=>{ passwordFormOpen = false; render(); };
+  return card;
+}
+
+/* Inline mini-form for setting a separate password used only to unlock a
+   finalized/locked day (distinct from the screen-lock password above). */
+function renderDayLockPasswordForm(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128273;</span> Set Day-Lock Password</h3>
+      <p class="subnote">This password is only asked for when unlocking a finalized day &mdash; separate from the screen-lock password. Once set, it can only be removed (not changed) from here &mdash; use "Remove day-lock password" and set a new one if you need to update it.</p>
+      <div class="row">
+        <div class="field">
+          <label>New day-lock password</label>
+          <input type="password" id="dlpw-new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm new password</label>
+          <input type="password" id="dlpw-confirm" autocomplete="new-password">
+        </div>
+      </div>
+      <div id="dlpw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button type="button" id="dlpw-save">Set day-lock password</button>
+        <button class="secondary" type="button" id="dlpw-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  const newInp = card.querySelector('#dlpw-new');
+  const confirmInp = card.querySelector('#dlpw-confirm');
+  const errBox = card.querySelector('#dlpw-error');
+  card.querySelector('#dlpw-save').onclick = async ()=>{
+    const a = newInp.value, b = confirmInp.value;
+    if(!a){ errBox.textContent = 'Enter a password.'; return; }
+    if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
+    if(a!==b){ errBox.textContent = 'Passwords do not match.'; return; }
+    state.dayLockPasswordHash = await sha256Hex(a);
+    dayLockPasswordFormOpen = false;
+    await saveState();
+    render();
+    showAlert('Day-lock password saved. Unlocking a finalized day will now ask for it.');
+  };
+  card.querySelector('#dlpw-cancel').onclick = ()=>{ dayLockPasswordFormOpen = false; render(); };
+  return card;
+}
+
+/* Full-screen password prompt shown instead of the app while locked. */
+function renderLockScreen(){
+  const wrap = el(`
+    <div style="max-width:420px; margin:80px auto 0;">
+      <div class="card">
+        <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
+        <h1 style="margin-bottom:14px;">&#128274; Locked</h1>
+        <p class="subnote">Enter the password to open the Daily Cash &amp; Bank Ledger.</p>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="unlock-pw" autocomplete="current-password">
+        </div>
+        <div id="unlock-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;">${escapeHtml(lockError)}</div>
+        <button type="button" id="unlock-btn">Unlock</button>
+        <div class="divider"></div>
+        <p class="subnote" style="margin-bottom:6px;">Forgotten the password? There's no reset here &mdash; the only way back in is a backup file exported earlier.</p>
+        <button class="secondary small" type="button" id="lock-import-backup">Import a backup file instead</button>
+        <input type="file" id="lock-import-file-input" accept="application/json,.json" style="display:none;">
+      </div>
+    </div>
+  `);
+  const pwInp = wrap.querySelector('#unlock-pw');
+  const doUnlock = async ()=>{
+    const hash = await sha256Hex(pwInp.value);
+    if(hash === state.lockPasswordHash){
+      locked = false;
+      lockError = '';
+      render();
+    } else {
+      lockError = 'Incorrect password.';
+      render();
+    }
+  };
+  wrap.querySelector('#unlock-btn').onclick = doUnlock;
+  pwInp.onkeydown = (e)=>{ if(e.key==='Enter') doUnlock(); };
+  const importFileInput = wrap.querySelector('#lock-import-file-input');
+  wrap.querySelector('#lock-import-backup').onclick = ()=>importFileInput.click();
+  importFileInput.onchange = ()=>{
+    const file = importFileInput.files[0];
+    if(file) importBackupJson(file);
+    importFileInput.value = '';
+  };
+  setTimeout(()=>pwInp.focus(), 0);
+  return wrap;
+}
+
+function renderSetup(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">Setup</span> Month &amp; bank accounts</h3>
+      <p class="subnote">Done once at the start of each month. Opening balances should match last month's closing figures.</p>
+      <div class="row">
+        <div class="field">
+          <label>Month</label>
+          <select id="set-month">
+            <option value="">Select month</option>
+            ${MONTHS.map(m=>`<option value="${m}" ${state.month===m?'selected':''}>${m}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="set-year" placeholder="2026" value="${state.year||''}">
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="setup-banks">
+        <label>Bank accounts</label>
+        <div id="bank-rows"></div>
+        <button class="secondary small" data-action="add-bank">+ Add bank account</button>
+      </div>
+      <div class="divider"></div>
+      <button data-action="finish-setup">Start recording &rarr;</button>
+    </div>
+  `);
+  const bankRows = card.querySelector('#bank-rows');
+  function drawBankRows(){
+    bankRows.innerHTML='';
+    if(state.banks.length===0){
+      bankRows.appendChild(el(`<p class="empty">No bank accounts yet &mdash; add at least one (e.g. IBBPLC, TBL).</p>`));
+    }
+    state.banks.forEach((b,i)=>{
+      const row = el(`
+        <div class="bank-row">
+          <div class="field" style="flex:2;margin-bottom:0;"><label>Bank name</label><input type="text" value="${escapeHtml(b.name)}" placeholder="e.g. IBBPLC"></div>
+          <div class="field" style="flex:1;margin-bottom:0;"><label>Opening balance</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(b.opening)}"></div>
+          <button class="danger small" type="button" title="Remove bank">&times;</button>
+        </div>
+      `);
+      const nameInp = row.querySelector('input[type=text]');
+      const openInp = row.querySelector('.amt-input');
+      nameInp.oninput = ()=>{ b.name = nameInp.value; saveState(); };
+      wireAmountInput(openInp, (num)=>{ b.opening = num; saveState(); });
+      row.querySelector('button').onclick = ()=>{ state.banks.splice(i,1); drawBankRows(); saveState(); };
+      bankRows.appendChild(row);
+    });
+  }
+  drawBankRows();
+  card.querySelector('#set-month').onchange = (e)=>{ state.month = e.target.value; saveState(); };
+  card.querySelector('#set-year').oninput = (e)=>{ state.year = e.target.value; saveState(); };
+  card._drawBankRows = drawBankRows;
+  return card;
+}
+
+function renderDayTabs(){
+  const wrap = el(`<div></div>`);
+  const tabs = el(`<div class="day-tabs"></div>`);
+  state.days.forEach(d=>{
+    tabs.appendChild(el(`<div class="day-tab ${d.id===selectedDayId?'active':''}" data-action="select-day" data-day="${d.id}">${dayLabel(d.date)}</div>`));
+  });
+  tabs.appendChild(el(`<button class="secondary small" style="flex:none;" data-action="add-day">+ Add day</button>`));
+  wrap.appendChild(tabs);
+  return wrap;
+}
+
+function refreshComputedOnly(){
+  const computed = computeAll();
+  const day = findDay(selectedDayId);
+  if(!day) return;
+  const c = computed[day.id];
+  setText('c-openingCash', money(c.openingCash));
+  setText('c-cashCollected', money(c.cashCollected));
+  setText('c-totalAmountCash', money(c.totalAmountCash));
+  setText('c-totalCashDisbursed', money(c.totalCashDisbursed));
+  setText('c-closingAmount', money(c.closingAmount));
+  setText('c-iouTotal', money(c.iouTotal));
+  setText('c-cashInHand', money(c.cashInHand));
+  setText('c-grandTotal', money(c.grandTotal));
+  state.banks.forEach(b=>{
+    const bc = c.banks[b.id]; if(!bc) return;
+    setText('bc-opening-'+b.id, money(bc.opening));
+    setText('bc-totalIn-'+b.id, money(bc.totalIn));
+    setText('bc-totalOut-'+b.id, money(bc.totalOut));
+    setText('bc-closing-'+b.id, money(bc.closing));
+  });
+  COA.forEach(cat=>{ setText('coa-cat-total-'+cat.key, money(c.coaTotals[cat.key]||0)); });
+  saveState();
+}
+function setText(id, text){
+  const e=document.getElementById(id);
+  if(!e) return;
+  const changed = e.textContent !== text;
+  e.textContent = text;
+  if(changed){
+    e.classList.remove('value-pop');
+    void e.offsetWidth; // restart the animation
+    e.classList.add('value-pop');
+  }
+}
+
+function renderDayPanel(dayId, computed){
+  const day = findDay(dayId);
+  const c = computed[dayId];
+  const idx = state.days.findIndex(d=>d.id===dayId);
+  const wrap = el(`<div class="day-panel${day.locked?' locked':''}"></div>`);
+
+  /* --- Period lock banner --- */
+  const lockBar = el(`
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;${day.locked?'border-left-color:var(--danger);':''}">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:15px;">${day.locked?'&#128274;':'&#128275;'}</span>
+        <span style="font-size:13px;color:var(--ink-soft);">${day.locked ? ('This day is locked - entries can\'t be edited until it\'s unlocked'+((state.dayLockPasswordHash||state.lockPasswordHash)?' with the password':'')+'.') : 'Once a day is finalized, lock it to prevent accidental edits.'}</span>
+      </div>
+      <button class="${day.locked?'danger':'secondary'} small" type="button" data-action="${day.locked?'unlock-day':'lock-day'}" data-day="${day.id}">${day.locked?'Unlock this day':'Lock this day'}</button>
+    </div>
+  `);
+  wrap.appendChild(lockBar);
+
+  /* --- 01 Cash received --- */
+  const cashCard = el(`
+    <div class="card">
+      <h3><span class="num">01</span> Cash received &mdash; ${dayLabel(day.date)}</h3>
+      <div class="row">
+        <div class="field">
+          <label>Date</label>
+          <input type="date" id="day-date" value="${day.date}">
+        </div>
+        ${idx===0 ? `
+        <div class="field">
+          <label>Opening cash balance (manual &mdash; first day only)</label>
+          <input type="text" inputmode="decimal" id="opening-cash-manual" value="${formatAsianAmount(day.openingCashManual)}">
+        </div>` : `
+        <div class="field">
+          <label>Beginning balance cash <span class="tag">auto</span></label>
+          <div class="computed"><span class="lbl">Carried from previous day's Closing amount</span><span id="c-openingCash">${money(c.openingCash)}</span></div>
+        </div>`}
+      </div>
+      ${idx===0 ? '' : `<p class="subnote" style="margin:4px 0 12px;">Tomorrow's opening cash comes from today's <strong>Closing amount</strong>, before IOUs are deducted &mdash; IOUs only affect today's own Cash In Hand.</p>`}
+      <div class="field">
+        <label>Service revenue collected</label>
+        <input type="text" inputmode="decimal" id="service-revenue" value="${formatAsianAmount(day.serviceRevenue)}">
+      </div>
+
+      <label style="margin-top:6px;">Cash withdrawn from a bank (adds to cash, drains that bank) <span class="tag">optional</span></label>
+      <div id="withdraw-list"></div>
+      <button class="secondary small" data-action="add-withdraw" data-day="${day.id}">+ Add withdrawal</button>
+
+      <div class="computed" style="margin-top:12px;"><span class="lbl">Total cash collected</span><span id="c-cashCollected">${money(c.cashCollected)}</span></div>
+      <div class="computed total"><span class="lbl">Total amount cash</span><span id="c-totalAmountCash">${money(c.totalAmountCash)}</span></div>
+    </div>
+  `);
+  if(idx===0){
+    wireAmountInput(cashCard.querySelector('#opening-cash-manual'), (num)=>{ day.openingCashManual = num; refreshComputedOnly(); });
+  }
+  cashCard.querySelector('#day-date').oninput = (e)=>{ day.date = e.target.value; refreshComputedOnly(); render(); };
+  wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ day.serviceRevenue = num; refreshComputedOnly(); });
+  drawTransferList(cashCard.querySelector('#withdraw-list'), day, 'withdrawals', 'No withdrawals today.');
+  if(day.locked) cashCard.classList.add('locked-day');
+  wrap.appendChild(cashCard);
+
+  /* --- 02 CoA disbursements --- */
+  const coaCard = el(`
+    <div class="card">
+      <h3><span class="num">02</span> Cash disbursed &mdash; by Chart of Accounts</h3>
+      <p class="subnote">Every voucher is classified into one CoA category first. The voucher code (short form + running number + month/year, e.g. Trans7/7/26) is generated automatically the moment you add a line.</p>
+      <button class="secondary small" type="button" id="toggle-voucher-numbering">${voucherCounterSettingsOpen?'Hide':'Set'} starting voucher numbers</button>
+      <div id="voucher-numbering-settings" style="${voucherCounterSettingsOpen?'':'display:none;'}margin-top:12px;"></div>
+      <div class="divider"></div>
+    </div>
+  `);
+  function drawVoucherNumberingSettings(){
+    const box = coaCard.querySelector('#voucher-numbering-settings');
+    box.innerHTML = '';
+    box.appendChild(el(`<p class="subnote" style="margin:0 0 8px;">Set the next voucher number for a category &mdash; useful when switching over from vouchers already issued outside this tool (e.g. if Trans6/.. was the last one used, set Transport's next number to 7).</p>`));
+    const grid = el(`<div class="row" style="flex-wrap:wrap;"></div>`);
+    COA.forEach(cat=>{
+      const field = el(`
+        <div class="field" style="min-width:170px;flex:1;">
+          <label>Next ${cat.label} voucher # <span class="tag">${cat.short}</span></label>
+          <input type="number" min="1" value="${(state.voucherCounters[cat.key]||0)+1}">
+        </div>
+      `);
+      field.querySelector('input').oninput = (e)=>{
+        const n = parseInt(e.target.value, 10);
+        state.voucherCounters[cat.key] = (isNaN(n)||n<1) ? 0 : n-1;
+        saveState();
+      };
+      grid.appendChild(field);
+    });
+    box.appendChild(grid);
+  }
+  drawVoucherNumberingSettings();
+  coaCard.querySelector('#toggle-voucher-numbering').onclick = ()=>{
+    voucherCounterSettingsOpen = !voucherCounterSettingsOpen;
+    const box = coaCard.querySelector('#voucher-numbering-settings');
+    box.style.display = voucherCounterSettingsOpen ? '' : 'none';
+    coaCard.querySelector('#toggle-voucher-numbering').textContent = (voucherCounterSettingsOpen?'Hide':'Set')+' starting voucher numbers';
+  };
+  COA.forEach((cat, ci)=>{
+    const items = day.coa[cat.key];
+    const catTemplates = state.templates.filter(t=>t.catKey===cat.key);
+    const section = el(`
+      <div style="margin-bottom:14px;padding-bottom:12px;${ci<COA.length-1?'border-bottom:1px solid var(--line-soft);':''}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <strong style="font-size:13.5px;">${String(ci+1).padStart(2,'0')} &middot; ${cat.label} <span class="tag">${cat.short}</span></strong>
+          <span class="mono" style="font-size:12.5px;color:var(--ink-soft);">Category total: <span id="coa-cat-total-${cat.key}">${money(c.coaTotals[cat.key]||0)}</span></span>
+        </div>
+        <div class="coa-desc">${cat.desc}</div>
+        <div id="coa-list-${cat.key}"></div>
+        <button class="secondary small" data-action="add-coa" data-day="${day.id}" data-cat="${cat.key}">+ Add ${cat.label} voucher</button>
+        ${catTemplates.map(tpl=>`<button class="secondary small" type="button" data-action="add-coa-from-template" data-day="${day.id}" data-tpl="${tpl.id}" title="${escapeHtml(tpl.desc)}${tpl.amount?' - '+money(tpl.amount):''}">&#128203; ${escapeHtml(tpl.desc)}</button>`).join('')}
+      </div>
+    `);
+    drawCoaList(section.querySelector('#coa-list-'+cat.key), day, cat.key, items);
+    coaCard.appendChild(section);
+  });
+  if(day.locked) coaCard.classList.add('locked-day');
+  wrap.appendChild(coaCard);
+
+  /* --- 03 Deposits + IOU --- */
+  const depIouCard = el(`
+    <div class="card">
+      <h3><span class="num">03</span> Deposits to bank &amp; IOUs</h3>
+      <label>Cash deposited into a bank (drains cash, adds to that bank) <span class="tag">optional</span></label>
+      <div id="deposit-list"></div>
+      <button class="secondary small" data-action="add-deposit" data-day="${day.id}">+ Add deposit</button>
+
+      <div class="divider"></div>
+
+      <label>IOU / not-yet-cleared cash (subtracted from today's closing cash)</label>
+      <p class="subnote" style="margin-top:-4px;">An IOU line keeps carrying forward to every following day automatically, until you remove it &mdash; removing it here only stops it going forward, it stays on the earlier days it already appeared on.</p>
+      <div id="iou-list"></div>
+      <button class="secondary small" data-action="add-iou" data-day="${day.id}">+ Add IOU line</button>
+
+      <div class="computed" style="margin-top:12px;"><span class="lbl">Total cash disbursed (CoA + deposits)</span><span id="c-totalCashDisbursed">${money(c.totalCashDisbursed)}</span></div>
+      <div class="computed"><span class="lbl">Closing amount</span><span id="c-closingAmount">${money(c.closingAmount)}</span></div>
+      <div class="computed"><span class="lbl">Total IOU</span><span id="c-iouTotal">${money(c.iouTotal)}</span></div>
+      <div class="computed total"><span class="lbl">Cash in hand</span><span id="c-cashInHand">${money(c.cashInHand)}</span></div>
+    </div>
+  `);
+  drawTransferList(depIouCard.querySelector('#deposit-list'), day, 'deposits', 'No deposits today.');
+  drawIouList(depIouCard.querySelector('#iou-list'), day);
+  if(day.locked) depIouCard.classList.add('locked-day');
+  wrap.appendChild(depIouCard);
+
+  /* --- 04+ Bank accounts --- */
+  state.banks.forEach((b, bi)=>{
+    const bd = ensureBankDaily(day, b.id);
+    const bc = c.banks[b.id];
+    const bankCard = el(`
+      <div class="card">
+        <h3><span class="num">0${4+bi}</span> Bank &mdash; ${escapeHtml(b.name)}</h3>
+        <div class="computed"><span class="lbl">Beginning balance <span class="tag">auto</span></span><span id="bc-opening-${b.id}">${money(bc.opening)}</span></div>
+        <div class="row" style="margin-top:10px;">
+          <div class="field">
+            <label>Other deposit / SSL Commerz</label>
+            <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.sslDeposit)}" data-field="sslDeposit" data-bank="${b.id}">
+          </div>
+          <div class="field">
+            <label>Bank fees</label>
+            <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.fees)}" data-field="fees" data-bank="${b.id}">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Salary payment &mdash; by account</label>
+            <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.salaryAccount)}" data-field="salaryAccount" data-bank="${b.id}">
+          </div>
+          <div class="field">
+            <label>Salary payment &mdash; by cash</label>
+            <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.salaryCash)}" data-field="salaryCash" data-bank="${b.id}">
+          </div>
+        </div>
+        <p class="subnote">Both salary lines affect only this bank's balance &mdash; they do not touch today's cash section.</p>
+        <div class="divider"></div>
+        <label>Bank to Bank Transfer <span class="tag">optional</span></label>
+        <p class="subnote" style="margin-top:-4px;">One entry updates both banks: it's deducted (as Cash Disbursed) from the "From" bank and added, right after Beginning Balance, to the "To" bank.</p>
+        <div id="bank-xfer-list-${b.id}"></div>
+        ${state.banks.length>=2 ? `<button class="secondary small" type="button" data-action="add-bank-transfer" data-day="${day.id}">+ Add transfer</button>` : `<p class="empty">Add a second bank account to enable transfers.</p>`}
+        <div class="divider"></div>
+        <div class="computed"><span class="lbl">Total in (opening + deposits + transfers in)</span><span id="bc-totalIn-${b.id}">${money(bc.totalIn)}</span></div>
+        <div class="computed"><span class="lbl">Total out (fees + salary + transfers out)</span><span id="bc-totalOut-${b.id}">${money(bc.totalOut)}</span></div>
+        <div class="computed total"><span class="lbl">Closing balance &mdash; ${escapeHtml(b.name)}</span><span id="bc-closing-${b.id}">${money(bc.closing)}</span></div>
+        <div class="divider"></div>
+        <label>Bank Reconciliation <span class="tag">optional</span></label>
+        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.</p>
+        <div class="row">
+          <div class="field">
+            <label>Bank statement balance</label>
+            <input type="text" inputmode="decimal" class="amt-input" id="recon-bal-${b.id}" value="${bd.reconciledBalance!=null?formatAsianAmount(bd.reconciledBalance):''}" placeholder="Not checked yet">
+          </div>
+          <div class="field">
+            <label>Note <span class="tag">optional</span></label>
+            <input type="text" id="recon-note-${b.id}" value="${escapeHtml(bd.reconcileNote)}" placeholder="e.g. matches statement dated...">
+          </div>
+        </div>
+        ${bd.reconciledBalance!=null ? (()=>{
+          const diff = Math.round((bc.closing - bd.reconciledBalance)*100)/100;
+          return diff===0
+            ? `<div class="computed" style="background:#DDEEE3;border-style:solid;border-color:var(--primary);"><span class="lbl">&#9989; Reconciled &mdash; matches the bank statement</span><span>${money(bc.closing)}</span></div>`
+            : `<div class="computed" style="background:var(--danger-soft);border-style:solid;border-color:var(--danger);"><span class="lbl">&#9888; Difference (ledger &minus; statement)</span><span style="color:var(--danger);font-weight:700;">${money(diff)}</span></div>`;
+        })() : ''}
+      </div>
+    `);
+    bankCard.querySelectorAll('input[data-field]').forEach(inp=>{
+      wireAmountInput(inp, (num)=>{ bd[inp.dataset.field] = num; refreshComputedOnly(); });
+    });
+    const reconInput = bankCard.querySelector('#recon-bal-'+b.id);
+    wireAmountInput(reconInput, (num)=>{ bd.reconciledBalance = (reconInput.value.trim()==='') ? null : num; refreshComputedOnly(); });
+    reconInput.addEventListener('blur', ()=>{ saveState(); render(); });
+    bankCard.querySelector('#recon-note-'+b.id).oninput = (e)=>{ bd.reconcileNote = e.target.value; saveState(); };
+    drawBankTransferList(bankCard.querySelector('#bank-xfer-list-'+b.id), day);
+    if(day.locked) bankCard.classList.add('locked-day');
+    wrap.appendChild(bankCard);
+  });
+
+  /* --- Day summary --- */
+  const bankBoxes = state.banks.map(b=>{
+    const bc = c.banks[b.id];
+    return `<div class="summary-box"><div class="lbl">${escapeHtml(b.name)} closing</div><div class="val">${money(bc.closing)}</div></div>`;
+  }).join('');
+  const summary = el(`
+    <div class="card">
+      <h3>Day summary</h3>
+      <div class="summary-grid">
+        <div class="summary-box"><div class="lbl">Cash in hand</div><div class="val">${money(c.cashInHand)}</div></div>
+        ${bankBoxes}
+        <div class="summary-box grand"><div class="lbl">Grand total (Closing amount + banks)</div><div class="val" id="c-grandTotal">${money(c.grandTotal)}</div></div>
+      </div>
+      <div class="divider"></div>
+      <button class="danger small" data-action="delete-day" data-day="${day.id}" ${day.locked?'disabled title="Unlock this day first"':''}>Delete this day</button>
+    </div>
+  `);
+  wrap.appendChild(summary);
+
+  return wrap;
+}
+
+/* --- Advanced Search: find any Cash Disbursed voucher across every
+   recorded day (current month + archived months), by category, year,
+   month, a specific date range, description/voucher text, and amount. --- */
+/* --- Dashboard: at-a-glance overview - latest Cash in Hand, bank
+   balances, this month's spend by category, and outstanding IOUs. --- */
+function renderDashboardCard(){
+  const computed = computeAll();
+  const latestDay = state.days.length ? state.days[state.days.length-1] : null;
+  const latestComputed = latestDay ? computed[latestDay.id] : null;
+
+  const catTotals = {};
+  COA.forEach(c=>{ catTotals[c.key] = 0; });
+  let monthRevenue = 0;
+  state.days.forEach(day=>{
+    COA.forEach(cat=>{
+      (day.coa[cat.key]||[]).forEach(item=>{ catTotals[cat.key] += Number(item.amount)||0; });
+    });
+    monthRevenue += Number(day.serviceRevenue)||0;
+  });
+  const monthTotal = Object.values(catTotals).reduce((s,v)=>s+v,0);
+  const topCats = COA.map(c=>({cat:c, total:catTotals[c.key]})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+
+  const today = new Date().toISOString().slice(0,10);
+  const outstandingIous = (state.iouRegistry||[]).filter(i=> i.toDate===null || i.toDate>=today);
+  const outstandingTotal = outstandingIous.reduce((s,i)=>s+(Number(i.amount)||0),0);
+
+  const bankBoxes = latestComputed ? state.banks.map(b=>{
+    const bc = latestComputed.banks[b.id];
+    return `<div class="summary-box"><div class="lbl">${escapeHtml(b.name)}</div><div class="val">${money(bc.closing)}</div></div>`;
+  }).join('') : '';
+
+  const trendDays = state.days.slice(-14);
+  const trendValues = trendDays.map(day=>{
+    let t = 0;
+    COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(item=>{ t += Number(item.amount)||0; }); });
+    return t;
+  });
+  const sparkline = trendValues.length>1 ? buildSparklineSvg(trendValues, trendDays.map(d=>dayLabel(d.date))) : '';
+
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#127968;</span> Dashboard</h3>
+      <p class="subnote">${latestDay ? `As of ${dayLabelFull(latestDay.date)} ${state.year}` : 'No days recorded yet this month'}</p>
+      <div class="summary-grid">
+        <div class="summary-box grand"><div class="lbl">Cash in hand</div><div class="val">${latestComputed?money(latestComputed.cashInHand):'&mdash;'}</div></div>
+        ${bankBoxes}
+        <div class="summary-box" style="border-color:var(--primary);"><div class="lbl">This month's revenue collected</div><div class="val" style="color:var(--primary-dark);">${money(monthRevenue)}</div></div>
+        <div class="summary-box"><div class="lbl">This month's total expenditure</div><div class="val">${money(monthTotal)}</div></div>
+        <div class="summary-box" style="${outstandingTotal>0?'border-color:var(--danger);':''}"><div class="lbl">Outstanding IOUs</div><div class="val" style="${outstandingTotal>0?'color:var(--danger);':''}">${money(outstandingTotal)}</div></div>
+      </div>
+      ${sparkline ? `
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Daily spend trend <span style="font-weight:400;color:var(--ink-soft);">(last ${trendValues.length} recorded days)</span></h3>
+      ${sparkline}
+      ` : ''}
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">This month by category</h3>
+      ${topCats.length===0 ? '<p class="empty">No expenses recorded yet this month.</p>' : topCats.map(x=>`
+        <div class="computed"><span class="lbl">${escapeHtml(x.cat.label)}</span><span>${money(x.total)}</span></div>
+      `).join('')}
+      ${outstandingIous.length>0 ? `
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Outstanding IOUs</h3>
+      ${outstandingIous.map(i=>`<div class="computed"><span class="lbl">${escapeHtml(i.desc||'IOU')} &middot; since ${dayLabel(i.fromDate)}</span><span>${money(i.amount)}</span></div>`).join('')}
+      ` : ''}
+    </div>
+  `);
+  return card;
+}
+
+/* Builds a compact inline SVG line-chart of daily spend for the Dashboard.
+   Deliberately simple (no library) - just enough to show a trend at a
+   glance, with the last point picked out and a light fill under the line. */
+function buildSparklineSvg(values, labels){
+  const w = 100, h = 34, pad = 3;
+  const max = Math.max(...values, 1);
+  const min = 0;
+  const stepX = values.length>1 ? (w-2*pad)/(values.length-1) : 0;
+  const yFor = (v)=> h-pad - ((v-min)/(max-min||1))*(h-2*pad);
+  const pts = values.map((v,i)=> [pad+i*stepX, yFor(v)]);
+  const line = pts.map(p=>p.join(',')).join(' ');
+  const fillPath = `M${pad},${h-pad} L` + line.split(' ').join(' L') + ` L${pad+(values.length-1)*stepX},${h-pad} Z`;
+  const last = pts[pts.length-1];
+  const titleParts = values.map((v,i)=> `${labels[i]}: ${formatAsianAmount(v)}`);
+  return `
+    <div style="background:var(--card-alt,#F7F8F4);border-radius:8px;padding:8px 10px;">
+      <svg viewBox="0 0 ${w} ${h}" width="100%" height="52" preserveAspectRatio="none" style="display:block;overflow:visible;">
+        <title>${escapeHtml(titleParts.join(' | '))}</title>
+        <path d="${fillPath}" fill="var(--primary)" opacity="0.08"></path>
+        <polyline points="${line}" fill="none" stroke="var(--primary)" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+        <circle cx="${last[0]}" cy="${last[1]}" r="1.8" fill="var(--primary-dark)"></circle>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-soft);margin-top:2px;">
+        <span>${escapeHtml(labels[0])}</span>
+        <span>${escapeHtml(labels[labels.length-1])}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderSearchCard(){
+  const years = voucherYearsPresent();
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128269;</span> Advanced Search</h3>
+      <p class="subnote">Search every Cash Disbursed voucher ever recorded (this month and archived months) by category, year/month, a date range, description or voucher text, and amount.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:160px;">
+          <label>Category</label>
+          <select id="srch-cat">
+            <option value="">All categories</option>
+            ${COA.map(c=>`<option value="${c.key}" ${searchFilters.catKey===c.key?'selected':''}>${c.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="min-width:120px;">
+          <label>Year</label>
+          <select id="srch-year">
+            <option value="">All years</option>
+            ${years.map(y=>`<option value="${y}" ${searchFilters.year===y?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="min-width:140px;">
+          <label>Month</label>
+          <select id="srch-month">
+            <option value="">All months</option>
+            ${MONTHS.map((m,i)=>{const v=String(i+1).padStart(2,'0'); return `<option value="${v}" ${searchFilters.month===v?'selected':''}>${m}</option>`;}).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field"><label>From date <span class="tag">optional</span></label><input type="date" id="srch-from" value="${searchFilters.fromDate}"></div>
+        <div class="field"><label>To date <span class="tag">optional</span></label><input type="date" id="srch-to" value="${searchFilters.toDate}"></div>
+        <div class="field"><label>Min amount <span class="tag">optional</span></label><input type="text" inputmode="decimal" class="amt-input" id="srch-min" value="${searchFilters.minAmt!==''?formatAsianAmount(searchFilters.minAmt):''}"></div>
+        <div class="field"><label>Max amount <span class="tag">optional</span></label><input type="text" inputmode="decimal" class="amt-input" id="srch-max" value="${searchFilters.maxAmt!==''?formatAsianAmount(searchFilters.maxAmt):''}"></div>
+      </div>
+      <div class="field">
+        <label>Description or voucher text</label>
+        <input type="text" id="srch-text" placeholder="e.g. warranty, pure it kit, misc18/6/26" value="${escapeHtml(searchFilters.text)}">
+      </div>
+      <div id="srch-results"></div>
+    </div>
+  `);
+  function drawResults(){
+    const box = card.querySelector('#srch-results');
+    const results = filteredVouchers(searchFilters);
+    const total = results.reduce((s,v)=>s+v.amount,0);
+    box.innerHTML = '';
+    box.appendChild(el(`<div class="computed total"><span class="lbl">${results.length} voucher${results.length===1?'':'s'} found</span><span>${money(total)}</span></div>`));
+    if(results.length===0){
+      box.appendChild(el(`<p class="empty">No matching vouchers.</p>`));
+      return;
+    }
+    const table = el(`
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+            <th style="padding:6px 8px;">Date</th>
+            <th style="padding:6px 8px;">Category</th>
+            <th style="padding:6px 8px;">Voucher</th>
+            <th style="padding:6px 8px;">Description</th>
+            <th style="padding:6px 8px; text-align:right;">Amount</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = table.querySelector('tbody');
+    results.slice().reverse().forEach(v=>{
+      tbody.appendChild(el(`
+        <tr style="border-bottom:1px solid var(--line-soft);">
+          <td style="padding:6px 8px; white-space:nowrap;" class="mono">${dayLabelFull(v.date)} ${v.date.slice(0,4)}</td>
+          <td style="padding:6px 8px;">${escapeHtml(v.cat.label)}</td>
+          <td style="padding:6px 8px;" class="mono">${highlightMatches(v.voucher, searchFilters.text)}</td>
+          <td style="padding:6px 8px;">${highlightMatches(v.desc, searchFilters.text)}</td>
+          <td style="padding:6px 8px; text-align:right;" class="mono">${money(v.amount)}</td>
+        </tr>
+      `));
+    });
+    box.appendChild(table);
+  }
+  drawResults();
+  card.querySelector('#srch-cat').onchange = (e)=>{ searchFilters.catKey = e.target.value; drawResults(); };
+  card.querySelector('#srch-year').onchange = (e)=>{ searchFilters.year = e.target.value; drawResults(); };
+  card.querySelector('#srch-month').onchange = (e)=>{ searchFilters.month = e.target.value; drawResults(); };
+  card.querySelector('#srch-from').onchange = (e)=>{ searchFilters.fromDate = e.target.value; drawResults(); };
+  card.querySelector('#srch-to').onchange = (e)=>{ searchFilters.toDate = e.target.value; drawResults(); };
+  card.querySelector('#srch-text').oninput = (e)=>{ searchFilters.text = e.target.value; drawResults(); };
+  wireAmountInput(card.querySelector('#srch-min'), (num)=>{ searchFilters.minAmt = num||''; drawResults(); });
+  wireAmountInput(card.querySelector('#srch-max'), (num)=>{ searchFilters.maxAmt = num||''; drawResults(); });
+  return card;
+}
+
+/* --- Category-wise Summary: pick a category and see totals by month,
+   by year, or for a custom date range (e.g. 1st-15th). --- */
+function renderCategorySummaryCard(){
+  if(!summaryFilters.catKey) summaryFilters.catKey = COA[0].key;
+  const years = voucherYearsPresent();
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128202;</span> Category-wise Summary</h3>
+      <p class="subnote">Pick a category to see how much was spent, grouped by month or year, or totalled over any custom date range.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:180px;">
+          <label>Category</label>
+          <select id="sum-cat">
+            ${COA.map(c=>`<option value="${c.key}" ${summaryFilters.catKey===c.key?'selected':''}>${c.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="min-width:220px;">
+          <label>View</label>
+          <select id="sum-mode">
+            <option value="month" ${summaryFilters.mode==='month'?'selected':''}>By month</option>
+            <option value="year" ${summaryFilters.mode==='year'?'selected':''}>By year</option>
+            <option value="range" ${summaryFilters.mode==='range'?'selected':''}>Custom date range</option>
+          </select>
+        </div>
+        ${summaryFilters.mode==='month' ? `
+        <div class="field" style="min-width:120px;">
+          <label>Year <span class="tag">optional</span></label>
+          <select id="sum-year">
+            <option value="">All years</option>
+            ${years.map(y=>`<option value="${y}" ${summaryFilters.year===y?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        ${summaryFilters.mode==='range' ? `
+        <div class="field"><label>From date</label><input type="date" id="sum-from" value="${summaryFilters.fromDate}"></div>
+        <div class="field"><label>To date</label><input type="date" id="sum-to" value="${summaryFilters.toDate}"></div>
+        ` : ''}
+      </div>
+      <div id="sum-results"></div>
+    </div>
+  `);
+  function drawResults(){
+    const box = card.querySelector('#sum-results');
+    box.innerHTML = '';
+    const catFilter = { catKey: summaryFilters.catKey };
+    if(summaryFilters.mode==='month'){
+      const f = Object.assign({}, catFilter, summaryFilters.year ? {year:summaryFilters.year} : {});
+      const rows = groupSum(filteredVouchers(f), v=>v.date.slice(0,7), k=>{
+        const [y,m] = k.split('-');
+        return `${MONTHS[parseInt(m,10)-1]} ${y}`;
+      });
+      renderSummaryTable(box, rows, 'Month');
+    } else if(summaryFilters.mode==='year'){
+      const rows = groupSum(filteredVouchers(catFilter), v=>v.date.slice(0,4));
+      renderSummaryTable(box, rows, 'Year');
+    } else {
+      const f = Object.assign({}, catFilter, {fromDate:summaryFilters.fromDate, toDate:summaryFilters.toDate});
+      const results = filteredVouchers(f);
+      const total = results.reduce((s,v)=>s+v.amount,0);
+      box.appendChild(el(`<div class="computed total"><span class="lbl">${escapeHtml(COA.find(c=>c.key===summaryFilters.catKey).label)} total for this range</span><span>${money(total)}</span></div>`));
+      if(results.length===0){
+        box.appendChild(el(`<p class="empty">No vouchers in this range.</p>`));
+      } else {
+        box.appendChild(el(`<p class="subnote" style="margin-top:8px;">${results.length} voucher${results.length===1?'':'s'}:</p>`));
+        results.forEach(v=>{
+          box.appendChild(el(`<div class="computed"><span class="lbl">${dayLabelFull(v.date)} ${v.date.slice(0,4)} &middot; ${escapeHtml(v.voucher)}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span><span>${money(v.amount)}</span></div>`));
+        });
+      }
+    }
+  }
+  function renderSummaryTable(box, rows, groupLabel){
+    if(rows.length===0){ box.appendChild(el(`<p class="empty">No data for this category yet.</p>`)); return; }
+    const grand = rows.reduce((s,r)=>s+r.total,0);
+    const table = el(`
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+            <th style="padding:6px 8px;">${groupLabel}</th>
+            <th style="padding:6px 8px; text-align:right;">Total</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = table.querySelector('tbody');
+    rows.slice().reverse().forEach(r=>{
+      tbody.appendChild(el(`<tr style="border-bottom:1px solid var(--line-soft);"><td style="padding:6px 8px;">${escapeHtml(r.label)}</td><td style="padding:6px 8px; text-align:right;" class="mono">${money(r.total)}</td></tr>`));
+    });
+    box.appendChild(table);
+    box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">Grand total</span><span>${money(grand)}</span></div>`));
+  }
+  drawResults();
+  card.querySelector('#sum-cat').onchange = (e)=>{ summaryFilters.catKey = e.target.value; drawResults(); };
+  card.querySelector('#sum-mode').onchange = (e)=>{ summaryFilters.mode = e.target.value; render(); };
+  const yearSel = card.querySelector('#sum-year');
+  if(yearSel) yearSel.onchange = (e)=>{ summaryFilters.year = e.target.value; drawResults(); };
+  const fromInp = card.querySelector('#sum-from');
+  const toInp = card.querySelector('#sum-to');
+  if(fromInp) fromInp.onchange = (e)=>{ summaryFilters.fromDate = e.target.value; drawResults(); };
+  if(toInp) toInp.onchange = (e)=>{ summaryFilters.toDate = e.target.value; drawResults(); };
+  return card;
+}
+
+/* --- Recurring Entry Templates: save a category+description+amount combo
+   once, then add it as a new voucher with one click - handy for monthly
+   recurring costs like rent, internet, or a fixed salary top-up. --- */
+function renderTemplatesCard(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128203;</span> Recurring Entry Templates</h3>
+      <p class="subnote">Save a category + description + amount once. Each one then shows as a quick-add button under that category in the day panel below.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:150px;">
+          <label>Category</label>
+          <select id="tpl-cat">${COA.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}</select>
+        </div>
+        <div class="field" style="min-width:180px;">
+          <label>Description</label>
+          <input type="text" id="tpl-desc" placeholder="e.g. Monthly internet bill">
+        </div>
+        <div class="field" style="min-width:130px;">
+          <label>Amount <span class="tag">optional</span></label>
+          <input type="text" inputmode="decimal" class="amt-input" id="tpl-amt" value="">
+        </div>
+      </div>
+      <button type="button" id="tpl-add">+ Save template</button>
+      <div class="divider"></div>
+      <div id="tpl-list"></div>
+    </div>
+  `);
+  let tplAmt = 0;
+  wireAmountInput(card.querySelector('#tpl-amt'), (num)=>{ tplAmt = num; });
+  function drawList(){
+    const box = card.querySelector('#tpl-list');
+    box.innerHTML = '';
+    if(state.templates.length===0){ box.appendChild(el(`<p class="empty">No templates saved yet.</p>`)); return; }
+    state.templates.forEach(tpl=>{
+      const cat = COA.find(c=>c.key===tpl.catKey);
+      const row = el(`
+        <div class="line-item">
+          <div class="voucher-badge mono">${escapeHtml(cat?cat.short:tpl.catKey)}</div>
+          <div class="field desc" style="margin-bottom:0;"><label>Description</label><div class="mono" style="padding:8px 0;">${escapeHtml(tpl.desc)||'<span class=\"empty\">(blank)</span>'}</div></div>
+          <div class="field amt" style="margin-bottom:0;"><label>Amount</label><div class="mono" style="padding:8px 0;">${tpl.amount?money(tpl.amount):'<span class=\"empty\">(set each time)</span>'}</div></div>
+          <button class="danger small" type="button" data-action="remove-template" data-item="${tpl.id}" title="Remove template">&times;</button>
+        </div>
+      `);
+      box.appendChild(row);
+    });
+  }
+  drawList();
+  card.querySelector('#tpl-add').onclick = ()=>{
+    const catKey = card.querySelector('#tpl-cat').value;
+    const desc = card.querySelector('#tpl-desc').value.trim();
+    if(!desc){ showAlert('Give the template a description.'); return; }
+    state.templates.push({id:uid(), catKey, desc, amount:tplAmt});
+    saveState();
+    card.querySelector('#tpl-desc').value = '';
+    card.querySelector('#tpl-amt').value = '';
+    tplAmt = 0;
+    drawList();
+  };
+  return card;
+}
+
+/* --- Annual Summary Export card --- */
+function renderAnnualSummaryCard(){
+  let years = voucherYearsPresent();
+  if(years.length===0) years = [state.year];
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128197;</span> Annual Summary</h3>
+      <p class="subnote">A full year's expenses in one grid &mdash; every category down the side, every month across the top &mdash; across this month and everything archived.</p>
+      <div class="row">
+        <div class="field" style="max-width:160px;">
+          <label>Year</label>
+          <select id="ann-year">${years.map(y=>`<option value="${y}" ${y===state.year?'selected':''}>${y}</option>`).join('')}</select>
+        </div>
+      </div>
+      <button type="button" id="ann-download">Download Annual Summary (Excel)</button>
+    </div>
+  `);
+  let selectedYear = card.querySelector('#ann-year').value;
+  card.querySelector('#ann-year').onchange = (e)=>{ selectedYear = e.target.value; };
+  card.querySelector('#ann-download').onclick = ()=>{ exportAnnualSummary(selectedYear); };
+  return card;
+}
+
+function renderNotesheetCard(){
+  const sortedDates = state.days.map(d=>d.date).sort();
+  const minDate = sortedDates[0], maxDate = sortedDates[sortedDates.length-1];
+  if(!notesheetRange) notesheetRange = {start:minDate, end:maxDate};
+  if(notesheetRange.start < minDate) notesheetRange.start = minDate;
+  if(notesheetRange.end > maxDate) notesheetRange.end = maxDate;
+
+  const {cats, grandTotal} = collectNotesheetRange(notesheetRange.start, notesheetRange.end);
+
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#9776;</span> Notesheets &amp; Withdraw Summary</h3>
+      <p class="subnote">Pick a date range to generate one notesheet per Chart of Accounts category that had expenses (categories with none are skipped automatically), plus one consolidated Withdraw Summary &mdash; matching the existing notesheet format, voucher numbering and signature blocks.</p>
+      <div class="row">
+        <div class="field">
+          <label>From date</label>
+          <input type="date" id="ns-start" min="${minDate}" max="${maxDate}" value="${notesheetRange.start}">
+        </div>
+        <div class="field">
+          <label>To date</label>
+          <input type="date" id="ns-end" min="${minDate}" max="${maxDate}" value="${notesheetRange.end}">
+        </div>
+      </div>
+      <div id="ns-preview"></div>
+      <button class="secondary small" type="button" id="ns-toggle-settings" style="margin-top:6px;">${notesheetSettingsOpen?'Hide':'Show'} numbering &amp; signatory settings</button>
+      <div id="ns-settings" style="${notesheetSettingsOpen?'':'display:none;'}margin-top:12px;"></div>
+      <div class="computed total" style="margin-top:14px;"><span class="lbl">Grand total across all categories in range</span><span id="ns-grand-total">${money(grandTotal)}</span></div>
+      <button type="button" id="ns-generate" style="margin-top:12px;" ${cats.length===0?'disabled':''}>Generate Notesheets &amp; Summary (Excel)</button>
+    </div>
+  `);
+
+  function drawPreview(){
+    const {cats, grandTotal} = collectNotesheetRange(notesheetRange.start, notesheetRange.end);
+    const preview = card.querySelector('#ns-preview');
+    preview.innerHTML = '';
+    if(cats.length===0){
+      preview.appendChild(el(`<p class="empty">No expenses recorded in this date range yet.</p>`));
+    } else {
+      cats.forEach(c=>{
+        preview.appendChild(el(`
+          <div class="computed"><span class="lbl">${c.cat.label} &mdash; next notesheet #${(state.notesheetCounters[c.key]||0)+1} &middot; ${c.items.length} voucher${c.items.length===1?'':'s'} &middot; ${dayLabel(c.firstDate)}&ndash;${dayLabel(c.lastDate)}</span><span>${money(c.total)}</span></div>
+        `));
+      });
+    }
+    setText('ns-grand-total', money(grandTotal));
+    const genBtn = card.querySelector('#ns-generate');
+    if(genBtn) genBtn.disabled = cats.length===0;
+  }
+  drawPreview();
+
+  card.querySelector('#ns-start').onchange = (e)=>{ notesheetRange.start = e.target.value; drawPreview(); };
+  card.querySelector('#ns-end').onchange = (e)=>{ notesheetRange.end = e.target.value; drawPreview(); };
+
+  function drawSettings(){
+    const settings = card.querySelector('#ns-settings');
+    settings.innerHTML = '';
+    settings.appendChild(el(`<p class="subnote" style="margin:0 0 8px;">These numbers advance automatically each time you generate. Adjust them here only if a notesheet was already created outside this tool.</p>`));
+    const grid = el(`<div class="row" style="flex-wrap:wrap;"></div>`);
+    COA.forEach(cat=>{
+      const field = el(`
+        <div class="field" style="min-width:170px;flex:1;">
+          <label>Next ${cat.label} notesheet #</label>
+          <input type="number" value="${(state.notesheetCounters[cat.key]||0)+1}" data-ns-cat="${cat.key}">
+        </div>
+      `);
+      field.querySelector('input').oninput = (e)=>{ state.notesheetCounters[cat.key] = (parseFloat(e.target.value)||1)-1; saveState(); };
+      grid.appendChild(field);
+    });
+    settings.appendChild(grid);
+    settings.appendChild(el(`<div class="divider"></div>`));
+    const summaryRow = el(`
+      <div class="row">
+        <div class="field"><label>Withdraw Summary year code</label><input type="text" id="ns-sum-year" value="${state.summaryCounterYear}"></div>
+        <div class="field"><label>Next Withdraw Summary #</label><input type="number" id="ns-sum-num" value="${state.summaryCounterNum+1}"></div>
+      </div>
+    `);
+    summaryRow.querySelector('#ns-sum-year').oninput = (e)=>{ state.summaryCounterYear = e.target.value; saveState(); };
+    summaryRow.querySelector('#ns-sum-num').oninput = (e)=>{ state.summaryCounterNum = (parseFloat(e.target.value)||1)-1; saveState(); };
+    settings.appendChild(summaryRow);
+    settings.appendChild(el(`<div class="divider"></div>`));
+    const s = state.signatories;
+    const sigRow = el(`
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:200px;"><label>Accountant name</label><input type="text" id="ns-sig-acct" value="${escapeHtml(s.accountant)}"></div>
+        <div class="field" style="min-width:200px;"><label>Admin Manager name</label><input type="text" id="ns-sig-adm" value="${escapeHtml(s.adminManager)}"></div>
+        <div class="field" style="min-width:200px;"><label>Principal name</label><input type="text" id="ns-sig-prin" value="${escapeHtml(s.principal)}"></div>
+      </div>
+    `);
+    sigRow.querySelector('#ns-sig-acct').oninput = (e)=>{ s.accountant = e.target.value; saveState(); };
+    sigRow.querySelector('#ns-sig-adm').oninput = (e)=>{ s.adminManager = e.target.value; saveState(); };
+    sigRow.querySelector('#ns-sig-prin').oninput = (e)=>{ s.principal = e.target.value; saveState(); };
+    settings.appendChild(sigRow);
+  }
+  drawSettings();
+
+  card.querySelector('#ns-toggle-settings').onclick = ()=>{
+    notesheetSettingsOpen = !notesheetSettingsOpen;
+    card.querySelector('#ns-settings').style.display = notesheetSettingsOpen ? '' : 'none';
+    card.querySelector('#ns-toggle-settings').textContent = (notesheetSettingsOpen?'Hide':'Show')+' numbering & signatory settings';
+  };
+
+  card.querySelector('#ns-generate').onclick = ()=>{ exportNotesheets(notesheetRange.start, notesheetRange.end); };
+
+  return card;
+}
+
+function drawTransferList(container, day, field, emptyText){
+  const arr = day[field];
+  container.innerHTML = '';
+  if(arr.length===0){ container.appendChild(el(`<p class="empty">${emptyText}</p>`)); return; }
+  const suggestions = transferNoteSuggestions(field);
+  const datalistId = `note-suggest-${field}`;
+  container.appendChild(el(`<datalist id="${datalistId}">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
+  arr.forEach((item)=>{
+    const row = el(`
+      <div class="line-item">
+        <div class="field bank-sel" style="margin-bottom:0;"><label>Bank</label>
+          <select>${state.banks.map(b=>`<option value="${b.id}" ${b.id===item.bankId?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field desc" style="margin-bottom:0;"><label>Note</label><input type="text" class="note-input" list="${datalistId}" value="${escapeHtml(item.note)}" placeholder="optional"></div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="danger small" type="button" data-action="${field==='withdrawals'?'remove-withdraw':'remove-deposit'}" data-day="${day.id}" data-item="${item.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    const sel = row.querySelector('select');
+    const noteInp = row.querySelector('.note-input');
+    const amtInp = row.querySelector('.amt-input');
+    sel.onchange = ()=>{ item.bankId = sel.value; refreshComputedOnly(); };
+    noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
+    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    container.appendChild(row);
+  });
+}
+
+/* Renders the day's shared Bank-to-Bank Transfer list. The same list (and
+   the same underlying day.bankTransfers records) is drawn inside every
+   bank card, so one entry is instantly reflected in both banks' figures. */
+function drawBankTransferList(container, day){
+  const arr = day.bankTransfers || [];
+  container.innerHTML = '';
+  if(state.banks.length<2) return;
+  if(arr.length===0){ container.appendChild(el(`<p class="empty">No bank-to-bank transfers today.</p>`)); return; }
+  arr.forEach((item)=>{
+    const invalid = item.fromBankId===item.toBankId;
+    const rowWrap = el(`<div></div>`);
+    const row = el(`
+      <div class="line-item">
+        <div class="field bank-sel" style="margin-bottom:0;"><label>From</label>
+          <select data-role="from">${state.banks.map(b=>`<option value="${b.id}" ${b.id===item.fromBankId?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field bank-sel" style="margin-bottom:0;"><label>To</label>
+          <select data-role="to">${state.banks.map(b=>`<option value="${b.id}" ${b.id===item.toBankId?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="danger small" type="button" data-action="remove-bank-transfer" data-day="${day.id}" data-item="${item.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    const fromSel = row.querySelector('select[data-role="from"]');
+    const toSel = row.querySelector('select[data-role="to"]');
+    const amtInp = row.querySelector('.amt-input');
+    fromSel.onchange = ()=>{ item.fromBankId = fromSel.value; render(); };
+    toSel.onchange = ()=>{ item.toBankId = toSel.value; render(); };
+    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    rowWrap.appendChild(row);
+    if(invalid){ rowWrap.appendChild(el(`<p class="subnote" style="color:var(--danger);margin:-4px 0 8px;">"From" and "To" must be different banks &mdash; this entry is ignored in totals until fixed.</p>`)); }
+    container.appendChild(rowWrap);
+  });
+}
+
+/* Every description ever typed for a given CoA category, so the browser's
+   native autocomplete can suggest it again - e.g. type "b" in Transport
+   and "Bank conveyance bill" shows up if it's been used before. */
+function descriptionSuggestions(catKey){
+  const seen = new Set();
+  allVouchers().forEach(v=>{
+    if(v.catKey===catKey && v.desc && v.desc.trim()) seen.add(v.desc.trim());
+  });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+function iouDescSuggestions(){
+  const seen = new Set();
+  (state.iouRegistry||[]).forEach(i=>{ if(i.desc && i.desc.trim()) seen.add(i.desc.trim()); });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+function transferNoteSuggestions(field){
+  const seen = new Set();
+  allDaysEverywhere().forEach(day=>{
+    (day[field]||[]).forEach(item=>{ if(item.note && item.note.trim()) seen.add(item.note.trim()); });
+  });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+
+/* Adds a new blank voucher line to a category and returns it - shared by
+   the "+ Add voucher" button and Enter-key quick entry so numbering stays
+   consistent between both paths. */
+/* Draft -> Reviewed -> Approved review workflow for CoA vouchers. Purely
+   a personal checklist (this tool is single-user) - no sign-off identity
+   is attached, just a quick visual cue for what's been double-checked
+   before a day gets locked. */
+const STATUS_ORDER = ['draft','reviewed','approved'];
+const STATUS_LABELS = {draft:'Draft', reviewed:'Reviewed', approved:'Approved'};
+function statusLabel(s){ return STATUS_LABELS[s] || STATUS_LABELS.draft; }
+function nextStatus(s){
+  const i = STATUS_ORDER.indexOf(s);
+  return STATUS_ORDER[(i+1) % STATUS_ORDER.length] || 'draft';
+}
+
+function addCoaVoucher(day, catKey){
+  const cat = COA.find(c=>c.key===catKey);
+  state.voucherCounters[catKey] += 1;
+  const yearShort = String(state.year).slice(-2);
+  const monthNum = MONTHS.indexOf(state.month)+1;
+  const voucher = `${cat.short}${state.voucherCounters[catKey]}/${monthNum}/${yearShort}`;
+  const item = {id:uid(), voucher, desc:'', amount:0, status:'draft'};
+  day.coa[catKey].push(item);
+  return item;
+}
+
+function drawCoaList(container, day, catKey, arr){
+  container.innerHTML = '';
+  if(arr.length===0){ container.appendChild(el(`<p class="empty">No vouchers yet.</p>`)); return; }
+  const suggestions = descriptionSuggestions(catKey);
+  const datalistId = `desc-suggest-${catKey}`;
+  container.appendChild(el(`<datalist id="${datalistId}">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
+  arr.forEach((item)=>{
+    const row = el(`
+      <div class="line-item">
+        <div class="voucher-badge mono">${item.voucher}</div>
+        <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
+        <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?"></div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    const descInp = row.querySelector('.desc-input');
+    const amtInp = row.querySelector('.amt-input');
+    descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    amtInp.addEventListener('blur', ()=>{
+      const msg = checkDuplicateAmount(day, item.amount, item.id);
+      if(msg) showDuplicateWarning(msg);
+    });
+    /* Keyboard quick entry: Enter in Description jumps to Amount; Enter in
+       Amount (once resolved) adds a new line in the same category and
+       focuses its Description field, for fast heads-down data entry. */
+    descInp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); amtInp.focus(); amtInp.select(); }
+    });
+    amtInp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){
+        e.preventDefault();
+        if(day.locked) return;
+        addCoaVoucher(day, catKey);
+        saveState();
+        render();
+        const freshContainer = document.getElementById('coa-list-'+catKey);
+        if(freshContainer){
+          const descInputs = freshContainer.querySelectorAll('.desc-input');
+          const last = descInputs[descInputs.length-1];
+          if(last) last.focus();
+        }
+      }
+    });
+    container.appendChild(row);
+  });
+}
+
+function drawIouList(container, day){
+  const arr = activeIousForDay(day.date);
+  container.innerHTML = '';
+  if(arr.length===0){ container.appendChild(el(`<p class="empty">No IOUs today.</p>`)); return; }
+  const suggestions = iouDescSuggestions();
+  container.appendChild(el(`<datalist id="iou-desc-suggest">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
+  arr.forEach((item)=>{
+    const carried = item.fromDate < day.date;
+    const row = el(`
+      <div class="line-item">
+        <div class="field desc" style="margin-bottom:0;">
+          <label>Description ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
+          <input type="text" class="desc-input" list="iou-desc-suggest" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load">
+        </div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="danger small" type="button" data-action="remove-iou" data-day="${day.id}" data-item="${item.id}" title="Remove (stops it carrying forward)">&times;</button>
+      </div>
+    `);
+    const descInp = row.querySelector('.desc-input');
+    const amtInp = row.querySelector('.amt-input');
+    descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    container.appendChild(row);
+  });
+}
+
+function renderFooter(){
+  return el(`
+    <footer class="dl">
+      <button class="secondary" data-action="dl-day">Download this day (Excel)</button>
+      <button data-action="dl-month">Download whole month (Excel)</button>
+    </footer>
+  `);
+}
+
+/* ======================================================================
+   ONE delegated listener for every button in the app.
+   Buttons never get per-render onclick rebinding, so there is no way
+   for a stale handler to fire on the wrong row.
+   ====================================================================== */
+function wireDelegation(){
+  document.getElementById('app').addEventListener('click', (e)=>{
+    const t = e.target.closest('[data-action]');
+    if(!t) return;
+    const action = t.dataset.action;
+    const dayId = t.dataset.day;
+    const day = dayId ? findDay(dayId) : null;
+
+    if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
+    if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
+    if(action==='remove-daylock-password'){
+      showPasswordPrompt('Enter the current day-lock password to remove it.', ()=>{
+        state.dayLockPasswordHash = null;
+        saveState(); render();
+        showAlert('Day-lock password removed.');
+      }, 'Remove', state.dayLockPasswordHash);
+      return;
+    }
+    if(action==='lock-now'){
+      if(!state.lockPasswordHash){ showAlert('Set a password first.'); return; }
+      locked = true; lockError = ''; render();
+      return;
+    }
+    if(action==='export-backup'){ exportBackupJson(); return; }
+    if(action==='import-backup'){ document.getElementById('import-file-input').click(); return; }
+    if(action==='connect-file'){ connectToFile(); return; }
+    if(action==='create-file'){ createNewFile(); return; }
+    if(action==='disconnect-file'){ disconnectFile(); return; }
+    if(action==='install-app'){
+      if(!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.finally(()=>{ deferredInstallPrompt = null; render(); });
+      return;
+    }
+    if(action==='edit-setup'){ state.setupDone=false; render(); return; }
+    if(action==='toggle-search'){ searchOpen = !searchOpen; render(); return; }
+    if(action==='toggle-summary'){ summaryOpen = !summaryOpen; render(); return; }
+    if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
+    if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
+    if(action==='remove-template'){
+      const idx = state.templates.findIndex(x=>x.id===t.dataset.item);
+      const removed = state.templates[idx];
+      state.templates = state.templates.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Template "'+removed.desc+'" removed.', ()=>{ state.templates.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
+
+    if(action==='add-bank'){
+      state.banks.push({id:uid(), name:'', opening:0});
+      const setupCard = t.closest('.card');
+      if(setupCard && setupCard._drawBankRows) setupCard._drawBankRows();
+      saveState();
+      return;
+    }
+    if(action==='finish-setup'){
+      if(!state.month || !state.year){ showAlert('Please choose a month and year.'); return; }
+      if(state.banks.length===0){ showAlert('Add at least one bank account.'); return; }
+      if(state.banks.some(b=>!b.name.trim())){ showAlert('Every bank account needs a name.'); return; }
+      state.setupDone = true;
+      saveState(); render();
+      return;
+    }
+
+    if(action==='select-day'){ selectedDayId = t.dataset.day; render(); return; }
+    if(action==='add-day'){
+      const lastDate = state.days.length ? state.days[state.days.length-1].date : null;
+      let next = new Date();
+      if(lastDate){ next = new Date(lastDate+'T00:00:00'); next.setDate(next.getDate()+1); }
+      const d = newDay(next.toISOString().slice(0,10));
+      state.days.push(d);
+      selectedDayId = d.id;
+      saveState(); render();
+      return;
+    }
+    if(action==='delete-day'){
+      if(day.locked){ showAlert('This day is locked. Unlock it first to delete it.'); return; }
+      showConfirm('Delete '+dayLabel(day.date)+'?', ()=>{
+        const i = state.days.findIndex(d=>d.id===dayId);
+        const removedDay = state.days[i];
+        state.days.splice(i,1);
+        selectedDayId = state.days.length ? state.days[Math.max(0,i-1)].id : null;
+        pushUndo(dayLabel(removedDay.date)+' deleted.', ()=>{
+          state.days.splice(i,0,removedDay);
+          selectedDayId = removedDay.id;
+        });
+        saveState(); render();
+      });
+      return;
+    }
+    if(action==='lock-day'){
+      const pending = COA.reduce((n,cat)=> n + (day.coa[cat.key]||[]).filter(it=>(it.status||'draft')!=='approved' && Number(it.amount)>0).length, 0);
+      const note = pending>0 ? ` Note: ${pending} voucher${pending>1?'s are':' is'} not yet marked Approved.` : '';
+      showConfirm('Lock '+dayLabel(day.date)+'? Its entries can\'t be edited again until you unlock it.'+note, ()=>{
+        day.locked = true; saveState(); render();
+      }, 'Lock this day');
+      return;
+    }
+    if(action==='unlock-day'){
+      const gateHash = state.dayLockPasswordHash || state.lockPasswordHash;
+      showPasswordPrompt('Enter password to unlock '+dayLabel(day.date)+' for editing.', ()=>{
+        day.locked = false; saveState(); render();
+      }, 'Unlock', gateHash);
+      return;
+    }
+    if(action==='perform-undo'){ performUndo(); return; }
+    if(action==='cycle-status'){
+      if(day.locked) return;
+      const catKey = t.dataset.cat;
+      const item = (day.coa[catKey]||[]).find(x=>x.id===t.dataset.item);
+      if(item){ item.status = nextStatus(item.status||'draft'); saveState(); render(); }
+      return;
+    }
+    if(action==='dismiss-dup-warning'){ if(duplicateWarningTimer) clearTimeout(duplicateWarningTimer); duplicateWarning=null; render(); return; }
+
+    if(!day && action!=='dl-day' && action!=='dl-month'){ return; }
+
+    if(action==='add-withdraw'){ if(day.locked) return; day.withdrawals.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
+    if(action==='remove-withdraw'){
+      if(day.locked) return;
+      const idx = day.withdrawals.findIndex(x=>x.id===t.dataset.item);
+      const removed = day.withdrawals[idx];
+      day.withdrawals = day.withdrawals.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Withdrawal removed.', ()=>{ day.withdrawals.splice(idx,0,removed); });
+      saveState(); render(); return;
+    }
+    if(action==='add-deposit'){ if(day.locked) return; day.deposits.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
+    if(action==='remove-deposit'){
+      if(day.locked) return;
+      const idx = day.deposits.findIndex(x=>x.id===t.dataset.item);
+      const removed = day.deposits[idx];
+      day.deposits = day.deposits.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Deposit removed.', ()=>{ day.deposits.splice(idx,0,removed); });
+      saveState(); render(); return;
+    }
+    if(action==='add-iou'){ if(day.locked) return; state.iouRegistry.push({id:uid(), desc:'', amount:0, fromDate:day.date, toDate:null}); render(); return; }
+    if(action==='remove-iou'){
+      if(day.locked) return;
+      const item = state.iouRegistry.find(x=>x.id===t.dataset.item);
+      if(item){
+        if(item.fromDate===day.date){
+          const idx = state.iouRegistry.findIndex(x=>x.id===item.id);
+          state.iouRegistry = state.iouRegistry.filter(x=>x.id!==item.id);
+          pushUndo('IOU removed.', ()=>{ state.iouRegistry.splice(idx,0,item); });
+        } else {
+          const prevToDate = item.toDate;
+          item.toDate = addDaysStr(day.date, -1);
+          pushUndo('IOU stopped carrying forward.', ()=>{ item.toDate = prevToDate; });
+        }
+      }
+      saveState(); render();
+      return;
+    }
+    if(action==='add-bank-transfer'){
+      if(day.locked) return;
+      if(state.banks.length<2){ showAlert('Add at least two bank accounts to make a transfer.'); return; }
+      if(!day.bankTransfers) day.bankTransfers = [];
+      const from = state.banks[0], to = state.banks[1];
+      day.bankTransfers.push({id:uid(), fromBankId:from.id, toBankId:to.id, amount:0});
+      render();
+      return;
+    }
+    if(action==='remove-bank-transfer'){
+      if(day.locked) return;
+      const idx = (day.bankTransfers||[]).findIndex(x=>x.id===t.dataset.item);
+      const removed = day.bankTransfers[idx];
+      day.bankTransfers = (day.bankTransfers||[]).filter(x=>x.id!==t.dataset.item);
+      pushUndo('Bank transfer removed.', ()=>{ day.bankTransfers.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
+
+    if(action==='add-coa'){
+      if(day.locked) return;
+      addCoaVoucher(day, t.dataset.cat);
+      render();
+      return;
+    }
+    if(action==='add-coa-from-template'){
+      if(day.locked) return;
+      const tpl = state.templates.find(x=>x.id===t.dataset.tpl);
+      if(!tpl) return;
+      const cat = COA.find(c=>c.key===tpl.catKey);
+      state.voucherCounters[tpl.catKey] += 1;
+      const yearShort = String(state.year).slice(-2);
+      const monthNum = MONTHS.indexOf(state.month)+1;
+      const voucher = `${cat.short}${state.voucherCounters[tpl.catKey]}/${monthNum}/${yearShort}`;
+      day.coa[tpl.catKey].push({id:uid(), voucher, desc:tpl.desc, amount:tpl.amount, status:'draft'});
+      render();
+      return;
+    }
+    if(action==='remove-coa'){
+      if(day.locked) return;
+      const catKey = t.dataset.cat;
+      const idx = day.coa[catKey].findIndex(x=>x.id===t.dataset.item);
+      const removed = day.coa[catKey][idx];
+      day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==t.dataset.item);
+      pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{ day.coa[catKey].splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
+
+    if(action==='dl-day'){ exportDay(selectedDayId); return; }
+    if(action==='dl-month'){ exportMonth(); return; }
+  });
+}
+
+
+
+/* ======================================================================
+   Excel export (ExcelJS) — mirrors the original workbook's layout:
+   Times New Roman throughout, bold section/total rows, thin borders on
+   every used cell, and live =SUM(...) / cross-sheet formulas instead of
+   hard-coded numbers, so the file behaves exactly like the hand-built
+   sample once opened in Excel.
+   ====================================================================== */
+const EXCELJS_URLS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+  'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
+  'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js'
+];
+let excelJsLoadPromise = null;
+function loadExcelJS(){
+  if(typeof ExcelJS !== 'undefined') return Promise.resolve();
+  if(excelJsLoadPromise) return excelJsLoadPromise;
+  excelJsLoadPromise = (async ()=>{
+    for(const url of EXCELJS_URLS){
+      try{
+        await new Promise((resolve, reject)=>{
+          const s = document.createElement('script');
+          s.src = url;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        if(typeof ExcelJS !== 'undefined') return;
+      }catch(e){ /* try next source */ }
+    }
+    throw new Error('Could not load the Excel export library from any source.');
+  })();
+  return excelJsLoadPromise;
+}
+
+/* ======================================================================
+   Debit Voucher generation (per cash-disbursed entry, daily export only)
+   The institute's exact Debit Voucher template (fonts, borders, merges,
+   A5 page setup/margins/print area) is embedded below as base64 and
+   cloned cell-for-cell for every CoA voucher with a non-blank amount, so
+   the printed layout is never altered - only five boxes get filled in:
+   No, Date, Description, Taka (amount), and In Words (twice).
+   ====================================================================== */
+const DEBIT_VOUCHER_TEMPLATE_B64 = "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";
+
+function base64ToArrayBuffer(base64){
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+let debitVoucherTemplatePromise = null;
+function loadDebitVoucherTemplate(){
+  if(debitVoucherTemplatePromise) return debitVoucherTemplatePromise;
+  debitVoucherTemplatePromise = (async ()=>{
+    const buf = base64ToArrayBuffer(DEBIT_VOUCHER_TEMPLATE_B64);
+    const tmplWb = new ExcelJS.Workbook();
+    await tmplWb.xlsx.load(buf);
+    return tmplWb.worksheets[0];
+  })();
+  return debitVoucherTemplatePromise;
+}
+
+/* Clones a worksheet cell-for-cell (values, styles, merges, column widths,
+   row heights, page setup/margins/print area) into destWb under a new name,
+   so the source template's exact formatting is preserved. */
+function cloneTemplateSheet(destWb, srcWs, name){
+  const ws = destWb.addWorksheet(name);
+  for(let c=1;c<=srcWs.columnCount;c++){ ws.getColumn(c).width = srcWs.getColumn(c).width; }
+  for(let r=1;r<=srcWs.rowCount;r++){
+    ws.getRow(r).height = srcWs.getRow(r).height;
+    for(let c=1;c<=srcWs.columnCount;c++){
+      const sCell = srcWs.getCell(r,c);
+      const dCell = ws.getCell(r,c);
+      dCell.value = sCell.value;
+      dCell.style = JSON.parse(JSON.stringify(sCell.style));
+    }
+  }
+  (srcWs.model.merges||[]).forEach(rng=>{ try{ ws.mergeCells(rng); }catch(e){ /* already covered */ } });
+  ws.pageSetup = JSON.parse(JSON.stringify(srcWs.pageSetup));
+  return ws;
+}
+
+/* "=1234-" / "=1234.50-" style amount box, matching the template's convention */
+function formatTakaBox(amount){
+  const n = Math.round((Number(amount)||0)*100)/100;
+  const s = (n % 1 === 0) ? String(n) : n.toFixed(2);
+  return '=' + formatAsianAmount(s) + '/-';
+}
+
+/* Splits a numbered multi-item description like "1. A 2. B 3. C" onto
+   separate lines - line 1 keeps item 1, then every next "N." / "N)" marker
+   (2 onward) starts a fresh line, so the Debit Voucher's Description box
+   prints each item on its own line instead of one run-on sentence. */
+function formatMultiItemDescription(text){
+  if(!text) return text;
+  return text.replace(/\s+(\d{1,3}[.\)]\s)/g, '\n$1').trim();
+}
+
+/* Adds one Debit Voucher sheet per Cash Disbursed (CoA) entry for the day,
+   skipping blank-amount vouchers. `used` is the sheet-name set shared with
+   the day's summary sheet so names never collide. */
+async function appendDebitVoucherSheets(wb, day, used){
+  const entries = [];
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(item=>{
+      const amt = Number(item.amount)||0;
+      if(amt>0) entries.push({cat, item, amt});
+    });
+  });
+  if(entries.length===0) return;
+  let srcWs;
+  try{ srcWs = await loadDebitVoucherTemplate(); }
+  catch(e){ return; } // if the template can't load, skip vouchers rather than block the whole export
+  entries.forEach(({cat, item, amt})=>{
+    const label = (item.desc && item.desc.trim()) ? item.desc.trim() : cat.label;
+    const sheetName = uniqueSheetName(label.replace(/[\\/\?\*\[\]:]/g,''), used);
+    const ws = cloneTemplateSheet(wb, srcWs, sheetName);
+    ws.getCell('C9').value = item.voucher;
+    ws.getCell('H9').value = `${dayLabelFull(day.date)} ${state.year}`;
+    ws.getCell('B14').value = formatMultiItemDescription(label);
+    ws.getCell('G14').value = formatTakaBox(amt);
+    ws.getCell('B28').value = `In Words: ${takaInWords(amt)}`;
+    ws.getCell('G28').value = formatTakaBox(amt);
+
+    /* No & Description boxes: top-left aligned */
+    ws.getCell('C9').alignment = {horizontal:'left', vertical:'top'};
+    ws.getCell('B14').alignment = {horizontal:'left', vertical:'top', wrapText:true};
+    /* Taka (amount) box: top-center aligned */
+    ws.getCell('G14').alignment = {horizontal:'center', vertical:'top'};
+    /* Bottom border under the Total Amount / In Words line */
+    ['B29','C29','D29','E29','F29','G29','H29'].forEach(addr=>{
+      const cell = ws.getCell(addr);
+      cell.border = Object.assign({}, cell.border, {bottom:{style:'thin'}});
+    });
+    /* Right border for the repeated-amount box (G28:H29) */
+    ['G28','H28','G29','H29'].forEach(addr=>{
+      const cell = ws.getCell(addr);
+      cell.border = Object.assign({}, cell.border, {right:{style:'thin'}});
+    });
+  });
+}
+
+const FONT = 'Times New Roman';
+const THIN = {style:'thin'};
+const BORDER_ALL = {top:THIN,left:THIN,bottom:THIN,right:THIN};
+
+/* Excel custom format for Asian/Indian comma grouping: last 3 digits,
+   then groups of 2 (e.g. 12,34,567) - matches the on-screen inputs. */
+const ASIAN_NUMFMT = '#,##,##0.00';
+function setCell(ws, addr, {value, formula, size=11, bold=false, center=false, numFmt}={}){
+  const cell = ws.getCell(addr);
+  if(formula!==undefined) cell.value = {formula};
+  else cell.value = (value===undefined?'':value);
+  cell.font = {name:FONT, size, bold};
+  cell.border = BORDER_ALL;
+  cell.alignment = center ? {horizontal:'center', vertical:'center', wrapText:true} : {vertical:'center'};
+  if(numFmt) cell.numFmt = numFmt;
+  return cell;
+}
+
+/* Writes one ledger row: A = voucher (blank+bordered if none), B = centered
+   label, and the amount goes in EITHER C or D depending on valueCol - the
+   other of the two is left as a blank bordered filler (valueCol='D') or left
+   completely untouched with no border (valueCol='C'), exactly like the sample. */
+/* Excel doesn't auto-fit a row's height once we set one explicitly - even
+   with wrap text turned on - so a long description just gets visually
+   clipped until someone manually double-clicks the row border. We
+   estimate how many wrapped lines the text needs (given the column's
+   character width and font size) and size the row for that ourselves. */
+function estimateWrappedRowHeight(text, colWidthChars, fontSize=11, minHeight=18.75){
+  if(!text) return minHeight;
+  const charsPerLine = Math.max(6, Math.round((colWidthChars*0.85) * (11/Math.max(fontSize,8))));
+  const paragraphs = String(text).split('\n');
+  let lines = 0;
+  paragraphs.forEach(p=>{ lines += Math.max(1, Math.ceil(p.length / charsPerLine)); });
+  const lineHeight = 15 * (fontSize/11);
+  const height = lines*lineHeight + 6;
+  return Math.max(minHeight, Math.ceil(height*1.15)); // 15% safety margin against estimation error
+}
+
+function writeRow(ws, r, {voucher='', label='', size=11, bold=false, valueCol='C', value, formula}={}){
+  setCell(ws, `A${r}`, {value:voucher, size:11, bold:false});
+  setCell(ws, `B${r}`, {value:label, size, bold, center:true});
+  if(valueCol==='D'){
+    setCell(ws, `C${r}`, {value:'', size, bold});
+    setCell(ws, `D${r}`, {value, formula, size, bold, numFmt:ASIAN_NUMFMT});
+  } else {
+    setCell(ws, `C${r}`, {value, formula, size, bold, numFmt:ASIAN_NUMFMT});
+  }
+  ws.getRow(r).height = estimateWrappedRowHeight(label, 58, size);
+  return r;
+}
+
+function writeDaySheet(ws, day, cmp, beginRefs){
+  ws.getColumn(1).width = 13;
+  ws.getColumn(2).width = 58;
+  ws.getColumn(3).width = 18;
+  ws.getColumn(4).width = 16;
+
+  let r = 1;
+  ws.mergeCells(`A${r}:C${r}`);
+  setCell(ws, `A${r}`, {value:`Daily Cash & Bank Account Summary - ${dayLabelFull(day.date)} ${state.year}`, size:16, bold:true, center:true});
+  // Match the sample's exact merged-title border pattern: outer box only, no internal dividers.
+  ws.getCell(`A${r}`).border = {left:THIN, top:THIN, bottom:THIN};
+  ws.getCell(`B${r}`).border = {top:THIN, bottom:THIN};
+  ws.getCell(`C${r}`).border = {top:THIN, bottom:THIN, right:THIN};
+  ws.getRow(r).height = 26;
+  r++;
+
+  // Beginning balance cash -> column D
+  const beginCashRow = r;
+  writeRow(ws, r, {label:'Beginning Balance Cash', size:14, bold:true, valueCol:'D', ...beginRefs.cash});
+  r++;
+
+  const revenueStart = r;
+  writeRow(ws, r, {label:'Service revenue collected', value:Number(day.serviceRevenue)||0}); r++;
+  day.withdrawals.forEach(w=>{
+    const bank = state.banks.find(b=>b.id===w.bankId);
+    writeRow(ws, r, {label:'Cash withdrawn from '+(bank?bank.name:'bank')+(w.note?' - '+w.note:''), value:Number(w.amount)||0});
+    r++;
+  });
+  const revenueEnd = r-1;
+
+  const totalCollectedRow = r;
+  writeRow(ws, r, {label:'Total cash collected', size:12, bold:true, formula:`SUM(C${revenueStart}:C${revenueEnd})`}); r++;
+
+  const totalAmountCashRow = r;
+  writeRow(ws, r, {label:'Total Amount Cash', size:14, bold:true, valueCol:'D', formula:`D${beginCashRow}+C${totalCollectedRow}`}); r++;
+
+  writeRow(ws, r, {label:'Cash Disbursed Summary', size:11, bold:true, value:''}); r++;
+
+  const disbStart = r;
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(item=>{
+      writeRow(ws, r, {voucher:item.voucher, label:item.desc||cat.label, value:Number(item.amount)||0});
+      r++;
+    });
+  });
+  day.deposits.forEach(d=>{
+    const bank = state.banks.find(b=>b.id===d.bankId);
+    writeRow(ws, r, {label:'Cash deposited to '+(bank?bank.name:'bank')+(d.note?' - '+d.note:''), value:Number(d.amount)||0});
+    r++;
+  });
+  let disbEnd = r-1;
+  if(disbEnd < disbStart){ writeRow(ws, r, {label:'(no disbursements)', value:0}); disbEnd=r; r++; }
+
+  const totalDisbursedRow = r;
+  writeRow(ws, r, {label:'Total Cash Disbursed', size:12, bold:true, formula:`SUM(C${disbStart}:C${disbEnd})`}); r++;
+
+  const closingAmountRow = r;
+  writeRow(ws, r, {label:'Closing amount', size:12, bold:true, valueCol:'D', formula:`D${totalAmountCashRow}-C${totalDisbursedRow}`}); r++;
+
+  const iouStart = r;
+  activeIousForDay(day.date).forEach(i=>{ writeRow(ws, r, {label:i.desc||'IOU', value:Number(i.amount)||0}); r++; });
+  let iouEnd = r-1;
+  if(iouEnd < iouStart){ writeRow(ws, r, {label:'(no IOU)', value:0}); iouEnd=r; r++; }
+
+  const totalIouRow = r;
+  writeRow(ws, r, {label:'Total IOU', size:11, bold:true, formula:`SUM(C${iouStart}:C${iouEnd})`}); r++;
+
+  const cashInHandRow = r;
+  writeRow(ws, r, {label:'Cash In Hand', size:14, bold:true, formula:`D${closingAmountRow}-C${totalIouRow}`}); r++;
+
+  const bankClosingAddr = {};
+  state.banks.forEach(b=>{
+    const bd = day.banksDaily[b.id] || {sslDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
+    const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
+    const beginBankRow = r;
+    const ref = beginRefs.banks[b.id] || {value:0};
+    writeRow(ws, r, {label:`Beginning Balance - ${b.name}`, size:14, bold:true, ...ref}); r++;
+
+    bankXfers.filter(t=>t.toBankId===b.id).forEach(t=>{
+      const fromBank = state.banks.find(x=>x.id===t.fromBankId);
+      writeRow(ws, r, {label:`Transferred from ${fromBank?fromBank.name:'bank'}`, value:Number(t.amount)||0});
+      r++;
+    });
+    if(bd.sslDeposit){ writeRow(ws, r, {label:'Other deposit / SSL Commerz', value:Number(bd.sslDeposit)||0}); r++; }
+    day.deposits.filter(d=>d.bankId===b.id).forEach(d=>{
+      writeRow(ws, r, {label:'Cash deposited from ledger'+(d.note?' - '+d.note:''), value:Number(d.amount)||0});
+      r++;
+    });
+    const depositEnd = Math.max(r-1, beginBankRow);
+
+    const totalAmountBankRow = r;
+    writeRow(ws, r, {label:`Total Amount - ${b.name}`, size:14, bold:true, formula:`SUM(C${beginBankRow}:C${depositEnd})`}); r++;
+
+    const disburseStart = r;
+    if(bd.fees){ writeRow(ws, r, {label:'Bank fees', value:Number(bd.fees)||0}); r++; }
+    if(bd.salaryAccount){ writeRow(ws, r, {label:'Salary payment - by account', value:Number(bd.salaryAccount)||0}); r++; }
+    if(bd.salaryCash){ writeRow(ws, r, {label:'Salary payment - by cash', value:Number(bd.salaryCash)||0}); r++; }
+    bankXfers.filter(t=>t.fromBankId===b.id).forEach(t=>{
+      const toBank = state.banks.find(x=>x.id===t.toBankId);
+      writeRow(ws, r, {label:`Transferred to ${toBank?toBank.name:'bank'}`, value:Number(t.amount)||0});
+      r++;
+    });
+    day.withdrawals.filter(w=>w.bankId===b.id).forEach(w=>{
+      writeRow(ws, r, {label:'Cash withdrawn to ledger'+(w.note?' - '+w.note:''), value:Number(w.amount)||0});
+      r++;
+    });
+    let disburseEnd = r-1;
+    if(disburseEnd < disburseStart){ writeRow(ws, r, {label:'Bank fees', value:0}); disburseEnd=r; r++; }
+
+    const totalDisbursedBankRow = r;
+    writeRow(ws, r, {label:'Total Cash Disbursed', size:14, bold:true, formula:`SUM(C${disburseStart}:C${disburseEnd})`}); r++;
+
+    const closingBankRow = r;
+    writeRow(ws, r, {label:`Closing Balance - ${b.name}`, size:14, bold:true, valueCol:'D', formula:`C${totalAmountBankRow}-C${totalDisbursedBankRow}`}); r++;
+
+    bankClosingAddr[b.id] = `D${closingBankRow}`;
+  });
+
+  const grandTotalRow = r;
+  const terms = [`D${closingAmountRow}`, ...Object.values(bankClosingAddr)].join('+');
+  writeRow(ws, r, {label:'Grand Total (Closing amount + all Bank Closing Balances)', size:15, bold:true, valueCol:'D', formula:terms});
+
+  return {cashInHandAddr:`C${cashInHandRow}`, closingAmountAddr:`D${closingAmountRow}`, bankClosingAddr, grandTotalAddr:`D${grandTotalRow}`};
+}
+
+function sheetNameFor(day, used){
+  return uniqueSheetName(dayLabel(day.date).replace(/[\\\/\?\*\[\]:]/g,'').slice(0,28), used);
+}
+/* --- Annual Summary: a Category x Month matrix for a full year, across
+   both the current month and everything archived. --- */
+async function exportAnnualSummary(year){
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+  const vouchers = allVouchers().filter(v=>v.date.slice(0,4)===year);
+  if(vouchers.length===0){ showAlert('No expenses recorded for '+year+' yet.'); return; }
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(`Annual ${year}`);
+  ws.getColumn(1).width = 26;
+  for(let m=2;m<=13;m++) ws.getColumn(m).width = 12;
+  ws.getColumn(14).width = 14;
+
+  function put(addr, value, {size=11, bold=false, numFmt}={}){
+    const c = ws.getCell(addr);
+    c.value = (value===''||value===undefined) ? '' : value;
+    c.font = {name:FONT, size, bold};
+    c.border = BORDER_ALL;
+    c.alignment = {horizontal:'center', vertical:'center'};
+    if(numFmt) c.numFmt = numFmt;
+    return c;
+  }
+
+  ws.mergeCells('A1:N1');
+  put('A1', `Annual Category Summary - ${year}`, {size:16, bold:true});
+  ws.getRow(1).height = 24;
+
+  let r = 3;
+  put(`A${r}`, 'Category', {bold:true});
+  for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, MONTHS[m].slice(0,3), {bold:true}); }
+  put('N'+r, 'Total', {bold:true});
+  r++;
+
+  const monthColTotals = new Array(12).fill(0);
+  SUMMARY_ORDER.forEach(catKey=>{
+    const cat = COA.find(c=>c.key===catKey);
+    put(`A${r}`, cat.label);
+    let rowTotal = 0;
+    for(let m=0;m<12;m++){
+      const mm = String(m+1).padStart(2,'0');
+      const total = vouchers.filter(v=>v.catKey===catKey && v.date.slice(5,7)===mm).reduce((s,v)=>s+v.amount,0);
+      put(String.fromCharCode(66+m)+r, total||'', {numFmt:ASIAN_NUMFMT});
+      rowTotal += total;
+      monthColTotals[m] += total;
+    }
+    put('N'+r, rowTotal, {bold:true, numFmt:ASIAN_NUMFMT});
+    r++;
+  });
+  put(`A${r}`, 'Total', {bold:true});
+  for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, monthColTotals[m], {bold:true, numFmt:ASIAN_NUMFMT}); }
+  put('N'+r, monthColTotals.reduce((s,v)=>s+v,0), {bold:true, numFmt:ASIAN_NUMFMT});
+
+  await downloadWorkbook(wb, `Annual_Summary_${year}.xlsx`);
+}
+
+function uniqueSheetName(base, used){
+  base = (base||'Sheet').slice(0,31);
+  let name = base, n=2;
+  while(used.has(name)){ name = (base+' '+n).slice(0,31); n++; }
+  used.add(name);
+  return name;
+}
+
+/* --- Individual category notesheet, mirroring the hand-built template --- */
+function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
+  ws.getColumn(1).width = 3.9; ws.getColumn(2).width = 3;
+  ws.getColumn(3).width = 13; ws.getColumn(4).width = 47; ws.getColumn(5).width = 20;
+  ws.getColumn(6).width = 7;
+
+  const thin = {top:THIN,left:THIN,bottom:THIN,right:THIN};
+  function put(addr, value, {size=12, bold=false, name=FONT, center=false, border=true, wrap=false, numFmt}={}){
+    const c = ws.getCell(addr);
+    c.value = value;
+    c.font = {name, size, bold};
+    if(border) c.border = thin;
+    if(center || wrap) c.alignment = {horizontal:center?'center':undefined, vertical:'center', wrapText:wrap};
+    if(numFmt) c.numFmt = numFmt;
+    return c;
+  }
+
+  ws.mergeCells('B1:F1');
+  put('B1','Note Sheet',{size:12, center:true, border:false});
+
+  ws.mergeCells('B3:E3');
+  put('B3', `III/Acct/Madrasa/Withdraw/${cat.notesheetLabel}/${number}`, {size:12, bold:true});
+  put('F3','Attach',{size:12});
+
+  ws.mergeCells('B4:E4');
+  put('B4','Sheet No 01',{size:12});
+
+  ws.mergeCells('B5:E5');
+  const sentence = `Following amount of money disbursed from ${dayLabelFull(firstDate)} ${state.year} - ${dayLabelFull(lastDate)} ${state.year} (voucher no: ${items[0].voucher} - ${items[items.length-1].voucher}) as ${cat.expensePhrase} expense may be withdrawn from madrasa acct:`;
+  put('B5', sentence, {size:12, wrap:true});
+  ws.getRow(5).height = 30;
+
+  let r = 7;
+  put(`C${r}`,'S/no',{size:12, center:true}); put(`D${r}`,'Description',{size:12, center:true}); put(`E${r}`,'Amount',{size:12, center:true});
+  r++;
+  const startRow = r;
+  items.forEach(it=>{
+    put(`C${r}`, it.voucher, {size:11});
+    put(`D${r}`, it.desc, {size:11, wrap:true});
+    put(`E${r}`, it.amount, {size:10, name:'Arial', numFmt:ASIAN_NUMFMT});
+    ws.getRow(r).height = estimateWrappedRowHeight(it.desc, 47, 11);
+    r++;
+  });
+  const endRow = r-1;
+
+  put(`C${r}`,'Total Amount',{size:12, bold:true});
+  put(`E${r}`, {formula:`SUM(E${startRow}:E${endRow})`}, {size:10, name:'Arial', numFmt:ASIAN_NUMFMT});
+  const totalRow = r; r++;
+
+  ws.mergeCells(`C${r}:E${r}`);
+  put(`C${r}`, takaInWords(total), {size:12, bold:true});
+  const wordsRow = r;
+
+  const my = monthYearAbbr();
+  const s = state.signatories;
+  let rr = wordsRow+4;
+  put(`E${rr}`, `${s.accountant}\n${s.accountantRole}\n${my}`, {size:13, border:false, wrap:true});
+  rr = wordsRow+5;
+  put(`C${rr}`, 'Admin Manager', {size:13, border:false});
+  rr = wordsRow+8;
+  put(`E${rr}`, `${s.adminManager}\n${s.adminManagerRole}\n${my}`, {size:13, border:false, wrap:true});
+  rr = wordsRow+10;
+  put(`C${rr}`, 'Principal', {size:13, border:false});
+  rr = wordsRow+11;
+  put(`E${rr}`, `${s.principal}\n${s.principalRole}\n${my}`, {size:13, border:false, wrap:true});
+}
+
+/* --- Consolidated Withdraw Summary sheet --- */
+function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
+  ws.getColumn(2).width = 4; ws.getColumn(3).width = 12;
+  for(let i=4;i<=8;i++) ws.getColumn(i).width = 10;
+  ws.getColumn(9).width = 12;
+
+  function put(addr, value, {size=20, bold=false, name=FONT, center=false, numFmt}={}){
+    const c = ws.getCell(addr);
+    c.value = value;
+    c.font = {name, size, bold};
+    if(center) c.alignment = {horizontal:'center', vertical:'center'};
+    if(numFmt) c.numFmt = numFmt;
+    return c;
+  }
+
+  put('B1', `III/Acct/Madrasa/Withdraw Summary/${yearCode}-${num}`, {size:14, bold:true});
+  ws.mergeCells('B2:I2');
+  put('B2', 'Cash withdraw Summary', {size:20, bold:true, center:true});
+
+  let r = 3;
+  rows.forEach((row, i)=>{
+    put(`B${r}`, String(i+1), {size:20});
+    ws.mergeCells(`C${r}:H${r}`);
+    put(`C${r}`, row.label, {size:20});
+    put(`I${r}`, row.total, {size:16, bold:true, name:'Arial', numFmt:ASIAN_NUMFMT});
+    r++;
+  });
+  const firstRow = 3, lastRow = r-1;
+
+  ws.mergeCells(`B${r}:H${r}`);
+  put(`B${r}`, `Total: ${takaInWords(grandTotal)}`, {size:20, bold:true});
+  put(`I${r}`, {formula:`SUM(I${firstRow}:I${lastRow})`}, {size:16, bold:true, name:'Arial', numFmt:ASIAN_NUMFMT});
+  const totalRow = r;
+
+  put(`B${totalRow+4}`, 'Accountant', {size:14, bold:true, name:'Calibri'});
+  put(`I${totalRow+4}`, 'Principal', {size:14, bold:true, name:'Calibri'});
+}
+
+async function exportNotesheets(startDate, endDate){
+  if(!startDate || !endDate){ showAlert('Pick a from and to date.'); return; }
+  if(startDate > endDate){ showAlert('The "From date" must be before the "To date".'); return; }
+  const {cats, grandTotal} = collectNotesheetRange(startDate, endDate);
+  if(cats.length===0){ showAlert('No expenses were recorded in that date range.'); return; }
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+
+  const wb = new ExcelJS.Workbook();
+  const used = new Set();
+  const summaryRows = [];
+
+  cats.forEach(({key, cat, items, total, firstDate, lastDate})=>{
+    const number = (state.notesheetCounters[key]||0) + 1;
+    const ws = wb.addWorksheet(uniqueSheetName(`${cat.notesheetLabel} ${number}`.replace(/[\\\/\?\*\[\]:]/g,''), used));
+    writeNotesheet(ws, cat, number, items, total, firstDate, lastDate);
+    state.notesheetCounters[key] = number;
+    summaryRows.push({label:cat.summaryLabel, total});
+  });
+
+  const summaryNum = (state.summaryCounterNum||0) + 1;
+  const wsSummary = wb.addWorksheet(uniqueSheetName(`${state.summaryCounterYear}-${summaryNum}`, used));
+  writeWithdrawSummary(wsSummary, summaryRows, grandTotal, state.summaryCounterYear, summaryNum);
+  state.summaryCounterNum = summaryNum;
+
+  await saveState();
+  await downloadWorkbook(wb, `Notesheets_${startDate}_to_${endDate}.xlsx`);
+  render();
+}
+
+async function downloadWorkbook(wb, filename){
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportDay(dayId){
+  if(!dayId){ showAlert('No day selected.'); return; }
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+  const day = findDay(dayId);
+  const computed = computeAll();
+  const c = computed[dayId];
+  const wb = new ExcelJS.Workbook();
+  const used = new Set();
+  const ws = wb.addWorksheet(sheetNameFor(day, used));
+  const beginRefs = {
+    cash: {value: c.openingCash},
+    banks: Object.fromEntries(state.banks.map(b=>[b.id, {value: c.banks[b.id].opening}]))
+  };
+  writeDaySheet(ws, day, c, beginRefs);
+  await appendDebitVoucherSheets(wb, day, used);
+  await downloadWorkbook(wb, `${dayLabel(day.date)}_${state.month}${state.year}.xlsx`);
+}
+
+async function exportMonth(){
+  if(state.days.length===0){ showAlert('No days recorded yet.'); return; }
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+  const computed = computeAll();
+  const wb = new ExcelJS.Workbook();
+  const used = new Set(['Overview']);
+
+  const wsOverview = wb.addWorksheet('Overview');
+
+  const dayRefs = {}; // dayId -> {sheetName, cashInHandAddr, bankClosingAddr, grandTotalAddr}
+  state.days.forEach((day, idx)=>{
+    const c = computed[day.id];
+    const sheetName = sheetNameFor(day, used);
+    const ws = wb.addWorksheet(sheetName);
+    let beginRefs;
+    if(idx===0){
+      beginRefs = {
+        cash: {value: c.openingCash},
+        banks: Object.fromEntries(state.banks.map(b=>[b.id, {value:c.banks[b.id].opening}]))
+      };
+    } else {
+      const prevDay = state.days[idx-1];
+      const prevRef = dayRefs[prevDay.id];
+      beginRefs = {
+        cash: {formula: `'${prevRef.sheetName}'!${prevRef.closingAmountAddr}`},
+        banks: Object.fromEntries(state.banks.map(b=>{
+          if(prevRef.bankClosingAddr[b.id]) return [b.id, {formula:`'${prevRef.sheetName}'!${prevRef.bankClosingAddr[b.id]}`}];
+          return [b.id, {value: c.banks[b.id].opening}];
+        }))
+      };
+    }
+    const refs = writeDaySheet(ws, day, c, beginRefs);
+    dayRefs[day.id] = {sheetName, ...refs};
+  });
+
+  // Populate the Overview sheet (created first, above, so it stays the first tab)
+  wsOverview.getColumn(1).width = 20;
+  for(let i=2;i<=state.banks.length+3;i++) wsOverview.getColumn(i).width = 18;
+  let r=1;
+  wsOverview.mergeCells(`A${r}:${String.fromCharCode(65+2+state.banks.length)}${r}`);
+  setCell(wsOverview, `A${r}`, {value:`Month Overview - ${state.month} ${state.year}`, size:16, bold:true, align:'center'});
+  r++;
+  const headerRow = r;
+  setCell(wsOverview, `A${r}`, {value:'Date', size:11, bold:true});
+  setCell(wsOverview, `B${r}`, {value:'Cash In Hand', size:11, bold:true});
+  state.banks.forEach((b,i)=>{ setCell(wsOverview, `${String.fromCharCode(67+i)}${r}`, {value:b.name+' Closing', size:11, bold:true}); });
+  setCell(wsOverview, `${String.fromCharCode(67+state.banks.length)}${r}`, {value:'Grand Total', size:11, bold:true});
+  r++;
+  state.days.forEach(day=>{
+    const ref = dayRefs[day.id];
+    setCell(wsOverview, `A${r}`, {value:dayLabel(day.date)});
+    setCell(wsOverview, `B${r}`, {formula:`'${ref.sheetName}'!${ref.cashInHandAddr}`, numFmt:ASIAN_NUMFMT});
+    state.banks.forEach((b,i)=>{
+      const addr = ref.bankClosingAddr[b.id];
+      setCell(wsOverview, `${String.fromCharCode(67+i)}${r}`, addr?{formula:`'${ref.sheetName}'!${addr}`, numFmt:ASIAN_NUMFMT}:{value:0, numFmt:ASIAN_NUMFMT});
+    });
+    setCell(wsOverview, `${String.fromCharCode(67+state.banks.length)}${r}`, {formula:`'${ref.sheetName}'!${ref.grandTotalAddr}`, numFmt:ASIAN_NUMFMT});
+    r++;
+  });
+  r++;
+  setCell(wsOverview, `A${r}`, {value:'CoA Category Totals - Whole Month', size:12, bold:true});
+  r++;
+  COA.forEach(cat=>{
+    let total = 0;
+    state.days.forEach(day=>{ total += computed[day.id].coaTotals[cat.key]||0; });
+    setCell(wsOverview, `A${r}`, {value:cat.label});
+    setCell(wsOverview, `B${r}`, {value:cat.short});
+    setCell(wsOverview, `C${r}`, {value:total, numFmt:ASIAN_NUMFMT});
+    r++;
+  });
+
+  await downloadWorkbook(wb, `${state.month}${state.year}_Full_Ledger.xlsx`);
+}
+
+/* ======================================================================
+   Boot
+   ====================================================================== */
+/* --- PWA installability ------------------------------------------------
+   The manifest link in <head> (with an embedded icon) is what lets the
+   browser offer "Install" at all. This only matters when the file is
+   hosted over https:// (or localhost) - a local file:// double-click and
+   Claude.ai's sandboxed artifact iframe generally won't offer an install
+   prompt no matter what, that's a browser platform restriction, not
+   something fixable from inside the page. Where it IS available, capture
+   the prompt so the header's "Install App" button can trigger it. */
+if(typeof window!=='undefined' && typeof window.addEventListener==='function'){
+  window.addEventListener('beforeinstallprompt', (e)=>{
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    if(state) render();
+  });
+}
+if(typeof navigator!=='undefined' && 'serviceWorker' in navigator && typeof location!=='undefined' && (location.protocol==='https:' || location.hostname==='localhost')){
+  try{
+    const swCode = "self.addEventListener('fetch', function(){});";
+    const swUrl = URL.createObjectURL(new Blob([swCode], {type:'application/javascript'}));
+    navigator.serviceWorker.register(swUrl).catch(()=>{ /* best effort - some browsers block blob: service workers */ });
+  }catch(e){ /* ignore - manifest alone is enough for installability in most current browsers */ }
+}
+
+(async function boot(){
+  await loadState();
+  locked = !!state.lockPasswordHash;
+  await tryReconnectFile();
+  wireDelegation();
+  render();
+  loadExcelJS().catch(()=>{});
+})();
+</script>
+</body>
+</html>
