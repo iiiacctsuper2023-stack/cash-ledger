@@ -126,6 +126,7 @@
   .status-badge.status-draft{background:#EDEEF1;color:#5B6270;border-color:#DADDE3;}
   .status-badge.status-reviewed{background:#DCEBFB;color:#1D5FA8;border-color:#BBDAF5;}
   .status-badge.status-approved{background:#DDEEE3;color:var(--primary-dark);border-color:#BFE0CC;}
+  input.locked-text{background:var(--card-alt,#F7F8F4);cursor:default;color:var(--ink-soft);}
   .day-panel.locked{position:relative;}
   .day-panel.locked::after{
     content:'\1F512';
@@ -967,6 +968,29 @@ function computeAll(){
    Small DOM helper
    ====================================================================== */
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+
+/* Description/note boxes: if a box already has text, it opens locked
+   (read-only) so a stray click while scrolling/selecting can't nudge the
+   wording - double-click to actually edit it. An empty box stays open
+   for typing right away, no double-click needed. Re-locks on blur once
+   there's text in it again. */
+function wireLockableTextInput(inputEl){
+  const syncLock = ()=>{
+    const hasText = !!inputEl.value.trim();
+    inputEl.readOnly = hasText;
+    inputEl.title = hasText ? 'Double-click to edit' : '';
+    inputEl.classList.toggle('locked-text', hasText);
+  };
+  syncLock();
+  inputEl.addEventListener('dblclick', ()=>{
+    inputEl.readOnly = false;
+    inputEl.classList.remove('locked-text');
+    inputEl.title = '';
+    inputEl.focus();
+    inputEl.select();
+  });
+  inputEl.addEventListener('blur', syncLock);
+}
 function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 /* Wraps every case-insensitive occurrence of query in <mark>, escaping
    everything safely (matching is done on the raw text, then each segment
@@ -1131,6 +1155,7 @@ function showSettleIouModal(day, item){
   document.body.appendChild(overlay);
   const catSelect = overlay.querySelector('#settle-cat-select');
   const descInput = overlay.querySelector('#settle-desc-input');
+  wireLockableTextInput(descInput);
   const input = overlay.querySelector('#settle-amt-input');
   const returnWrap = overlay.querySelector('#settle-return-wrap');
   const returnInput = overlay.querySelector('#settle-return-input');
@@ -2367,6 +2392,7 @@ function drawTransferList(container, day, field, emptyText){
     const amtInp = row.querySelector('.amt-input');
     sel.onchange = ()=>{ item.bankId = sel.value; refreshComputedOnly(); };
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
+    wireLockableTextInput(noteInp);
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
@@ -2476,6 +2502,7 @@ function drawCoaList(container, day, catKey, arr){
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    wireLockableTextInput(descInp);
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); }, ()=>{
       /* Fires only once the amount box already held a plain resolved
          number when Enter was pressed - i.e. the user is really done
@@ -2525,6 +2552,7 @@ function drawIouList(container, day){
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    wireLockableTextInput(descInp);
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
@@ -2553,6 +2581,7 @@ function drawPayableList(container, day){
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    wireLockableTextInput(descInp);
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
