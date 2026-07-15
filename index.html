@@ -207,7 +207,8 @@
    Shown faintly in the footer so it's obvious at a glance whether a
    browser/host is serving a stale cached copy after an update - just
    compare what's on screen to what you expect. */
-const APP_BUILD = '2026-07-16.1';
+const APP_BUILD = '2026-07-16.2';
+const APP_UPDATED_LABEL = 'Jul 16, 2026 &middot; 4:10 PM';
 
 /* ======================================================================
    Chart of Accounts
@@ -986,6 +987,21 @@ function highlightMatches(text, query){
   return out;
 }
 
+/* Closes a modal overlay on backdrop click - but only a genuine click.
+   Selecting text inside the box (e.g. dragging right-to-left over a
+   description field) can end the drag with the mouse outside the box,
+   which used to look like a backdrop click and closed the modal
+   mid-selection. Requiring mousedown AND mouseup to both land on the
+   backdrop itself fixes that without losing click-outside-to-close. */
+function wireBackdropClose(overlay){
+  let downOnBackdrop = false;
+  overlay.addEventListener('mousedown', (e)=>{ downOnBackdrop = (e.target===overlay); });
+  overlay.addEventListener('mouseup', (e)=>{
+    if(downOnBackdrop && e.target===overlay) overlay.remove();
+    downOnBackdrop = false;
+  });
+}
+
 /* Native confirm()/alert() are often blocked inside a sandboxed artifact
    iframe (they silently no-op). These custom modals work everywhere. */
 function showModal({message, confirmText='OK', cancelText=null, danger=false, onConfirm}){
@@ -1006,7 +1022,7 @@ function showModal({message, confirmText='OK', cancelText=null, danger=false, on
   const cancelBtn = buttons.length>1 ? buttons[0] : null;
   confirmBtn.onclick = ()=>{ overlay.remove(); if(onConfirm) onConfirm(); };
   if(cancelBtn) cancelBtn.onclick = ()=> overlay.remove();
-  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  wireBackdropClose(overlay);
 }
 function showAlert(message){ showModal({message, confirmText:'OK'}); }
 function showConfirm(message, onConfirm, confirmText='Delete'){ showModal({message, confirmText, cancelText:'Cancel', danger:true, onConfirm}); }
@@ -1038,8 +1054,8 @@ function showSettleIouModal(day, item){
         <select id="settle-cat-select" style="margin:2px 0 10px;">${catOptions}</select>
 
         <label style="font-size:12.5px;color:var(--ink-soft);">Description</label>
-        <input type="text" id="settle-desc-input" value="${escapeHtml(item.desc||'')}" style="margin:2px 0 10px;">
-
+        <input type="text" id="settle-desc-input" list="settle-desc-suggest" value="${escapeHtml(item.desc||'')}" style="margin:2px 0 10px;">
+        <datalist id="settle-desc-suggest"></datalist>
         <label style="font-size:12.5px;color:var(--ink-soft);">Receipt / amount actually spent</label>
         <input type="text" inputmode="decimal" id="settle-amt-input" placeholder="e.g. 930" style="margin:2px 0 4px;">
         <div id="settle-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
@@ -1065,6 +1081,13 @@ function showSettleIouModal(day, item){
   const returnInput = overlay.querySelector('#settle-return-input');
   const errBox = overlay.querySelector('#settle-error');
   const preview = overlay.querySelector('#settle-preview');
+  const descSuggestList = overlay.querySelector('#settle-desc-suggest');
+  const refreshDescSuggestions = ()=>{
+    const opts = descriptionSuggestions(catSelect.value);
+    descSuggestList.innerHTML = opts.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('');
+  };
+  refreshDescSuggestions();
+  catSelect.addEventListener('change', refreshDescSuggestions);
   const buttons = overlay.querySelectorAll('.modal-actions button');
   const cancelBtn = buttons[0], confirmBtn = buttons[1];
 
@@ -1160,7 +1183,7 @@ function showSettleIouModal(day, item){
   cancelBtn.onclick = ()=> overlay.remove();
   input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); returnInput.focus(); } };
   returnInput.onkeydown = (e)=>{ if(e.key==='Enter') doSettle(); };
-  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  wireBackdropClose(overlay);
   setTimeout(()=>input.focus(), 30);
 }
 
@@ -1199,7 +1222,7 @@ function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToChec
   confirmBtn.onclick = attempt;
   cancelBtn.onclick = ()=> overlay.remove();
   input.onkeydown = (e)=>{ if(e.key==='Enter') attempt(); };
-  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  wireBackdropClose(overlay);
   setTimeout(()=>input.focus(), 30);
 }
 
@@ -1246,6 +1269,7 @@ function renderHeader(){
         <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
         <h1>Daily Cash &amp; Bank Ledger</h1>
         <p>${state.setupDone ? `Recording for <strong>${state.month} ${state.year}</strong>` : 'Set up the month before recording daily entries'}</p>
+        <p style="font-size:10.5px;color:var(--ink-soft);opacity:.65;margin-top:2px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</p>
       </div>
       <div class="toolbar">
         ${state.setupDone ? `
@@ -1378,6 +1402,7 @@ function renderLockScreen(){
         <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
         <h1 style="margin-bottom:14px;">&#128274; Locked</h1>
         <p class="subnote">Enter the password to open the Daily Cash &amp; Bank Ledger.</p>
+        <p style="font-size:10.5px;color:var(--ink-soft);opacity:.65;margin:-8px 0 14px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</p>
         <div class="field">
           <label>Password</label>
           <input type="password" id="unlock-pw" autocomplete="current-password">
@@ -2475,7 +2500,7 @@ function renderFooter(){
     <footer class="dl">
       <button class="secondary" data-action="dl-day">Download this day (Excel)</button>
       <button data-action="dl-month">Download whole month (Excel)</button>
-      <div style="width:100%;text-align:center;font-size:10.5px;color:var(--ink-soft);opacity:.6;margin-top:6px;">build ${APP_BUILD}</div>
+      <div style="width:100%;text-align:center;font-size:10.5px;color:var(--ink-soft);opacity:.6;margin-top:6px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</div>
     </footer>
   `);
 }
