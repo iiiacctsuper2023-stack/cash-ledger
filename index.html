@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Daily Cash & Bank Ledger</title>
 <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIkRhaWx5IENhc2ggJiBCYW5rIExlZGdlciIsICJzaG9ydF9uYW1lIjogIkNhc2ggTGVkZ2VyIiwgImRlc2NyaXB0aW9uIjogIkRhaWx5IENhc2ggJiBCYW5rIExlZGdlciBmb3IgdGhlIEludGVybmF0aW9uYWwgSXNsYW1pYyBJbnN0aXR1dGUiLCAic3RhcnRfdXJsIjogIi4iLCAic2NvcGUiOiAiLiIsICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLCAiYmFja2dyb3VuZF9jb2xvciI6ICIjRUVGMEU2IiwgInRoZW1lX2NvbG9yIjogIiMxQjRCNDMiLCAiaWNvbnMiOiBbeyJzcmMiOiAiZGF0YTppbWFnZS9zdmcreG1sO2Jhc2U2NCxQSE4yWnlCNGJXeHVjejBpYUhSMGNEb3ZMM2QzZHk1M015NXZjbWN2TWpBd01DOXpkbWNpSUhacFpYZENiM2c5SWpBZ01DQXlNREFnTWpBd0lqNEtQSEpsWTNRZ2QybGtkR2c5SWpJd01DSWdhR1ZwWjJoMFBTSXlNREFpSUhKNFBTSXlPQ0lnWm1sc2JEMGlJekZDTkVJME15SXZQZ284ZEdWNGRDQjRQU0l4TURBaUlIazlJakV6T0NJZ1ptOXVkQzFtWVcxcGJIazlJa2RsYjNKbmFXRXNJQ2RVYVcxbGN5Qk9aWGNnVW05dFlXNG5MQ0J6WlhKcFppSWdabTl1ZEMxemFYcGxQU0l4TWpBaUlHWnZiblF0ZDJWcFoyaDBQU0kzTURBaUlHWnBiR3c5SWlORlFVUkdRelVpSUhSbGVIUXRZVzVqYUc5eVBTSnRhV1JrYkdVaVB1Q25zend2ZEdWNGRENEtQQzl6ZG1jKyIsICJzaXplcyI6ICJhbnkiLCAidHlwZSI6ICJpbWFnZS9zdmcreG1sIiwgInB1cnBvc2UiOiAiYW55IG1hc2thYmxlIn1dfQ==">
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj4KPHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIHJ4PSIyOCIgZmlsbD0iIzFCNEI0MyIvPgo8dGV4dCB4PSIxMDAiIHk9IjEzOCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSIxMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNFQURGQzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuCnszwvdGV4dD4KPC9zdmc+">
@@ -200,6 +203,12 @@
 <div class="wrap" id="app"></div>
 
 <script>
+/* Bumped by hand whenever a meaningfully new copy of this file is shipped.
+   Shown faintly in the footer so it's obvious at a glance whether a
+   browser/host is serving a stale cached copy after an update - just
+   compare what's on screen to what you expect. */
+const APP_BUILD = '2026-07-16.1';
+
 /* ======================================================================
    Chart of Accounts
    ====================================================================== */
@@ -263,6 +272,7 @@ function defaultState(){
     },
     days:[],
     iouRegistry:[],
+    payableRegistry:[],
     lockPasswordHash:null,
     dayLockPasswordHash:null,
     archive:[],
@@ -372,7 +382,7 @@ function resolveAmountField(inputEl, onChange, fallbackValue){
    typed looks like an arithmetic expression instead (has a +, *, /, or a
    non-leading -), it's left as raw text while typing and only resolved
    into a final number on blur or Enter. */
-function wireAmountInput(inputEl, onChange){
+function wireAmountInput(inputEl, onChange, onPlainEnter){
   const fallbackValue = parseAmountInput(inputEl.value);
   inputEl.addEventListener('input', ()=>{
     const raw = inputEl.value.replace(/,/g,'');
@@ -403,7 +413,26 @@ function wireAmountInput(inputEl, onChange){
   });
   inputEl.addEventListener('blur', ()=>{ resolveAmountField(inputEl, onChange, fallbackValue); });
   inputEl.addEventListener('keydown', (e)=>{
-    if(e.key==='Enter'){ e.preventDefault(); resolveAmountField(inputEl, onChange, fallbackValue); inputEl.blur(); }
+    if(e.key==='Enter'){
+      e.preventDefault();
+      /* If this Enter still has an unresolved expression (e.g. "1500-500"),
+         use it just to resolve/compute the result - don't also treat it as
+         "move to a new line" yet. A second Enter, once the box already
+         shows a plain resolved number, is what actually advances. This
+         stops "compute the total" and "start a new entry" from colliding
+         on the same keypress. */
+      const rawBefore = inputEl.value.replace(/,/g,'').trim();
+      const wasAlreadyPlain = looksLikePlainNumber(rawBefore) && rawBefore!=='';
+      resolveAmountField(inputEl, onChange, fallbackValue);
+      if(wasAlreadyPlain){
+        inputEl.blur();
+        if(onPlainEnter) onPlainEnter();
+      }
+      // else: expression just got resolved into a plain number and stays
+      // focused/selected so the very next Enter (on the now-plain value)
+      // can advance, without having silently skipped a line in between.
+      else { inputEl.select(); }
+    }
   });
 }
 function findDay(id){ return state.days.find(d=>d.id===id); }
@@ -544,6 +573,14 @@ function addDaysStr(dateStr, delta){
    later days, without touching the days it already appeared on. */
 function activeIousForDay(dateStr){
   return state.iouRegistry.filter(r => r.fromDate<=dateStr && (r.toDate===null || dateStr<=r.toDate));
+}
+/* Payables are the reverse of an IOU: money the institution owes a
+   person (e.g. they fronted more than their advance covered). Tracked
+   separately so it's visible and doesn't get forgotten, but - unlike an
+   IOU - it is NOT subtracted from cash in hand, since it isn't cash
+   currently held; it's a future obligation to pay out. */
+function activePayablesForDay(dateStr){
+  return state.payableRegistry.filter(r => r.fromDate<=dateStr && (r.toDate===null || dateStr<=r.toDate));
 }
 
 /* Bangladeshi (Indian numbering: Crore/Lakh/Thousand) taka-in-words formatter */
@@ -809,6 +846,7 @@ function migrateState(){
   (state.days||[]).forEach(day=>{ if(!day.bankTransfers) day.bankTransfers = []; });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
+  if(state.payableRegistry===undefined) state.payableRegistry = [];
   if(!state.archive) state.archive = [];
   if(!state.templates) state.templates = [];
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
@@ -978,6 +1016,154 @@ function showConfirm(message, onConfirm, confirmText='Delete'){ showModal({messa
    calling onConfirm. If no screen-lock password has been set at all, this
    falls back to a plain confirm so the feature doesn't dead-end users who
    never set one. */
+/* Settle (fully or partially) an outstanding IOU in one step: this
+   creates the actual expense voucher under the category chosen AND
+   adjusts the IOU, so nothing has to be entered twice.
+   Deliberately manual/explicit about WHICH IOU and WHICH category -
+   IOU descriptions are often thin or worded differently at the time
+   they're taken, so we don't try to auto-match by text.
+   History-safe: if the IOU has already carried forward from an earlier
+   day, the original record is closed as of yesterday (so past days keep
+   showing the original amount for audit purposes) and, if a balance
+   remains, a new record opens from today with the reduced amount. */
+function showSettleIouModal(day, item){
+  const catOptions = COA.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('');
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p><strong>Settle IOU</strong>${item.desc?` &mdash; ${escapeHtml(item.desc)}`:''}<br>
+        <span style="color:var(--ink-soft);font-size:12.5px;">Outstanding: ${money(item.amount)}, since ${escapeHtml(dayLabel(item.fromDate))}</span></p>
+
+        <label style="font-size:12.5px;color:var(--ink-soft);">Expense category</label>
+        <select id="settle-cat-select" style="margin:2px 0 10px;">${catOptions}</select>
+
+        <label style="font-size:12.5px;color:var(--ink-soft);">Description</label>
+        <input type="text" id="settle-desc-input" value="${escapeHtml(item.desc||'')}" style="margin:2px 0 10px;">
+
+        <label style="font-size:12.5px;color:var(--ink-soft);">Receipt / amount actually spent</label>
+        <input type="text" inputmode="decimal" id="settle-amt-input" placeholder="e.g. 930" style="margin:2px 0 4px;">
+        <div id="settle-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
+
+        <div id="settle-return-wrap" style="display:none;">
+          <label style="font-size:12.5px;color:var(--ink-soft);">Cash handed back now, if any (leave blank if the rest is still owed)</label>
+          <input type="text" inputmode="decimal" id="settle-return-input" placeholder="e.g. 70" style="margin:2px 0 10px;">
+        </div>
+
+        <div id="settle-preview" style="font-size:12.5px;color:var(--ink-soft);margin:-2px 0 10px;min-height:1em;"></div>
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">Settle</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const catSelect = overlay.querySelector('#settle-cat-select');
+  const descInput = overlay.querySelector('#settle-desc-input');
+  const input = overlay.querySelector('#settle-amt-input');
+  const returnWrap = overlay.querySelector('#settle-return-wrap');
+  const returnInput = overlay.querySelector('#settle-return-input');
+  const errBox = overlay.querySelector('#settle-error');
+  const preview = overlay.querySelector('#settle-preview');
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const cancelBtn = buttons[0], confirmBtn = buttons[1];
+
+  const updatePreview = ()=>{
+    const spent = parseAmountInput(input.value);
+    const returned = parseAmountInput(returnInput.value);
+    if(!spent || spent<=0){ preview.textContent=''; returnWrap.style.display='none'; return; }
+    const balanceAfterSpend = item.amount - spent;
+    if(balanceAfterSpend<=0){
+      returnWrap.style.display='none';
+      preview.textContent = spent>item.amount
+        ? `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label} and fully closes this IOU. The extra ${money(spent-item.amount)} is more than the IOU covered &mdash; it'll be tracked as an amount owed back to them until it's paid out.`
+        : `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label} and fully closes this IOU.`;
+      return;
+    }
+    returnWrap.style.display='block';
+    const remaining = balanceAfterSpend - returned;
+    if(returned>0 && remaining<=0){
+      preview.textContent = `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label}, plus ${money(returned)} received back in cash. Fully closes this IOU.`;
+    } else if(returned>0){
+      preview.textContent = `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label}, plus ${money(returned)} received back in cash. Remaining ${money(remaining)} still carries forward.`;
+    } else {
+      preview.textContent = `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label}. Remaining ${money(balanceAfterSpend)} still owed and carries forward from ${dayLabel(day.date)}.`;
+    }
+  };
+  input.addEventListener('input', updatePreview);
+  returnInput.addEventListener('input', updatePreview);
+  catSelect.addEventListener('change', updatePreview);
+
+  const reduceIou = (settledAmount)=>{
+    const remaining = Math.max(0, item.amount - settledAmount);
+    if(item.fromDate===day.date){
+      /* Never carried forward yet - safe to edit the record in place. */
+      if(remaining<=0){
+        const idx = state.iouRegistry.findIndex(x=>x.id===item.id);
+        state.iouRegistry = state.iouRegistry.filter(x=>x.id!==item.id);
+        return ()=>{ state.iouRegistry.splice(idx,0,item); };
+      } else {
+        const prevAmount = item.amount;
+        item.amount = remaining;
+        return ()=>{ item.amount = prevAmount; };
+      }
+    } else {
+      /* Has carried-forward history - close the original as of yesterday
+         so earlier days keep showing the original amount, and open a
+         fresh record from today for any remaining balance. */
+      const prevToDate = item.toDate;
+      item.toDate = addDaysStr(day.date, -1);
+      let newItem = null;
+      if(remaining>0){
+        newItem = {id:uid(), desc:item.desc, amount:remaining, fromDate:day.date, toDate:null};
+        state.iouRegistry.push(newItem);
+      }
+      return ()=>{
+        item.toDate = prevToDate;
+        if(newItem) state.iouRegistry = state.iouRegistry.filter(x=>x.id!==newItem.id);
+      };
+    }
+  };
+
+  const doSettle = ()=>{
+    const spent = parseAmountInput(input.value);
+    if(!spent || spent<=0){ errBox.textContent = 'Enter a positive amount.'; return; }
+    const returned = Math.max(0, parseAmountInput(returnInput.value));
+    const catKey = catSelect.value;
+    const desc = descInput.value.trim();
+    const overage = Math.max(0, spent - item.amount);
+
+    const voucher = addCoaVoucher(day, catKey);
+    voucher.desc = desc;
+    voucher.amount = spent;
+    const prevRevenue = day.serviceRevenue;
+    if(returned>0) day.serviceRevenue = (Number(day.serviceRevenue)||0) + returned;
+    const undoIou = reduceIou(spent + returned);
+
+    let newPayable = null;
+    if(overage>0){
+      newPayable = {id:uid(), desc, amount:overage, fromDate:day.date, toDate:null};
+      state.payableRegistry.push(newPayable);
+    }
+
+    pushUndo('IOU settlement undone.', ()=>{
+      day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==voucher.id);
+      day.serviceRevenue = prevRevenue;
+      undoIou();
+      if(newPayable) state.payableRegistry = state.payableRegistry.filter(x=>x.id!==newPayable.id);
+    });
+    saveState();
+    overlay.remove();
+    render();
+  };
+  confirmBtn.onclick = doSettle;
+  cancelBtn.onclick = ()=> overlay.remove();
+  input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); returnInput.focus(); } };
+  returnInput.onkeydown = (e)=>{ if(e.key==='Enter') doSettle(); };
+  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  setTimeout(()=>input.focus(), 30);
+}
+
 function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToCheck){
   if(hashToCheck===undefined) hashToCheck = state.lockPasswordHash;
   if(!hashToCheck){ showConfirm(message, onConfirm, confirmText); return; }
@@ -1467,6 +1653,13 @@ function renderDayPanel(dayId, computed){
       <div id="iou-list"></div>
       <button class="secondary small" data-action="add-iou" data-day="${day.id}">+ Add IOU line</button>
 
+      <div class="divider"></div>
+
+      <label>Owed back to a person <span class="tag">reverse IOU</span></label>
+      <p class="subnote" style="margin-top:-4px;">For when someone fronted more than their advance covered. Not subtracted from cash in hand (it's not cash you're holding) &mdash; just kept visible so it doesn't get forgotten. Mark it Paid once you've actually handed the cash over (and entered that as its own voucher).</p>
+      <div id="payable-list"></div>
+      <button class="secondary small" data-action="add-payable" data-day="${day.id}">+ Add manually</button>
+
       <div class="computed" style="margin-top:12px;"><span class="lbl">Total cash disbursed (CoA + deposits)</span><span id="c-totalCashDisbursed">${money(c.totalCashDisbursed)}</span></div>
       <div class="computed"><span class="lbl">Closing amount</span><span id="c-closingAmount">${money(c.closingAmount)}</span></div>
       <div class="computed"><span class="lbl">Total IOU</span><span id="c-iouTotal">${money(c.iouTotal)}</span></div>
@@ -1475,6 +1668,7 @@ function renderDayPanel(dayId, computed){
   `);
   drawTransferList(depIouCard.querySelector('#deposit-list'), day, 'deposits', 'No deposits today.');
   drawIouList(depIouCard.querySelector('#iou-list'), day);
+  drawPayableList(depIouCard.querySelector('#payable-list'), day);
   if(day.locked) depIouCard.classList.add('locked-day');
   wrap.appendChild(depIouCard);
 
@@ -1596,6 +1790,8 @@ function renderDashboardCard(){
   const today = new Date().toISOString().slice(0,10);
   const outstandingIous = (state.iouRegistry||[]).filter(i=> i.toDate===null || i.toDate>=today);
   const outstandingTotal = outstandingIous.reduce((s,i)=>s+(Number(i.amount)||0),0);
+  const outstandingPayables = (state.payableRegistry||[]).filter(i=> i.toDate===null || i.toDate>=today);
+  const outstandingPayableTotal = outstandingPayables.reduce((s,i)=>s+(Number(i.amount)||0),0);
 
   const bankBoxes = latestComputed ? state.banks.map(b=>{
     const bc = latestComputed.banks[b.id];
@@ -1620,6 +1816,7 @@ function renderDashboardCard(){
         <div class="summary-box" style="border-color:var(--primary);"><div class="lbl">This month's revenue collected</div><div class="val" style="color:var(--primary-dark);">${money(monthRevenue)}</div></div>
         <div class="summary-box"><div class="lbl">This month's total expenditure</div><div class="val">${money(monthTotal)}</div></div>
         <div class="summary-box" style="${outstandingTotal>0?'border-color:var(--danger);':''}"><div class="lbl">Outstanding IOUs</div><div class="val" style="${outstandingTotal>0?'color:var(--danger);':''}">${money(outstandingTotal)}</div></div>
+        ${outstandingPayableTotal>0 ? `<div class="summary-box" style="border-color:#B8860B;"><div class="lbl">Owed back to staff</div><div class="val" style="color:#B8860B;">${money(outstandingPayableTotal)}</div></div>` : ''}
       </div>
       ${sparkline ? `
       <div class="divider"></div>
@@ -1635,6 +1832,11 @@ function renderDashboardCard(){
       <div class="divider"></div>
       <h3 style="font-size:14px;">Outstanding IOUs</h3>
       ${outstandingIous.map(i=>`<div class="computed"><span class="lbl">${escapeHtml(i.desc||'IOU')} &middot; since ${dayLabel(i.fromDate)}</span><span>${money(i.amount)}</span></div>`).join('')}
+      ` : ''}
+      ${outstandingPayables.length>0 ? `
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Owed back to staff</h3>
+      ${outstandingPayables.map(i=>`<div class="computed"><span class="lbl">${escapeHtml(i.desc||'Owed')} &middot; since ${dayLabel(i.fromDate)}</span><span>${money(i.amount)}</span></div>`).join('')}
       ` : ''}
     </div>
   `);
@@ -2186,31 +2388,28 @@ function drawCoaList(container, day, catKey, arr){
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
-    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); }, ()=>{
+      /* Fires only once the amount box already held a plain resolved
+         number when Enter was pressed - i.e. the user is really done
+         with this line, not just finishing a calculation. */
+      if(day.locked) return;
+      addCoaVoucher(day, catKey);
+      saveState();
+      render();
+      const freshContainer = document.getElementById('coa-list-'+catKey);
+      if(freshContainer){
+        const descInputs = freshContainer.querySelectorAll('.desc-input');
+        const last = descInputs[descInputs.length-1];
+        if(last) last.focus();
+      }
+    });
     amtInp.addEventListener('blur', ()=>{
       const msg = checkDuplicateAmount(day, item.amount, item.id);
       if(msg) showDuplicateWarning(msg);
     });
-    /* Keyboard quick entry: Enter in Description jumps to Amount; Enter in
-       Amount (once resolved) adds a new line in the same category and
-       focuses its Description field, for fast heads-down data entry. */
+    /* Keyboard quick entry: Enter in Description jumps to Amount. */
     descInp.addEventListener('keydown', (e)=>{
       if(e.key==='Enter'){ e.preventDefault(); amtInp.focus(); amtInp.select(); }
-    });
-    amtInp.addEventListener('keydown', (e)=>{
-      if(e.key==='Enter'){
-        e.preventDefault();
-        if(day.locked) return;
-        addCoaVoucher(day, catKey);
-        saveState();
-        render();
-        const freshContainer = document.getElementById('coa-list-'+catKey);
-        if(freshContainer){
-          const descInputs = freshContainer.querySelectorAll('.desc-input');
-          const last = descInputs[descInputs.length-1];
-          if(last) last.focus();
-        }
-      }
     });
     container.appendChild(row);
   });
@@ -2231,7 +2430,36 @@ function drawIouList(container, day){
           <input type="text" class="desc-input" list="iou-desc-suggest" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load">
         </div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="secondary small" type="button" data-action="open-settle-iou" data-day="${day.id}" data-item="${item.id}" title="Record a receipt/repayment against this IOU">Settle</button>
         <button class="danger small" type="button" data-action="remove-iou" data-day="${day.id}" data-item="${item.id}" title="Remove (stops it carrying forward)">&times;</button>
+      </div>
+    `);
+    const descInp = row.querySelector('.desc-input');
+    const amtInp = row.querySelector('.amt-input');
+    descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    container.appendChild(row);
+  });
+}
+
+/* Payables mirror the IOU list UI, but represent the reverse direction
+   (institution owes a person). "Paid" just removes/closes it here -
+   the actual cash payout still needs its own voucher entered under the
+   relevant category, same as any other disbursement. */
+function drawPayableList(container, day){
+  const arr = activePayablesForDay(day.date);
+  container.innerHTML = '';
+  if(arr.length===0){ container.appendChild(el(`<p class="empty">Nothing owed to anyone right now.</p>`)); return; }
+  arr.forEach((item)=>{
+    const carried = item.fromDate < day.date;
+    const row = el(`
+      <div class="line-item">
+        <div class="field desc" style="margin-bottom:0;">
+          <label>Description ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
+          <input type="text" class="desc-input" value="${escapeHtml(item.desc)}" placeholder="e.g. Khairul - extra fronted">
+        </div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount owed</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="secondary small" type="button" data-action="pay-payable" data-day="${day.id}" data-item="${item.id}" title="Mark as paid out (remember to also enter the cash voucher)">Paid</button>
       </div>
     `);
     const descInp = row.querySelector('.desc-input');
@@ -2247,6 +2475,7 @@ function renderFooter(){
     <footer class="dl">
       <button class="secondary" data-action="dl-day">Download this day (Excel)</button>
       <button data-action="dl-month">Download whole month (Excel)</button>
+      <div style="width:100%;text-align:center;font-size:10.5px;color:var(--ink-soft);opacity:.6;margin-top:6px;">build ${APP_BUILD}</div>
     </footer>
   `);
 }
@@ -2384,6 +2613,12 @@ function wireDelegation(){
       saveState(); render(); return;
     }
     if(action==='add-iou'){ if(day.locked) return; state.iouRegistry.push({id:uid(), desc:'', amount:0, fromDate:day.date, toDate:null}); render(); return; }
+    if(action==='open-settle-iou'){
+      if(day.locked) return;
+      const item = state.iouRegistry.find(x=>x.id===t.dataset.item);
+      if(item) showSettleIouModal(day, item);
+      return;
+    }
     if(action==='remove-iou'){
       if(day.locked) return;
       const item = state.iouRegistry.find(x=>x.id===t.dataset.item);
@@ -2396,6 +2631,29 @@ function wireDelegation(){
           const prevToDate = item.toDate;
           item.toDate = addDaysStr(day.date, -1);
           pushUndo('IOU stopped carrying forward.', ()=>{ item.toDate = prevToDate; });
+        }
+      }
+      saveState(); render();
+      return;
+    }
+    if(action==='add-payable'){
+      if(day.locked) return;
+      state.payableRegistry.push({id:uid(), desc:'', amount:0, fromDate:day.date, toDate:null});
+      render();
+      return;
+    }
+    if(action==='pay-payable'){
+      if(day.locked) return;
+      const item = state.payableRegistry.find(x=>x.id===t.dataset.item);
+      if(item){
+        if(item.fromDate===day.date){
+          const idx = state.payableRegistry.findIndex(x=>x.id===item.id);
+          state.payableRegistry = state.payableRegistry.filter(x=>x.id!==item.id);
+          pushUndo('Payable marked paid.', ()=>{ state.payableRegistry.splice(idx,0,item); });
+        } else {
+          const prevToDate = item.toDate;
+          item.toDate = addDaysStr(day.date, -1);
+          pushUndo('Payable marked paid.', ()=>{ item.toDate = prevToDate; });
         }
       }
       saveState(); render();
