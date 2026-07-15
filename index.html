@@ -1002,6 +1002,58 @@ function wireBackdropClose(overlay){
   });
 }
 
+/* Moves a voucher that was entered under the wrong category to the
+   correct one. Gets a fresh voucher number in the destination category
+   (so its code always matches where it's actually filed) but keeps the
+   description, amount and review status. */
+function showMoveVoucherModal(day, fromCatKey, item){
+  const fromLabel = COA.find(c=>c.key===fromCatKey).label;
+  const catOptions = COA.filter(c=>c.key!==fromCatKey).map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('');
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p><strong>Move voucher</strong><br>
+        <span style="color:var(--ink-soft);font-size:12.5px;">${escapeHtml(item.voucher)} &mdash; ${escapeHtml(item.desc||'(no description)')} &mdash; ${money(item.amount)}<br>Currently under: ${escapeHtml(fromLabel)}</span></p>
+        <label style="font-size:12.5px;color:var(--ink-soft);">Move to</label>
+        <select id="move-cat-select" style="margin:2px 0 10px;">
+          <option value="" selected>-- Select a category --</option>
+          ${catOptions}
+        </select>
+        <div id="move-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">Move</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const catSelect = overlay.querySelector('#move-cat-select');
+  const errBox = overlay.querySelector('#move-error');
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const cancelBtn = buttons[0], confirmBtn = buttons[1];
+  const doMove = ()=>{
+    const toCatKey = catSelect.value;
+    if(!toCatKey){ errBox.textContent = 'Select a destination category.'; catSelect.focus(); return; }
+    day.coa[fromCatKey] = day.coa[fromCatKey].filter(x=>x.id!==item.id);
+    const newVoucher = addCoaVoucher(day, toCatKey);
+    newVoucher.desc = item.desc;
+    newVoucher.amount = item.amount;
+    newVoucher.status = item.status;
+    pushUndo(`Voucher moved to ${COA.find(c=>c.key===toCatKey).label} - undone.`, ()=>{
+      day.coa[toCatKey] = day.coa[toCatKey].filter(x=>x.id!==newVoucher.id);
+      day.coa[fromCatKey].push(item);
+    });
+    saveState();
+    overlay.remove();
+    render();
+  };
+  confirmBtn.onclick = doMove;
+  cancelBtn.onclick = ()=> overlay.remove();
+  wireBackdropClose(overlay);
+  setTimeout(()=>catSelect.focus(), 30);
+}
+
 /* Native confirm()/alert() are often blocked inside a sandboxed artifact
    iframe (they silently no-op). These custom modals work everywhere. */
 function showModal({message, confirmText='OK', cancelText=null, danger=false, onConfirm}){
@@ -1051,13 +1103,16 @@ function showSettleIouModal(day, item){
         <span style="color:var(--ink-soft);font-size:12.5px;">Outstanding: ${money(item.amount)}, since ${escapeHtml(dayLabel(item.fromDate))}</span></p>
 
         <label style="font-size:12.5px;color:var(--ink-soft);">Expense category</label>
-        <select id="settle-cat-select" style="margin:2px 0 10px;">${catOptions}</select>
+        <select id="settle-cat-select" style="margin:2px 0 10px;">
+          <option value="" selected>-- Select a category --</option>
+          ${catOptions}
+        </select>
 
         <label style="font-size:12.5px;color:var(--ink-soft);">Description</label>
         <input type="text" id="settle-desc-input" list="settle-desc-suggest" value="${escapeHtml(item.desc||'')}" style="margin:2px 0 10px;">
         <datalist id="settle-desc-suggest"></datalist>
         <label style="font-size:12.5px;color:var(--ink-soft);">Receipt / amount actually spent</label>
-        <input type="text" inputmode="decimal" id="settle-amt-input" placeholder="e.g. 930" style="margin:2px 0 4px;">
+        <input type="text" inputmode="decimal" id="settle-amt-input" placeholder="e.g. 930 or 1000-70" style="margin:2px 0 4px;">
         <div id="settle-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
 
         <div id="settle-return-wrap" style="display:none;">
@@ -1083,7 +1138,7 @@ function showSettleIouModal(day, item){
   const preview = overlay.querySelector('#settle-preview');
   const descSuggestList = overlay.querySelector('#settle-desc-suggest');
   const refreshDescSuggestions = ()=>{
-    const opts = descriptionSuggestions(catSelect.value);
+    const opts = catSelect.value ? descriptionSuggestions(catSelect.value) : [];
     descSuggestList.innerHTML = opts.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('');
   };
   refreshDescSuggestions();
@@ -1091,30 +1146,36 @@ function showSettleIouModal(day, item){
   const buttons = overlay.querySelectorAll('.modal-actions button');
   const cancelBtn = buttons[0], confirmBtn = buttons[1];
 
-  const updatePreview = ()=>{
-    const spent = parseAmountInput(input.value);
-    const returned = parseAmountInput(returnInput.value);
+  /* Calculator-style amount boxes, same as everywhere else in the app:
+     you can type "1500-500" and it resolves to 1000 on blur/Enter. */
+  let spentVal = 0, returnedVal = 0;
+  wireAmountInput(input, (num)=>{ spentVal = num; updatePreview(); });
+  wireAmountInput(returnInput, (num)=>{ returnedVal = num; updatePreview(); });
+
+  function updatePreview(){
+    const spent = spentVal;
+    const returned = returnedVal;
     if(!spent || spent<=0){ preview.textContent=''; returnWrap.style.display='none'; return; }
+    if(!catSelect.value){ preview.textContent = 'Pick a category to see what this will record.'; returnWrap.style.display='none'; return; }
+    const catLabel = COA.find(c=>c.key===catSelect.value).label;
     const balanceAfterSpend = item.amount - spent;
     if(balanceAfterSpend<=0){
       returnWrap.style.display='none';
       preview.textContent = spent>item.amount
-        ? `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label} and fully closes this IOU. The extra ${money(spent-item.amount)} is more than the IOU covered &mdash; it'll be tracked as an amount owed back to them until it's paid out.`
-        : `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label} and fully closes this IOU.`;
+        ? `Records ${money(spent)} under ${catLabel} and fully closes this IOU. The extra ${money(spent-item.amount)} is more than the IOU covered &mdash; it'll be tracked as an amount owed back to them until it's paid out.`
+        : `Records ${money(spent)} under ${catLabel} and fully closes this IOU.`;
       return;
     }
     returnWrap.style.display='block';
     const remaining = balanceAfterSpend - returned;
     if(returned>0 && remaining<=0){
-      preview.textContent = `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label}, plus ${money(returned)} received back in cash. Fully closes this IOU.`;
+      preview.textContent = `Records ${money(spent)} under ${catLabel}, plus ${money(returned)} received back in cash. Fully closes this IOU.`;
     } else if(returned>0){
-      preview.textContent = `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label}, plus ${money(returned)} received back in cash. Remaining ${money(remaining)} still carries forward.`;
+      preview.textContent = `Records ${money(spent)} under ${catLabel}, plus ${money(returned)} received back in cash. Remaining ${money(remaining)} still carries forward.`;
     } else {
-      preview.textContent = `Records ${money(spent)} under ${COA.find(c=>c.key===catSelect.value).label}. Remaining ${money(balanceAfterSpend)} still owed and carries forward from ${dayLabel(day.date)}.`;
+      preview.textContent = `Records ${money(spent)} under ${catLabel}. Remaining ${money(balanceAfterSpend)} still owed and carries forward from ${dayLabel(day.date)}.`;
     }
-  };
-  input.addEventListener('input', updatePreview);
-  returnInput.addEventListener('input', updatePreview);
+  }
   catSelect.addEventListener('change', updatePreview);
 
   const reduceIou = (settledAmount)=>{
@@ -1149,10 +1210,11 @@ function showSettleIouModal(day, item){
   };
 
   const doSettle = ()=>{
-    const spent = parseAmountInput(input.value);
-    if(!spent || spent<=0){ errBox.textContent = 'Enter a positive amount.'; return; }
-    const returned = Math.max(0, parseAmountInput(returnInput.value));
     const catKey = catSelect.value;
+    if(!catKey){ errBox.textContent = 'Select an expense category first - settling needs to know where this money was actually spent.'; catSelect.focus(); return; }
+    const spent = spentVal;
+    if(!spent || spent<=0){ errBox.textContent = 'Enter a positive amount.'; return; }
+    const returned = Math.max(0, returnedVal);
     const desc = descInput.value.trim();
     const overage = Math.max(0, spent - item.amount);
 
@@ -2407,6 +2469,7 @@ function drawCoaList(container, day, catKey, arr){
         <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
         <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?"></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <button class="secondary small" type="button" data-action="open-move-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Move to a different category" ${day.locked?'disabled':''}>&#8646; Move</button>
         <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
       </div>
     `);
@@ -2730,6 +2793,13 @@ function wireDelegation(){
       day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==t.dataset.item);
       pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{ day.coa[catKey].splice(idx,0,removed); });
       saveState(); render();
+      return;
+    }
+    if(action==='open-move-coa'){
+      if(day.locked) return;
+      const catKey = t.dataset.cat;
+      const item = day.coa[catKey].find(x=>x.id===t.dataset.item);
+      if(item) showMoveVoucherModal(day, catKey, item);
       return;
     }
 
