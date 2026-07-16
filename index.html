@@ -3007,7 +3007,17 @@ function cloneTemplateSheet(destWb, srcWs, name){
     }
   }
   (srcWs.model.merges||[]).forEach(rng=>{ try{ ws.mergeCells(rng); }catch(e){ /* already covered */ } });
-  ws.pageSetup = JSON.parse(JSON.stringify(srcWs.pageSetup));
+  /* Copy page setup (orientation, margins, paper size, fit-to-page) but
+     drop printArea specifically - ExcelJS bakes the SOURCE sheet's name
+     into that string (e.g. "'Voucher'!$A$1:$H$30"), and copying it
+     verbatim onto a differently-named destination sheet writes a
+     Print_Area defined name in workbook.xml that points at a range/sheet
+     that doesn't match. Excel treats that as corruption and "repairs" the
+     file by discarding it on open. Each cloned voucher sheet doesn't need
+     an explicit print area anyway - it's a single page either way. */
+  const clonedPageSetup = JSON.parse(JSON.stringify(srcWs.pageSetup));
+  delete clonedPageSetup.printArea;
+  ws.pageSetup = clonedPageSetup;
   return ws;
 }
 
