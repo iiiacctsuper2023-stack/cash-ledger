@@ -3009,17 +3009,18 @@ function cloneTemplateSheet(destWb, srcWs, name){
     }
   }
   (srcWs.model.merges||[]).forEach(rng=>{ try{ ws.mergeCells(rng); }catch(e){ /* already covered */ } });
-  /* Copy page setup (orientation, margins, paper size, fit-to-page) but
-     drop printArea specifically - ExcelJS bakes the SOURCE sheet's name
-     into that string (e.g. "'Voucher'!$A$1:$H$30"), and copying it
-     verbatim onto a differently-named destination sheet writes a
-     Print_Area defined name in workbook.xml that points at a range/sheet
-     that doesn't match. Excel treats that as corruption and "repairs" the
-     file by discarding it on open. Each cloned voucher sheet doesn't need
-     an explicit print area anyway - it's a single page either way. */
-  const clonedPageSetup = JSON.parse(JSON.stringify(srcWs.pageSetup));
-  delete clonedPageSetup.printArea;
-  ws.pageSetup = clonedPageSetup;
+  /* Copy page setup (orientation, margins, paper size, fit-to-page,
+     print area) as-is. printArea itself is just a bare cell range like
+     "A2:I37" - no sheet name embedded - so copying it is safe. The
+     earlier corruption came from ExcelJS not escaping an apostrophe
+     when it QUOTES the destination sheet's name while writing the
+     Print_Area defined name; that's now fixed at the source by
+     stripping apostrophes out of voucher sheet names in
+     appendDebitVoucherSheets, so printArea can stay - dropping it
+     entirely made Excel fit-to-page the sheet's whole used range
+     instead of just the voucher area, printing everything smaller
+     than intended. */
+  ws.pageSetup = JSON.parse(JSON.stringify(srcWs.pageSetup));
   return ws;
 }
 
@@ -3056,7 +3057,7 @@ async function appendDebitVoucherSheets(wb, day, used){
   catch(e){ return; } // if the template can't load, skip vouchers rather than block the whole export
   entries.forEach(({cat, item, amt})=>{
     const label = (item.desc && item.desc.trim()) ? item.desc.trim() : cat.label;
-    const sheetName = uniqueSheetName(label.replace(/[\\/\?\*\[\]:]/g,''), used);
+    const sheetName = uniqueSheetName(label.replace(/[\\/\?\*\[\]:']/g,''), used);
     const ws = cloneTemplateSheet(wb, srcWs, sheetName);
     ws.getCell('C9').value = item.voucher;
     ws.getCell('H9').value = `${dayLabelFull(day.date)} ${state.year}`;
@@ -3068,6 +3069,8 @@ async function appendDebitVoucherSheets(wb, day, used){
     /* No & Description boxes: top-left aligned */
     ws.getCell('C9').alignment = {horizontal:'left', vertical:'top'};
     ws.getCell('B14').alignment = {horizontal:'left', vertical:'top', wrapText:true};
+    /* In Words box: wrap so longer amounts (e.g. lakhs/crores) don't get cut off */
+    ws.getCell('B28').alignment = {horizontal:'left', vertical:'top', wrapText:true};
     /* Taka (amount) box: top-center aligned */
     ws.getCell('G14').alignment = {horizontal:'center', vertical:'top'};
     /* Bottom border under the Total Amount / In Words line */
