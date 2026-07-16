@@ -127,6 +127,35 @@
   .status-badge.status-reviewed{background:#DCEBFB;color:#1D5FA8;border-color:#BBDAF5;}
   .status-badge.status-approved{background:#DDEEE3;color:var(--primary-dark);border-color:#BFE0CC;}
   input.locked-text{background:var(--card-alt,#F7F8F4);cursor:default;color:var(--ink-soft);}
+
+  .section-nav{position:fixed;right:8px;top:50%;transform:translateY(-50%);z-index:420;display:flex;flex-direction:column;gap:7px;}
+  .section-nav-item{position:relative;}
+  .section-nav-dot{
+    width:34px;height:34px;border-radius:50%;
+    background:var(--primary-dark);color:#fff;border:2px solid #fff;
+    font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:var(--shadow-md,0 2px 8px rgba(0,0,0,.18));
+    cursor:pointer;opacity:.82;transition:opacity .15s var(--ease),transform .12s var(--ease);
+    padding:0;
+  }
+  .section-nav-dot:hover, .section-nav-item.open .section-nav-dot{opacity:1;transform:scale(1.07);}
+  .section-nav-flyout{
+    display:none;position:absolute;right:42px;top:50%;transform:translateY(-50%);
+    background:#fff;border:1px solid var(--line-soft);border-radius:10px;
+    box-shadow:var(--shadow-lg);padding:6px;min-width:190px;max-height:60vh;overflow-y:auto;
+  }
+  .section-nav-item.open .section-nav-flyout{display:block;}
+  .section-nav-flyout-title{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;padding:4px 8px 6px;}
+  .section-nav-flyout-item{
+    display:block;width:100%;text-align:left;background:none;border:none;
+    font-size:12.5px;padding:7px 8px;border-radius:6px;cursor:pointer;color:var(--ink);
+  }
+  .section-nav-flyout-item:hover{background:var(--card-alt,#F7F8F4);}
+  @media (max-width: 480px){
+    .section-nav-dot{width:30px;height:30px;font-size:10.5px;}
+    .section-nav{right:4px;gap:6px;}
+  }
   .day-panel.locked{position:relative;}
   .day-panel.locked::after{
     content:'\1F512';
@@ -1651,7 +1680,7 @@ function renderDayPanel(dayId, computed){
 
   /* --- 01 Cash received --- */
   const cashCard = el(`
-    <div class="card">
+    <div class="card" id="section-cash-received">
       <h3><span class="num">01</span> Cash received &mdash; ${dayLabel(day.date)}</h3>
       <div class="row">
         <div class="field">
@@ -1693,7 +1722,7 @@ function renderDayPanel(dayId, computed){
 
   /* --- 02 CoA disbursements --- */
   const coaCard = el(`
-    <div class="card">
+    <div class="card" id="section-cash-disbursed">
       <h3><span class="num">02</span> Cash disbursed &mdash; by Chart of Accounts</h3>
       <p class="subnote">Every voucher is classified into one CoA category first. The voucher code (short form + running number + month/year, e.g. Trans7/7/26) is generated automatically the moment you add a line.</p>
       <button class="secondary small" type="button" id="toggle-voucher-numbering">${voucherCounterSettingsOpen?'Hide':'Set'} starting voucher numbers</button>
@@ -1733,7 +1762,7 @@ function renderDayPanel(dayId, computed){
     const items = day.coa[cat.key];
     const catTemplates = state.templates.filter(t=>t.catKey===cat.key);
     const section = el(`
-      <div style="margin-bottom:14px;padding-bottom:12px;${ci<COA.length-1?'border-bottom:1px solid var(--line-soft);':''}">
+      <div id="cat-section-${cat.key}" style="margin-bottom:14px;padding-bottom:12px;${ci<COA.length-1?'border-bottom:1px solid var(--line-soft);':''}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;">
           <strong style="font-size:13.5px;">${String(ci+1).padStart(2,'0')} &middot; ${cat.label} <span class="tag">${cat.short}</span></strong>
           <span class="mono" style="font-size:12.5px;color:var(--ink-soft);">Category total: <span id="coa-cat-total-${cat.key}">${money(c.coaTotals[cat.key]||0)}</span></span>
@@ -1752,7 +1781,7 @@ function renderDayPanel(dayId, computed){
 
   /* --- 03 Deposits + IOU --- */
   const depIouCard = el(`
-    <div class="card">
+    <div class="card" id="section-deposits-iou">
       <h3><span class="num">03</span> Deposits to bank &amp; IOUs</h3>
       <label>Cash deposited into a bank (drains cash, adds to that bank) <span class="tag">optional</span></label>
       <div id="deposit-list"></div>
@@ -1789,7 +1818,7 @@ function renderDayPanel(dayId, computed){
     const bd = ensureBankDaily(day, b.id);
     const bc = c.banks[b.id];
     const bankCard = el(`
-      <div class="card">
+      <div class="card" id="section-bank-${b.id}">
         <h3><span class="num">0${4+bi}</span> Bank &mdash; ${escapeHtml(b.name)}</h3>
         <div class="computed"><span class="lbl">Beginning balance <span class="tag">auto</span></span><span id="bc-opening-${b.id}">${money(bc.opening)}</span></div>
         <div class="row" style="margin-top:10px;">
@@ -1873,8 +1902,68 @@ function renderDayPanel(dayId, computed){
     </div>
   `);
   wrap.appendChild(summary);
+  wrap.appendChild(renderSectionNav(day));
 
   return wrap;
+}
+
+/* Floating section-jump nav for the day panel. Numbered dots for the
+   day's 5(ish) top-level sections (Cash received / Cash disbursed /
+   Deposits+IOU / one per bank) stay fixed on screen while scrolling, so
+   a long voucher list doesn't mean a long scroll to reach another
+   section. The Cash disbursed dot opens a flyout of the 10 CoA
+   categories so you can jump straight into e.g. Transport or
+   Miscellaneous without scrolling past every category in between. */
+function renderSectionNav(day){
+  const sections = [
+    {id:'section-cash-received', num:'01', label:'Cash received'},
+    {id:'section-cash-disbursed', num:'02', label:'Cash disbursed', flyout:COA.map((cat,i)=>({id:'cat-section-'+cat.key, num:String(i+1).padStart(2,'0'), label:cat.label}))},
+    {id:'section-deposits-iou', num:'03', label:'Deposits & IOUs'},
+    ...state.banks.map((b,bi)=>({id:'section-bank-'+b.id, num:String(4+bi).padStart(2,'0'), label:b.name})),
+  ];
+  const nav = el(`<nav class="section-nav" aria-label="Jump to section"></nav>`);
+  const scrollToId = (id)=>{
+    const target = document.getElementById(id);
+    if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+  };
+  sections.forEach(sec=>{
+    const dot = el(`
+      <div class="section-nav-item">
+        <button type="button" class="section-nav-dot" title="${escapeHtml(sec.label)}">${sec.num}</button>
+        ${sec.flyout ? `<div class="section-nav-flyout"></div>` : ''}
+      </div>
+    `);
+    const dotBtn = dot.querySelector('.section-nav-dot');
+    const closeOtherFlyouts = ()=>{
+      nav.querySelectorAll('.section-nav-item.open').forEach(d=>{ if(d!==dot) d.classList.remove('open'); });
+    };
+    if(sec.flyout){
+      const flyout = dot.querySelector('.section-nav-flyout');
+      flyout.appendChild(el(`<div class="section-nav-flyout-title">${escapeHtml(sec.label)}</div>`));
+      sec.flyout.forEach(sub=>{
+        const subBtn = el(`<button type="button" class="section-nav-flyout-item">${sub.num} &middot; ${escapeHtml(sub.label)}</button>`);
+        subBtn.onclick = ()=>{ scrollToId(sub.id); dot.classList.remove('open'); };
+        flyout.appendChild(subBtn);
+      });
+      dotBtn.onclick = ()=>{ closeOtherFlyouts(); dot.classList.toggle('open'); };
+    } else {
+      dotBtn.onclick = ()=>{ closeOtherFlyouts(); scrollToId(sec.id); };
+    }
+    nav.appendChild(dot);
+  });
+  ensureSectionNavGlobalListener();
+  return nav;
+}
+let sectionNavGlobalListenerWired = false;
+function ensureSectionNavGlobalListener(){
+  if(sectionNavGlobalListenerWired) return;
+  sectionNavGlobalListenerWired = true;
+  /* One listener for the app's lifetime, not one per render - it always
+     looks up whichever .section-nav is currently in the DOM. */
+  document.addEventListener('click', (e)=>{
+    const nav = document.querySelector('.section-nav');
+    if(nav && !nav.contains(e.target)) nav.querySelectorAll('.section-nav-item.open').forEach(d=>d.classList.remove('open'));
+  });
 }
 
 /* --- Advanced Search: find any Cash Disbursed voucher across every
@@ -3463,14 +3552,23 @@ async function exportMonth(){
 /* ======================================================================
    Boot
    ====================================================================== */
-/* --- PWA installability ------------------------------------------------
+/* --- PWA installability & offline caching -------------------------------
    The manifest link in <head> (with an embedded icon) is what lets the
    browser offer "Install" at all. This only matters when the file is
    hosted over https:// (or localhost) - a local file:// double-click and
    Claude.ai's sandboxed artifact iframe generally won't offer an install
    prompt no matter what, that's a browser platform restriction, not
    something fixable from inside the page. Where it IS available, capture
-   the prompt so the header's "Install App" button can trigger it. */
+   the prompt so the header's "Install App" button can trigger it.
+
+   Actual offline support needs a REAL service worker file (sw.js) served
+   from the same origin - a blob: URL service worker (what used to be
+   registered here) can't reliably take control of or cache the page
+   itself, so it never actually enabled offline use. If a sibling sw.js
+   isn't present next to this HTML file (e.g. it hasn't been uploaded to
+   the host yet, or this file is being viewed somewhere without one),
+   registration just quietly fails and the app keeps working online only -
+   nothing here depends on it being present. */
 if(typeof window!=='undefined' && typeof window.addEventListener==='function'){
   window.addEventListener('beforeinstallprompt', (e)=>{
     e.preventDefault();
@@ -3479,11 +3577,7 @@ if(typeof window!=='undefined' && typeof window.addEventListener==='function'){
   });
 }
 if(typeof navigator!=='undefined' && 'serviceWorker' in navigator && typeof location!=='undefined' && (location.protocol==='https:' || location.hostname==='localhost')){
-  try{
-    const swCode = "self.addEventListener('fetch', function(){});";
-    const swUrl = URL.createObjectURL(new Blob([swCode], {type:'application/javascript'}));
-    navigator.serviceWorker.register(swUrl).catch(()=>{ /* best effort - some browsers block blob: service workers */ });
-  }catch(e){ /* ignore - manifest alone is enough for installability in most current browsers */ }
+  navigator.serviceWorker.register('./sw.js').catch(()=>{ /* no sw.js next to this file (yet) - fine, app still works online */ });
 }
 
 (async function boot(){
