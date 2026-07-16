@@ -128,33 +128,35 @@
   .status-badge.status-approved{background:#DDEEE3;color:var(--primary-dark);border-color:#BFE0CC;}
   input.locked-text{background:var(--card-alt,#F7F8F4);cursor:default;color:var(--ink-soft);}
 
-  .section-nav{position:fixed;right:8px;top:50%;transform:translateY(-50%);z-index:420;display:flex;flex-direction:column;gap:7px;}
+  .section-nav{position:fixed;right:10px;top:50%;transform:translateY(-50%);z-index:420;display:flex;flex-direction:column;gap:12px;align-items:flex-end;}
   .section-nav-item{position:relative;}
   .section-nav-dot{
-    width:34px;height:34px;border-radius:50%;
-    background:var(--primary-dark);color:#fff;border:2px solid #fff;
-    font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;
-    display:flex;align-items:center;justify-content:center;
+    height:64px;min-width:64px;border-radius:32px;
+    background:var(--primary-dark);color:#fff;border:3px solid #fff;
+    font-family:'IBM Plex Sans',sans-serif;font-size:15px;font-weight:600;
+    display:flex;align-items:center;justify-content:flex-start;gap:8px;
     box-shadow:var(--shadow-md,0 2px 8px rgba(0,0,0,.18));
-    cursor:pointer;opacity:.82;transition:opacity .15s var(--ease),transform .12s var(--ease);
-    padding:0;
+    cursor:pointer;opacity:.88;transition:opacity .15s var(--ease),transform .12s var(--ease);
+    padding:0 20px;white-space:nowrap;
   }
-  .section-nav-dot:hover, .section-nav-item.open .section-nav-dot{opacity:1;transform:scale(1.07);}
+  .section-nav-dot .num{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;opacity:.85;}
+  .section-nav-dot:hover, .section-nav-item.open .section-nav-dot{opacity:1;transform:scale(1.04);}
   .section-nav-flyout{
-    display:none;position:absolute;right:42px;top:50%;transform:translateY(-50%);
+    display:none;position:absolute;right:calc(100% + 10px);top:50%;transform:translateY(-50%);
     background:#fff;border:1px solid var(--line-soft);border-radius:10px;
-    box-shadow:var(--shadow-lg);padding:6px;min-width:190px;max-height:60vh;overflow-y:auto;
+    box-shadow:var(--shadow-lg);padding:6px;min-width:220px;max-height:65vh;overflow-y:auto;
   }
   .section-nav-item.open .section-nav-flyout{display:block;}
-  .section-nav-flyout-title{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;padding:4px 8px 6px;}
+  .section-nav-flyout-title{font-size:12.5px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;padding:5px 10px 7px;}
   .section-nav-flyout-item{
     display:block;width:100%;text-align:left;background:none;border:none;
-    font-size:12.5px;padding:7px 8px;border-radius:6px;cursor:pointer;color:var(--ink);
+    font-size:14px;padding:10px 10px;border-radius:7px;cursor:pointer;color:var(--ink);
   }
   .section-nav-flyout-item:hover{background:var(--card-alt,#F7F8F4);}
   @media (max-width: 480px){
-    .section-nav-dot{width:30px;height:30px;font-size:10.5px;}
-    .section-nav{right:4px;gap:6px;}
+    .section-nav-dot{height:56px;min-width:56px;font-size:13px;padding:0 16px;}
+    .section-nav-dot .num{font-size:13px;}
+    .section-nav{right:6px;gap:10px;}
   }
   .day-panel.locked{position:relative;}
   .day-panel.locked::after{
@@ -1916,10 +1918,10 @@ function renderDayPanel(dayId, computed){
    Miscellaneous without scrolling past every category in between. */
 function renderSectionNav(day){
   const sections = [
-    {id:'section-cash-received', num:'01', label:'Cash received'},
-    {id:'section-cash-disbursed', num:'02', label:'Cash disbursed', flyout:COA.map((cat,i)=>({id:'cat-section-'+cat.key, num:String(i+1).padStart(2,'0'), label:cat.label}))},
-    {id:'section-deposits-iou', num:'03', label:'Deposits & IOUs'},
-    ...state.banks.map((b,bi)=>({id:'section-bank-'+b.id, num:String(4+bi).padStart(2,'0'), label:b.name})),
+    {id:'section-cash-received', num:'1', label:'Cash received'},
+    {id:'section-cash-disbursed', num:'2', label:'Cash disbursed', flyout:COA.map((cat,i)=>({id:'cat-section-'+cat.key, num:String(i+1).padStart(2,'0'), label:cat.label}))},
+    {id:'section-deposits-iou', num:'3', label:'Deposits & IOUs'},
+    ...state.banks.map((b,bi)=>({id:'section-bank-'+b.id, num:String(4+bi), label:b.name})),
   ];
   const nav = el(`<nav class="section-nav" aria-label="Jump to section"></nav>`);
   const scrollToId = (id)=>{
@@ -1929,7 +1931,7 @@ function renderSectionNav(day){
   sections.forEach(sec=>{
     const dot = el(`
       <div class="section-nav-item">
-        <button type="button" class="section-nav-dot" title="${escapeHtml(sec.label)}">${sec.num}</button>
+        <button type="button" class="section-nav-dot" title="${escapeHtml(sec.label)}"><span class="num">${sec.num}.</span> ${escapeHtml(sec.label)}</button>
         ${sec.flyout ? `<div class="section-nav-flyout"></div>` : ''}
       </div>
     `);
