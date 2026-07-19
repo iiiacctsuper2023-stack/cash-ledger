@@ -4842,14 +4842,17 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   const my = monthYearAbbr();
   const s = state.signatories;
   let rr = wordsRow+4;
+  ws.mergeCells(`E${rr}:F${rr}`);
   put(`E${rr}`, `${s.accountant}\n${s.accountantRole}\n${my}`, {size:13, border:false, wrap:true});
   rr = wordsRow+5;
   put(`C${rr}`, 'Admin Manager', {size:13, border:false});
   rr = wordsRow+8;
+  ws.mergeCells(`E${rr}:F${rr}`);
   put(`E${rr}`, `${s.adminManager}\n${s.adminManagerRole}\n${my}`, {size:13, border:false, wrap:true});
   rr = wordsRow+10;
   put(`C${rr}`, 'Principal', {size:13, border:false});
   rr = wordsRow+11;
+  ws.mergeCells(`E${rr}:F${rr}`);
   put(`E${rr}`, `${s.principal}\n${s.principalRole}\n${my}`, {size:13, border:false, wrap:true});
 }
 
