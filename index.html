@@ -129,6 +129,41 @@
   input.locked-text{background:var(--card-alt,#F7F8F4);cursor:default;color:var(--ink-soft);}
 
   .section-nav{position:fixed;right:10px;top:50%;transform:translateY(-50%);z-index:420;display:flex;flex-direction:column;gap:12px;align-items:flex-end;}
+  .desc-input.input-missing{border-color:var(--danger,#B3261E);box-shadow:0 0 0 1px var(--danger,#B3261E) inset;}
+  .pw-wrap{position:relative;display:block;}
+  .pw-wrap input{width:100%;padding-right:34px;box-sizing:border-box;}
+  .pw-toggle-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px 6px;font-size:15px;line-height:1;color:var(--ink-soft,#666);}
+  .pw-toggle-btn:hover{color:var(--ink,#222);}
+  .xlsx-preview-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;display:flex;align-items:center;justify-content:center;padding:3vh 3vw;}
+  .xlsx-preview-modal{background:#fff;border-radius:10px;width:100%;height:100%;max-width:1200px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4);}
+  .xlsx-preview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line-soft);}
+  .xlsx-preview-head h4{margin:0;font-size:15px;}
+  .xlsx-preview-tabs{display:flex;gap:4px;padding:8px 14px 0;background:#F1F2EC;overflow-x:auto;flex:0 0 auto;}
+  .xlsx-preview-tabs button{border:1px solid var(--line-soft);border-bottom:none;background:#E4E6DC;padding:6px 14px;font-size:12.5px;border-radius:6px 6px 0 0;cursor:pointer;white-space:nowrap;}
+  .xlsx-preview-tabs button.active{background:#fff;font-weight:700;}
+  .xlsx-preview-body{flex:1 1 auto;overflow:auto;background:#fff;padding:14px;}
+  table.xlsx-preview-table{border-collapse:collapse;font-size:12.5px;font-family:Calibri,Arial,sans-serif;}
+  table.xlsx-preview-table td{border:1px solid #D6D6D6;padding:3px 6px;white-space:pre-wrap;vertical-align:middle;min-width:24px;}
+  .floating-window{
+    position:fixed;top:6vh;right:2vw;width:min(880px,60vw);height:88vh;
+    min-width:340px;min-height:220px;max-width:96vw;max-height:94vh;
+    background:var(--card,#fff);border:1px solid var(--border,#D8DED2);border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.25);z-index:500;display:flex;flex-direction:column;
+    resize:both;overflow:hidden;
+  }
+  .floating-window-header{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 12px;background:var(--card-alt,#F7F8F4);border-bottom:1px solid var(--border,#D8DED2);
+    cursor:move;user-select:none;border-radius:10px 10px 0 0;flex:0 0 auto;
+  }
+  .floating-window-title{font-weight:700;font-size:14px;}
+  .floating-window-controls{display:flex;gap:6px;}
+  .floating-window-controls button{padding:2px 10px;min-width:0;line-height:1.6;}
+  .floating-window-body{flex:1 1 auto;overflow:auto;padding:4px 10px 14px;}
+  .floating-window-body .card{box-shadow:none;border:none;margin:0;padding:6px 0 0;}
+  @media (max-width:900px){
+    .floating-window{top:2vh;right:1vw;left:1vw;width:auto;height:96vh;}
+  }
   .section-nav-item{position:relative;}
   .section-nav-dot{
     height:64px;min-width:64px;border-radius:32px;
@@ -259,6 +294,142 @@ const COA = [
 ];
 /* Order categories appear in on the Withdraw Summary sheet & notesheet generation pass */
 const SUMMARY_ORDER = ['Misc','Trans','Tailor','Utility','BooksSty','Hons','EduAssist','PayAllce','Loan','Event'];
+
+/* ======================================================================
+   Monthly Ledger (Revenue / Expenditure / Balance Sheet workbook)
+   ====================================================================== */
+/* Revenue-side categories - this is a completely separate chart from the
+   Daily Ledger's expense CoA above (fees collected vs money spent), so
+   it's entered by hand in the Monthly Ledger tool rather than pulled
+   from daily vouchers. Order matches the historical workbook's columns. */
+const REVENUE_CATS = [
+  {key:'admissionFee', label:'Admission Fee & Form', aliases:['ad/ form','ad/form','admission fee 2025','admission fee']},
+  {key:'sessionFee',   label:'Session fee'},
+  {key:'tuitionFee',   label:'Monthly Tuition Fee'},
+  {key:'mqmFee',       label:'Monthly Mqm/Fee'},
+  {key:'booksSty',     label:'Books & Sty', aliases:['books and sty']},
+  {key:'transportFee', label:'Transport Fee', aliases:['transport']},
+  {key:'gratuity',     label:'Gratuity'},
+  {key:'eduAssist',    label:'Education Assistant', aliases:['education & assistant']},
+  {key:'misc',         label:'Misc', aliases:['miscelleneous','miscellaneous']},
+  {key:'uniform',      label:'Uniform'},
+  {key:'eventFee',     label:'Event Fee', aliases:['event']},
+];
+/* Known expenditure-side label variants seen across the institution's
+   past workbooks, for matching when importing an older file (2025
+   months used somewhat different wording, and swapped which optional
+   column appeared in a given slot from month to month). Not tied to a
+   fixed position - matched by name wherever it turns up.
+   "MT" = Monthly Test (a recurring exam - held 4x/year, plus half-yearly
+   and yearly exams) - a real, recurring cost, distinct from Transport,
+   even though the two have occupied the same column slot in different
+   periods. Construction/demolition-type columns are one-off exceptions
+   (only seen Dec 2025 - Jan 2026) and are deliberately NOT in this list -
+   those should stay as ad-hoc manual columns added for just that month,
+   not something the tool expects to see regularly. */
+const EXPENDITURE_LABEL_ALIASES = {
+  PayAllce: ['pay & allce','pay and allce'],
+  Trans:    ['transport'],
+  BooksSty: ['books & sty','books and sty'],
+  Misc:     ['misc','miscelleneous','miscellaneous'],
+  Tailor:   ['tailor'],
+  Utility:  ['utility bill','utility'],
+  EduAssist:['education & assistant','education assistant'],
+  Event:    ['event'],
+  Hons:     ['honorarium','honourarium'],
+  Loan:     ['loan','loan paid','loan refunded'],
+};
+const RECURRING_EXAM_COLUMN = {label:'MT (Monthly Test)', aliases:['mt','monthly test','half yearly','half-yearly','yearly exam']};
+/* Default expenditure columns for a new month - the 8 that map straight
+   onto a Daily Ledger CoA category (auto-totalled from that month's
+   vouchers) plus Bank Charge, which the Daily Ledger doesn't track as
+   its own category. Fully editable per month: add, rename, remove, or
+   point any column at a different CoA category (e.g. add a Honourarium
+   or Loan column only for a month that actually had one, or add a
+   one-off manual column like "Eng Arif Construction"). */
+function defaultExpenditureColumns(){
+  return [
+    {id:uid(), label:'Pay & Allce',            source:'coa', coaKey:'PayAllce'},
+    {id:uid(), label:'Transport',              source:'coa', coaKey:'Trans'},
+    {id:uid(), label:'Books & Sty',            source:'coa', coaKey:'BooksSty'},
+    {id:uid(), label:'Misc',                   source:'coa', coaKey:'Misc'},
+    {id:uid(), label:'Tailor',                 source:'coa', coaKey:'Tailor'},
+    {id:uid(), label:'Utility Bill',           source:'coa', coaKey:'Utility'},
+    {id:uid(), label:'Bank Charge',            source:'manual', amount:0},
+    {id:uid(), label:'Education & Assistant',  source:'coa', coaKey:'EduAssist'},
+    {id:uid(), label:'Event',                  source:'coa', coaKey:'Event'},
+  ];
+}
+function monthKeyFor(month, year){
+  const idx = MONTHS.indexOf(month);
+  return idx>=0 ? `${year}-${String(idx+1).padStart(2,'0')}` : null;
+}
+function monthKeyLabel(key){
+  const [y,m] = key.split('-');
+  return `${MONTHS[Number(m)-1]} ${y}`;
+}
+/* Gets (creating if needed) the persistent record for one month - never
+   deleted by Daily Ledger month switches, unlike state.days. */
+function getMonthlyLedgerMonth(key){
+  if(!state.monthlyLedger.months[key]){
+    state.monthlyLedger.months[key] = {
+      revenueEntries:[],
+      revenueTotalDue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
+      revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
+      beginningBankBalance:0,
+      expenditureColumns:defaultExpenditureColumns(),
+      balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[] },
+    };
+  }
+  return state.monthlyLedger.months[key];
+}
+/* Revenue category totals actually earned in one month (sums entries). */
+function monthRevenueTotals(monthRec){
+  const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
+  monthRec.revenueEntries.forEach(e=>{ REVENUE_CATS.forEach(c=>{ totals[c.key] += Number(e[c.key])||0; }); });
+  return totals;
+}
+/* "Yearly Running Total from Previous Month": the seed (if any, for
+   whatever predates this tool) plus every tracked month of the same
+   calendar year strictly before this one, summed live - no separate
+   running counter to keep in sync by hand. */
+function yearlyRunningTotalBefore(key){
+  const [yearStr, monStr] = key.split('-');
+  const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
+  const seed = state.monthlyLedger.seed;
+  if(seed && seed.year===yearStr) REVENUE_CATS.forEach(c=>{ totals[c.key] += Number(seed.revenue[c.key])||0; });
+  Object.keys(state.monthlyLedger.months).forEach(k=>{
+    const [ky,km] = k.split('-');
+    if(ky===yearStr && Number(km) < Number(monStr)){
+      const rec = state.monthlyLedger.months[k];
+      const monthTotals = monthRevenueTotals(rec);
+      REVENUE_CATS.forEach(c=>{
+        totals[c.key] += monthTotals[c.key] + (Number(rec.revenueTransfer[c.key])||0);
+      });
+    }
+  });
+  return totals;
+}
+/* Live per-category totals for the Daily Ledger's CoA vouchers in a
+   given month, so 'coa'-sourced Monthly Ledger expenditure columns can
+   auto-total without retyping anything. Only works for the month
+   currently loaded in the Daily Ledger (state.days) - other months'
+   'coa' columns fall back to 0 with a note, since their day-by-day data
+   isn't in memory (it's in state.archive, month-scoped, not itemised by
+   category there).
+   NOTE: relies on the CURRENT Daily Ledger state (state.month/year,
+   state.days) matching the requested month - callers should check
+   monthKeyFor(state.month, state.year) === key first for an accurate
+   result. */
+function currentDailyLedgerCoaTotals(){
+  const totals = {};
+  COA.forEach(c=>{ totals[c.key] = 0; });
+  state.days.forEach(day=>{
+    COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(item=>{ totals[cat.key] += Number(item.amount)||0; }); });
+  });
+  return totals;
+}
+
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 /* ======================================================================
@@ -275,6 +446,9 @@ let summaryOpen = false;
 let summaryFilters = { catKey:'', mode:'month', year:'', fromDate:'', toDate:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
+let monthlyLedgerOpen = false;
+let monthlyLedgerMinimized = false;
+let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
 let locked = false;            // true = show the lock screen instead of the app
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
@@ -298,6 +472,7 @@ function defaultState(){
     notesheetCounters,
     summaryCounterYear:'26',
     summaryCounterNum:13,
+    nextDepositNotesheetNo:117,
     signatories:{
       accountant:'Mulham Haider Chowdhury', accountantRole:'Accountant',
       adminManager:'Sgt Helal Uddin Sarker(Retd)', adminManagerRole:'Admin Manager',
@@ -309,7 +484,15 @@ function defaultState(){
     lockPasswordHash:null,
     dayLockPasswordHash:null,
     archive:[],
-    templates:[]
+    templates:[],
+    /* Monthly Ledger (Revenue/Expenditure/Balance Sheet workbook) - keyed
+       by "YYYY-MM" so it persists independently of state.days, which
+       resets/archives whenever the Daily Ledger's active month changes.
+       `seed` is a one-time manual/imported starting point for the
+       Yearly Running Total columns, covering whatever months predate
+       this tool being used (before that, everything is derived live by
+       summing each tracked month's revenue entries for the same year). */
+    monthlyLedger:{ months:{}, seed:null }
   };
 }
 function newDay(dateStr){
@@ -547,7 +730,7 @@ function allVouchers(){
     COA.forEach(cat=>{
       (day.coa[cat.key]||[]).forEach(item=>{
         const amt = Number(item.amount)||0;
-        if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:item.desc||'', amount:amt});
+        if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:item.desc||'', note:item.note||'', amount:amt});
       });
     });
   });
@@ -567,7 +750,7 @@ function filteredVouchers(f){
     if(f.toDate && v.date>f.toDate) return false;
     if(f.text){
       const q = f.text.toLowerCase();
-      if(!v.desc.toLowerCase().includes(q) && !v.voucher.toLowerCase().includes(q)) return false;
+      if(!v.desc.toLowerCase().includes(q) && !v.voucher.toLowerCase().includes(q) && !(v.note||'').toLowerCase().includes(q)) return false;
     }
     if(f.minAmt!=='' && f.minAmt!==undefined && v.amount<Number(f.minAmt)) return false;
     if(f.maxAmt!=='' && f.maxAmt!==undefined && v.amount>Number(f.maxAmt)) return false;
@@ -880,6 +1063,7 @@ function migrateState(){
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(state.payableRegistry===undefined) state.payableRegistry = [];
+  if(state.monthlyLedger===undefined) state.monthlyLedger = { months:{}, seed:null };
   if(!state.archive) state.archive = [];
   if(!state.templates) state.templates = [];
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
@@ -1005,6 +1189,30 @@ function el(html){ const t=document.createElement('template'); t.innerHTML=html.
    wording - double-click to actually edit it. An empty box stays open
    for typing right away, no double-click needed. Re-locks on blur once
    there's text in it again. */
+/* Adds a show/hide "eye" toggle button to a <input type="password">,
+   wrapping it in a positioned container so the button sits inside
+   the field on the right - lets the user confirm what they typed. */
+function wirePasswordToggle(inputEl){
+  if(!inputEl || inputEl.dataset.pwToggled) return;
+  inputEl.dataset.pwToggled = '1';
+  const wrap = document.createElement('div');
+  wrap.className = 'pw-wrap';
+  inputEl.parentNode.insertBefore(wrap, inputEl);
+  wrap.appendChild(inputEl);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pw-toggle-btn';
+  btn.textContent = '\u{1F441}';
+  btn.title = 'Show/hide password';
+  btn.tabIndex = -1;
+  btn.onmousedown = (e)=> e.preventDefault(); // don't steal focus from the input
+  btn.onclick = ()=>{
+    inputEl.type = inputEl.type==='password' ? 'text' : 'password';
+    btn.textContent = inputEl.type==='password' ? '\u{1F441}' : '\u{1F576}';
+  };
+  wrap.appendChild(btn);
+}
+
 function wireLockableTextInput(inputEl){
   const syncLock = ()=>{
     const hasText = !!inputEl.value.trim();
@@ -1323,6 +1531,7 @@ function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToChec
   `);
   document.body.appendChild(overlay);
   const input = overlay.querySelector('#pw-prompt-input');
+  wirePasswordToggle(input);
   const errorEl = overlay.querySelector('#pw-prompt-error');
   const buttons = overlay.querySelectorAll('.modal-actions button');
   const cancelBtn = buttons[0], confirmBtn = buttons[1];
@@ -1354,13 +1563,16 @@ function render(){
     app.appendChild(renderLockScreen());
     return;
   }
-  app.appendChild(renderHeader());
-  if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
-  if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
   if(!state.setupDone){
+    app.appendChild(renderHeader());
+    if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
+    if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
     app.appendChild(renderSetup());
     return;
   }
+  app.appendChild(renderHeader());
+  if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
+  if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
   if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
   if(summaryOpen) app.appendChild(renderCategorySummaryCard());
@@ -1373,9 +1585,16 @@ function render(){
     if(!selectedDayId || !findDay(selectedDayId)) selectedDayId = state.days[state.days.length-1].id;
     app.appendChild(renderDayPanel(selectedDayId, computed));
     app.appendChild(renderNotesheetCard());
+    app.appendChild(renderDepositNotesheetCard());
+    app.appendChild(el(`
+      <div class="card" style="text-align:center;">
+        <button class="secondary" data-action="toggle-monthly-ledger">&#128220; Generate Monthly Ledger</button>
+      </div>
+    `));
     app.appendChild(renderAnnualSummaryCard());
   }
   app.appendChild(renderFooter());
+  if(monthlyLedgerOpen) app.appendChild(renderMonthlyLedgerWindow());
   if(lastUndo) app.appendChild(renderUndoToast());
   if(duplicateWarning) app.appendChild(renderDuplicateWarningToast());
 }
@@ -1454,6 +1673,8 @@ function renderPasswordForm(){
   `);
   const newInp = card.querySelector('#pw-new');
   const confirmInp = card.querySelector('#pw-confirm');
+  wirePasswordToggle(newInp);
+  wirePasswordToggle(confirmInp);
   const errBox = card.querySelector('#pw-error');
   card.querySelector('#pw-save').onclick = async ()=>{
     const a = newInp.value, b = confirmInp.value;
@@ -1496,6 +1717,8 @@ function renderDayLockPasswordForm(){
   `);
   const newInp = card.querySelector('#dlpw-new');
   const confirmInp = card.querySelector('#dlpw-confirm');
+  wirePasswordToggle(newInp);
+  wirePasswordToggle(confirmInp);
   const errBox = card.querySelector('#dlpw-error');
   card.querySelector('#dlpw-save').onclick = async ()=>{
     const a = newInp.value, b = confirmInp.value;
@@ -1535,6 +1758,7 @@ function renderLockScreen(){
     </div>
   `);
   const pwInp = wrap.querySelector('#unlock-pw');
+  wirePasswordToggle(pwInp);
   const doUnlock = async ()=>{
     const hash = await sha256Hex(pwInp.value);
     if(hash === state.lockPasswordHash){
@@ -2076,6 +2300,723 @@ function buildSparklineSvg(values, labels){
   `;
 }
 
+/* ======================================================================
+   Monthly Ledger card - Revenue / Expenditure / Balance Sheet workbook,
+   replicating the institution's existing manual Excel format so the
+   monthly file can be generated straight from data already on hand
+   instead of retyped from scratch each month.
+   ====================================================================== */
+/* All derived figures for one month's ledger, in one place so the
+   initial render and the lightweight live-refresh (below) can't drift
+   out of sync with each other. */
+function computeMonthlyLedgerFigures(key){
+  const rec = getMonthlyLedgerMonth(key);
+  const isLiveMonth = key === monthKeyFor(state.month, state.year);
+
+  const revTotals = monthRevenueTotals(rec);
+  const revTotalIncome = REVENUE_CATS.reduce((s,c)=>s+revTotals[c.key],0);
+  const yrtBefore = yearlyRunningTotalBefore(key);
+  const yrtNew = {};
+  REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + (Number(rec.revenueTransfer[c.key])||0); });
+  const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
+  const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome;
+
+  const liveCoaTotals = isLiveMonth ? currentDailyLedgerCoaTotals() : null;
+  let expTotal = 0;
+  const expColAmounts = rec.expenditureColumns.map(col=>{
+    let amt = 0;
+    if(col.source==='coa'){ amt = liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0; }
+    else { amt = Number(col.amount)||0; }
+    expTotal += amt;
+    return amt;
+  });
+  const totalBalance = revTotalIncome - expTotal; // matches template's Total Income - Total Expenditure
+
+  const expAssistCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
+  const expAssistIdx = expAssistCol ? rec.expenditureColumns.indexOf(expAssistCol) : -1;
+  const expAssistAmt = expAssistIdx>=0 ? expColAmounts[expAssistIdx] : 0;
+
+  const latestDay = state.days.length ? state.days[state.days.length-1] : null;
+  const computed = isLiveMonth ? computeAll() : null;
+  const latestComputed = latestDay && computed ? computed[latestDay.id] : null;
+  const autoCashInHand = latestComputed ? latestComputed.cashInHand : null;
+  const autoBankTotal = latestComputed ? state.banks.reduce((s,b)=>s+latestComputed.banks[b.id].closing,0) : null;
+  const cashInHandShown = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCashInHand;
+
+  const debtTotal = rec.balanceSheet.debtItems.reduce((s,d)=>s+(Number(d.amount)||0),0);
+  const gratuityPayable = yrtNew.gratuity;
+  const eduAssistPayable = yrtNew.eduAssist - expAssistAmt;
+  const totalAssets = (Number(cashInHandShown)||0) + totalBalance + totalDueSum;
+  const equity = totalAssets - (Number(rec.balanceSheet.advancePayment)||0) - gratuityPayable - eduAssistPayable - debtTotal;
+
+  return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
+    liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
+    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity};
+}
+
+/* Updates just the read-only computed figures in an already-rendered
+   Monthly Ledger card, without rebuilding the DOM - rebuilding on every
+   keystroke (the way a full render() would) steals focus out of
+   whichever input the person is still typing in. */
+function refreshMonthlyLedgerComputedOnly(){
+  if(!monthlyLedgerOpen || !monthlyLedgerViewKey) return;
+  const f = computeMonthlyLedgerFigures(monthlyLedgerViewKey);
+  setText('ml-total-income', money(f.revTotalIncome));
+  setText('ml-total-due-sum', money(f.totalDueSum));
+  setText('ml-total-amount', money(f.totalAmount));
+  setText('ml-total-expenditure', money(f.expTotal));
+  setText('ml-total-balance', money(f.totalBalance));
+  setText('ml-bs-balance-bank', money(f.totalBalance));
+  setText('ml-bs-due-payment', money(f.totalDueSum));
+  setText('ml-bs-gratuity', money(f.gratuityPayable));
+  setText('ml-bs-eduassist', money(f.eduAssistPayable));
+  setText('ml-total-assets', money(f.totalAssets));
+  setText('ml-equity', money(f.equity));
+  const yrtNewBox = document.getElementById('ml-yrt-new');
+  if(yrtNewBox) yrtNewBox.innerHTML = REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(f.yrtNew[c.key])}</div>`).join('');
+}
+
+function renderMonthlyLedgerWindow(){
+  const win = el(`
+    <div class="floating-window" id="ml-floating-window">
+      <div class="floating-window-header" id="ml-floating-header">
+        <span class="floating-window-title">&#128220; Monthly Ledger</span>
+        <div class="floating-window-controls">
+          <button type="button" class="secondary small" data-action="minimize-monthly-ledger" title="${monthlyLedgerMinimized?'Restore':'Minimize'}">${monthlyLedgerMinimized?'&#9723;':'&#8212;'}</button>
+          <button type="button" class="secondary small" data-action="close-monthly-ledger" title="Close">&#10005;</button>
+        </div>
+      </div>
+      <div class="floating-window-body" id="ml-floating-body" style="${monthlyLedgerMinimized?'display:none;':''}"></div>
+    </div>
+  `);
+  if(!monthlyLedgerMinimized){
+    win.querySelector('#ml-floating-body').appendChild(renderMonthlyLedgerCard());
+  }
+  // Drag by header (skip if the click originated on a control button)
+  const header = win.querySelector('#ml-floating-header');
+  header.addEventListener('mousedown', (e)=>{
+    if(e.target.closest('button')) return;
+    const rect = win.getBoundingClientRect();
+    win.style.left = rect.left + 'px';
+    win.style.top = rect.top + 'px';
+    win.style.right = 'auto';
+    win.style.bottom = 'auto';
+    const startX = e.clientX, startY = e.clientY;
+    const origLeft = rect.left, origTop = rect.top;
+    const onMove = (ev)=>{
+      win.style.left = Math.max(0, origLeft + (ev.clientX - startX)) + 'px';
+      win.style.top = Math.max(0, origTop + (ev.clientY - startY)) + 'px';
+    };
+    const onUp = ()=>{
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+  return win;
+}
+
+function renderMonthlyLedgerCard(){
+  const key = monthlyLedgerViewKey || monthKeyFor(state.month, state.year) || monthKeyFor(MONTHS[new Date().getMonth()], String(new Date().getFullYear()));
+  monthlyLedgerViewKey = key;
+  const f = computeMonthlyLedgerFigures(key);
+  const {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
+    liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoBankTotal,
+    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity} = f;
+
+  const monthOptions = (()=>{
+    const keys = new Set(Object.keys(state.monthlyLedger.months));
+    keys.add(key);
+    return [...keys].sort().map(k=>`<option value="${k}" ${k===key?'selected':''}>${monthKeyLabel(k)}</option>`).join('');
+  })();
+
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
+      <p class="subnote">Revenue, Expenditure &amp; Balance Sheet for the month, formatted to match the institution's existing workbook - generate the finished .xlsx straight from data already on hand.</p>
+
+      <div class="row" style="align-items:flex-end;flex-wrap:wrap;">
+        <div class="field" style="max-width:220px;">
+          <label>Viewing month</label>
+          <select id="ml-month-select">${monthOptions}</select>
+        </div>
+        <button class="secondary small" type="button" data-action="ml-add-month">+ New month</button>
+        <button class="secondary small" type="button" data-action="ml-import">&#11014; Import previous ledger (.xlsx)</button>
+        <input type="file" id="ml-import-input" accept=".xlsx" style="display:none;">
+        <button type="button" data-action="ml-export">&#11015; Export this month (.xlsx)</button>
+        <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
+      </div>
+      ${!isLiveMonth ? `<p class="subnote" style="color:var(--danger);">This isn't the month currently open in the Daily Ledger (${state.month} ${state.year}) - Cash in Hand and any "Auto from CoA" expenditure columns can't be pulled live for it here, so they show as 0/blank until you switch the Daily Ledger to that month, or enter them manually below.</p>` : ''}
+
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Revenue</h3>
+      <div class="row">
+        <div class="field">
+          <label>Beginning Balance (Bank)</label>
+          <input type="text" inputmode="decimal" id="ml-beginning-balance" value="${formatAsianAmount(rec.beginningBankBalance)}">
+        </div>
+      </div>
+      <p class="subnote" style="margin-top:-4px;">Yearly running total carried in from ${monthKeyLabel(key).split(' ')[1]===  (state.monthlyLedger.seed?state.monthlyLedger.seed.year:'') ? 'the imported seed' : 'earlier tracked months'} this year (read-only, derived automatically):</p>
+      <div id="ml-yrt-before" style="font-size:12.5px;color:var(--ink-soft);display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 14px;margin-bottom:10px;">
+        ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtBefore[c.key])}</div>`).join('')}
+      </div>
+      ${!state.monthlyLedger.seed ? `<button class="secondary small" type="button" data-action="ml-set-seed">+ Set starting point (import or type in totals from before this tool)</button>` : `<button class="secondary small" type="button" data-action="ml-set-seed">Edit starting point (currently: through ${escapeHtml(state.monthlyLedger.seed.throughMonth)} ${escapeHtml(state.monthlyLedger.seed.year)})</button>`}
+
+      <div class="divider"></div>
+      <label>Revenue entries</label>
+      <div id="ml-revenue-list"></div>
+      <button class="secondary small" type="button" data-action="ml-add-revenue">+ Add revenue entry</button>
+
+      <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Income</span><span id="ml-total-income">${money(revTotalIncome)}</span></div>
+
+      <div class="divider"></div>
+      <label>Total Due (per category, manual)</label>
+      <div id="ml-total-due-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
+      <div class="computed"><span class="lbl">Total Due (sum)</span><span id="ml-total-due-sum">${money(totalDueSum)}</span></div>
+
+      <div class="divider"></div>
+      <label>Transfer between categories (e.g. Admission Fee &rarr; Gratuity/Education Assistance Fund)</label>
+      <div id="ml-transfer-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
+
+      <div class="computed"><span class="lbl">Yearly Running Total (through this month)</span><span></span></div>
+      <div id="ml-yrt-new" style="font-size:12.5px;color:var(--ink-soft);display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 14px;margin-bottom:6px;">
+        ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtNew[c.key])}</div>`).join('')}
+      </div>
+      <div class="computed total"><span class="lbl">Total Amount (Beginning Balance + Total Income)</span><span id="ml-total-amount">${money(totalAmount)}</span></div>
+
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Expenditure</h3>
+      <div id="ml-expenditure-list"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button class="secondary small" type="button" data-action="ml-add-expcol">+ Add column (auto from a CoA category)</button>
+        <button class="secondary small" type="button" data-action="ml-add-expcol-manual">+ Add column (manual / one-off)</button>
+      </div>
+      <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Expenditure</span><span id="ml-total-expenditure">${money(expTotal)}</span></div>
+      <div class="computed"><span class="lbl">Total Balance (Income &minus; Expenditure)</span><span id="ml-total-balance">${money(totalBalance)}</span></div>
+
+      <div class="divider"></div>
+      <h3 style="font-size:14px;">Balance Sheet</h3>
+      <div class="row">
+        <div class="field">
+          <label>Cash in Hand ${isLiveMonth?'<span class="tag">auto from Daily Ledger</span>':''}</label>
+          <input type="text" inputmode="decimal" id="ml-cash-override" value="${formatAsianAmount(cashInHandShown||0)}" ${isLiveMonth && rec.balanceSheet.cashInHandOverride===null ? 'placeholder="auto"' : ''}>
+        </div>
+        <div class="field">
+          <label>Advance Payment (liability, manual)</label>
+          <input type="text" inputmode="decimal" id="ml-advance-payment" value="${formatAsianAmount(rec.balanceSheet.advancePayment)}">
+        </div>
+      </div>
+      ${isLiveMonth && autoBankTotal!==null ? `<p class="subnote" style="margin-top:-6px;">Cross-check: Daily Ledger's actual tracked bank total right now is ${money(autoBankTotal)} (Balance Sheet below uses the Income&minus;Expenditure formula, matching the workbook's own convention - compare the two to catch mismatches).</p>` : ''}
+      <div class="computed"><span class="lbl">Balance in Bank Account</span><span id="ml-bs-balance-bank">${money(totalBalance)}</span></div>
+      <div class="computed"><span class="lbl">Due Payment</span><span id="ml-bs-due-payment">${money(totalDueSum)}</span></div>
+      <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${money(gratuityPayable)}</span></div>
+      <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${money(eduAssistPayable)}</span></div>
+
+      <div class="divider"></div>
+      <label>Other liabilities / debts (ad-hoc, e.g. a loan taken)</label>
+      <div id="ml-debt-list"></div>
+      <button class="secondary small" type="button" data-action="ml-add-debt">+ Add liability</button>
+
+      <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Assets</span><span id="ml-total-assets">${money(totalAssets)}</span></div>
+      <div class="computed total"><span class="lbl">Equity (balancing figure)</span><span id="ml-equity">${money(equity)}</span></div>
+    </div>
+  `);
+
+  card.querySelector('#ml-month-select').onchange = (e)=>{ monthlyLedgerViewKey = e.target.value; render(); };
+  card.querySelector('#ml-import-input').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(file) importMonthlyLedgerFile(file);
+    e.target.value = '';
+  };
+  card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
+  card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  const cashInp = card.querySelector('#ml-cash-override');
+  if(cashInp) wireAmountInput(cashInp, (num)=>{ rec.balanceSheet.cashInHandOverride = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+
+  drawMlRevenueList(card.querySelector('#ml-revenue-list'), rec, key);
+  drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
+  drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
+  drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, isLiveMonth?liveCoaTotals:null);
+  drawMlDebtList(card.querySelector('#ml-debt-list'), rec);
+
+  return card;
+}
+
+function drawMlGrid(container, dataObj, kind){
+  container.innerHTML = '';
+  REVENUE_CATS.forEach(c=>{
+    const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(dataObj[c.key])}"></div>`);
+    const inp = wrap.querySelector('input');
+    wireAmountInput(inp, (num)=>{ dataObj[c.key] = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    container.appendChild(wrap);
+  });
+}
+
+function drawMlRevenueList(container, rec, monthKey){
+  container.innerHTML = '';
+  if(rec.revenueEntries.length===0){ container.appendChild(el(`<p class="empty">No revenue entries yet this month.</p>`)); }
+  rec.revenueEntries.forEach(entry=>{
+    const row = el(`
+      <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
+        <div class="row">
+          <div class="field" style="max-width:150px;"><label>Date</label><input type="date" class="ml-rev-date" value="${entry.date||''}"></div>
+          <div class="field"><label>Description</label><input type="text" class="ml-rev-desc" value="${escapeHtml(entry.desc||'')}"></div>
+          <button class="danger small" type="button" data-action="ml-remove-revenue" data-item="${entry.id}" title="Remove">&times;</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
+          ${REVENUE_CATS.map(c=>`
+            <div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-rev-amt" data-cat="${c.key}" value="${formatAsianAmount(entry[c.key]||0)}"></div>
+          `).join('')}
+        </div>
+      </div>
+    `);
+    row.querySelector('.ml-rev-date').oninput = (e)=>{ entry.date = e.target.value; saveState(); };
+    wireLockableTextInput(row.querySelector('.ml-rev-desc'));
+    row.querySelector('.ml-rev-desc').oninput = (e)=>{ entry.desc = e.target.value; saveState(); };
+    row.querySelectorAll('.ml-rev-amt').forEach(inp=>{
+      wireAmountInput(inp, (num)=>{ entry[inp.dataset.cat] = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    });
+    container.appendChild(row);
+  });
+}
+
+function drawMlExpenditureList(container, rec, liveCoaTotals){
+  container.innerHTML = '';
+  rec.expenditureColumns.forEach(col=>{
+    const isCoa = col.source==='coa';
+    const amt = isCoa ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : (Number(col.amount)||0);
+    const row = el(`
+      <div class="line-item">
+        <div class="field desc" style="margin-bottom:0;"><label>Column</label><input type="text" class="ml-exp-label" value="${escapeHtml(col.label)}"></div>
+        ${isCoa
+          ? `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">auto from ${escapeHtml(COA.find(c=>c.key===col.coaKey)?.label||col.coaKey)}</span></label><input type="text" value="${formatAsianAmount(amt)}" disabled></div>`
+          : `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">manual</span></label><input type="text" inputmode="decimal" class="ml-exp-amt" value="${formatAsianAmount(amt)}"></div>`
+        }
+        <button class="danger small" type="button" data-action="ml-remove-expcol" data-item="${col.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    const labelInp = row.querySelector('.ml-exp-label');
+    wireLockableTextInput(labelInp);
+    labelInp.oninput = (e)=>{ col.label = e.target.value; saveState(); };
+    const amtInp = row.querySelector('.ml-exp-amt');
+    if(amtInp) wireAmountInput(amtInp, (num)=>{ col.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    container.appendChild(row);
+  });
+}
+
+function drawMlDebtList(container, rec){
+  container.innerHTML = '';
+  if(rec.balanceSheet.debtItems.length===0){ container.appendChild(el(`<p class="empty">No other liabilities recorded.</p>`)); }
+  rec.balanceSheet.debtItems.forEach(item=>{
+    const row = el(`
+      <div class="line-item">
+        <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="ml-debt-label" value="${escapeHtml(item.label||'')}" placeholder="e.g. Debt to III Assets Ltd"></div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="ml-debt-amt" value="${formatAsianAmount(item.amount||0)}"></div>
+        <button class="danger small" type="button" data-action="ml-remove-debt" data-item="${item.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    const labelInp = row.querySelector('.ml-debt-label');
+    wireLockableTextInput(labelInp);
+    labelInp.oninput = (e)=>{ item.label = e.target.value; saveState(); };
+    wireAmountInput(row.querySelector('.ml-debt-amt'), (num)=>{ item.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    container.appendChild(row);
+  });
+}
+
+/* --- Monthly Ledger: add-month modal --- */
+function showMlAddMonthModal(){
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p><strong>Start a new month</strong></p>
+        <div class="row">
+          <div class="field"><label>Month</label>
+            <select id="ml-new-month">${MONTHS.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Year</label><input type="text" id="ml-new-year" value="${state.year||new Date().getFullYear()}"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">Create</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  buttons[1].onclick = ()=>{
+    const m = overlay.querySelector('#ml-new-month').value;
+    const y = overlay.querySelector('#ml-new-year').value.trim();
+    if(!y){ return; }
+    const k = monthKeyFor(m,y);
+    getMonthlyLedgerMonth(k);
+    monthlyLedgerViewKey = k;
+    saveState();
+    overlay.remove();
+    render();
+  };
+  buttons[0].onclick = ()=> overlay.remove();
+  wireBackdropClose(overlay);
+}
+
+/* --- Monthly Ledger: add-expenditure-column modal --- */
+function showMlAddColumnModal(isCoa){
+  const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+  const usedCoaKeys = new Set(rec.expenditureColumns.filter(c=>c.source==='coa').map(c=>c.coaKey));
+  const availableCats = COA.filter(c=>!usedCoaKeys.has(c.key));
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p><strong>${isCoa ? 'Add column - auto from a CoA category' : 'Add column - manual / one-off'}</strong></p>
+        ${isCoa ? `
+          ${availableCats.length===0 ? '<p class="subnote">Every CoA category already has a column this month.</p>' : `
+          <label style="font-size:12.5px;color:var(--ink-soft);">Category</label>
+          <select id="ml-newcol-cat" style="margin:2px 0 10px;">${availableCats.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}</select>
+          `}
+        ` : `
+          <label style="font-size:12.5px;color:var(--ink-soft);">Column name</label>
+          <input type="text" id="ml-newcol-label" list="ml-newcol-suggest" placeholder="e.g. Eng Arif Construction" style="margin:2px 0 10px;">
+          <datalist id="ml-newcol-suggest">
+            <option value="${escapeHtml(RECURRING_EXAM_COLUMN.label)}">
+            <option value="Half Yearly Exam">
+            <option value="Yearly Exam">
+          </datalist>
+          <p class="subnote" style="margin:-4px 0 10px;">"MT (Monthly Test)" is a recurring exam cost (held 4x/year, plus half-yearly and yearly exams) - not every month, but not exceptional either. Construction/demolition-type columns are one-off exceptions - just type the specific name for those.</p>
+        `}
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button" ${isCoa && availableCats.length===0 ? 'disabled' : ''}>Add</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  buttons[1].onclick = ()=>{
+    if(isCoa){
+      const catKey = overlay.querySelector('#ml-newcol-cat').value;
+      const cat = COA.find(c=>c.key===catKey);
+      rec.expenditureColumns.push({id:uid(), label:cat.label, source:'coa', coaKey:catKey});
+    } else {
+      const label = overlay.querySelector('#ml-newcol-label').value.trim();
+      if(!label) return;
+      rec.expenditureColumns.push({id:uid(), label, source:'manual', amount:0});
+    }
+    saveState();
+    overlay.remove();
+    render();
+  };
+  buttons[0].onclick = ()=> overlay.remove();
+  wireBackdropClose(overlay);
+}
+
+/* --- Monthly Ledger: set/edit the Yearly-Running-Total starting point --- */
+function showMlSeedModal(){
+  const existing = state.monthlyLedger.seed;
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p><strong>Starting point for Yearly Running Total</strong><br>
+        <span style="color:var(--ink-soft);font-size:12.5px;">Cumulative totals for the year, as of the end of the last month before this tool started tracking. Every month you add after that is summed automatically on top of this.</span></p>
+        <div class="row">
+          <div class="field"><label>Year</label><input type="text" id="ml-seed-year" value="${existing?escapeHtml(existing.year):(state.year||'')}"></div>
+          <div class="field"><label>Through month</label>
+            <select id="ml-seed-month">${MONTHS.map(m=>`<option value="${m}" ${existing&&existing.throughMonth===m?'selected':''}>${m}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin:8px 0 4px;">
+          ${REVENUE_CATS.map(c=>`
+            <div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-seed-amt" data-cat="${c.key}" value="${formatAsianAmount(existing?existing.revenue[c.key]:0)}"></div>
+          `).join('')}
+        </div>
+        <div class="modal-actions">
+          ${existing ? '<button class="secondary" type="button" id="ml-seed-clear">Clear</button>' : ''}
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const amtInputs = overlay.querySelectorAll('.ml-seed-amt');
+  amtInputs.forEach(inp=>wireAmountInput(inp, ()=>{}));
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const clearBtn = existing ? overlay.querySelector('#ml-seed-clear') : null;
+  const cancelBtn = buttons[existing?1:0], saveBtn = buttons[existing?2:1];
+  saveBtn.onclick = ()=>{
+    const year = overlay.querySelector('#ml-seed-year').value.trim();
+    const throughMonth = overlay.querySelector('#ml-seed-month').value;
+    if(!year) return;
+    const revenue = {};
+    amtInputs.forEach(inp=>{ revenue[inp.dataset.cat] = parseAmountInput(inp.value); });
+    state.monthlyLedger.seed = {year, throughMonth, revenue};
+    saveState();
+    overlay.remove();
+    render();
+  };
+  if(clearBtn) clearBtn.onclick = ()=>{ state.monthlyLedger.seed = null; saveState(); overlay.remove(); render(); };
+  cancelBtn.onclick = ()=> overlay.remove();
+  wireBackdropClose(overlay);
+}
+
+/* --- Monthly Ledger: import a previous month's workbook to read off its
+   Yearly Running Total row, so the seed above doesn't need retyping by
+   hand. Only reads - never writes back to the uploaded file. --- */
+async function importMonthlyLedgerFile(file){
+  try{
+    await loadExcelJS();
+    const buf = await file.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const revSheet = wb.worksheets.find(w=>/revenue/i.test(w.name));
+    if(!revSheet){ showAlert('Could not find a "Monthly Revenue" sheet in that file.'); return; }
+
+    // Find the category header row (has "Date" and "Description" nearby)
+    let headerRow = null, headerRowIdx = null;
+    for(let r=1;r<=revSheet.rowCount;r++){
+      const row = revSheet.getRow(r);
+      const rowText = row.values.map(v=>String(v||'')).join('|').toLowerCase();
+      if(rowText.includes('date') && rowText.includes('description')){ headerRow = row; headerRowIdx = r; break; }
+    }
+    if(!headerRow){ showAlert('Could not find the category header row (Date/Description/...) in that sheet.'); return; }
+    const colsForCat = {}; // cat.key -> array of matching column indices (old formats sometimes split one category across two columns)
+    REVENUE_CATS.forEach(cat=>{
+      const names = [cat.label, ...(cat.aliases||[])].map(s=>s.toLowerCase().replace(/\s+/g,' ').trim());
+      const matches = [];
+      for(let c=1;c<=revSheet.columnCount;c++){
+        const v = String(headerRow.getCell(c).value||'').toLowerCase().replace(/\s+/g,' ').trim();
+        if(!v) continue;
+        if(names.some(target => v===target || v.includes(target) || target.includes(v))) matches.push(c);
+      }
+      colsForCat[cat.key] = matches;
+    });
+
+    // Find the "Yearly Running Total" row (the NEW one, not "...from Previous Month")
+    // - the label can sit in column A, B, or C depending on the file's exact layout.
+    let yrtRow = null;
+    for(let r=headerRowIdx;r<=revSheet.rowCount;r++){
+      const rowLabel = [1,2,3].map(c=>String(revSheet.getCell(r,c).value||'')).join(' ');
+      if(/yearly running total/i.test(rowLabel) && !/previous month/i.test(rowLabel)){ yrtRow = r; break; }
+    }
+    if(!yrtRow){ showAlert('Could not find the "Yearly Running Total" row in that sheet.'); return; }
+
+    const revenue = {};
+    REVENUE_CATS.forEach(cat=>{
+      const cols = colsForCat[cat.key]||[];
+      revenue[cat.key] = cols.reduce((s,c)=> s + (Number(revSheet.getCell(yrtRow, c).value)||0), 0);
+    });
+
+    // Try to read the month/year from a title cell like "Monthly Income: Month of March 2026"
+    let year = state.year||'', throughMonth = state.month||MONTHS[0];
+    for(let r=1;r<=Math.min(6,revSheet.rowCount);r++){
+      const v = String(revSheet.getCell(r,1).value||'');
+      const m = v.match(/month of\s+([a-zA-Z]+)\s+(\d{4})/i);
+      if(m){ throughMonth = MONTHS.find(mm=>mm.toLowerCase()===m[1].toLowerCase())||throughMonth; year = m[2]; break; }
+    }
+
+    showConfirm(
+      `Found Yearly Running Total figures through ${throughMonth} ${year}. Set this as the starting point? ` +
+      REVENUE_CATS.map(c=>`${c.label}: ${money(revenue[c.key])}`).join(', '),
+      ()=>{
+        state.monthlyLedger.seed = {year:String(year), throughMonth, revenue};
+        saveState(); render();
+        showAlert('Starting point saved. Months you add from here are summed on top of it automatically.');
+      },
+      'Use these figures'
+    );
+  }catch(err){
+    showAlert('Could not read that file - make sure it\'s the same format as your existing monthly ledger workbooks.');
+  }
+}
+
+/* --- Monthly Ledger: export the two-sheet workbook, matching the
+   institution's existing format with real formulas (not hardcoded
+   results), so it recalculates correctly if opened and tweaked. --- */
+async function exportMonthlyLedger(key, previewOnly){
+  const rec = getMonthlyLedgerMonth(key);
+  await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+
+  const FONT = {name:'Calibri', size:11};
+  const BOLD = {name:'Calibri', size:11, bold:true};
+  const thin = {top:{style:'thin'},left:{style:'thin'},bottom:{style:'thin'},right:{style:'thin'}};
+  const numFmt = '#,##0.00';
+
+  /* ---- Monthly Revenue sheet ---- */
+  const rev = wb.addWorksheet('Monthly Revenue');
+  rev.getColumn(1).width = 4; rev.getColumn(2).width = 12; rev.getColumn(3).width = 34;
+  for(let c=4;c<=15;c++) rev.getColumn(c).width = 15;
+
+  rev.getCell('A1').value = 'INTERNATIONAL ISLAMIC INSTITUTE (MADRASHA ACCT)';
+  rev.getCell('A1').font = BOLD;
+  rev.getCell('A2').value = `Monthly Income: Month of ${monthKeyLabel(key)}`;
+  rev.getCell('A2').font = BOLD;
+  rev.getCell('A3').value = 'Madrasah Acct';
+
+  const headerRowNum = 5;
+  const headers = ['Date','Description','Total', ...REVENUE_CATS.map(c=>c.label)];
+  headers.forEach((h,i)=>{
+    const cell = rev.getCell(headerRowNum, i+2); // starts col B
+    cell.value = h; cell.font = BOLD; cell.border = thin;
+    cell.alignment = {wrapText:true, vertical:'bottom'};
+  });
+
+  let r = headerRowNum+1;
+  rev.getCell(r,1).value = '-';
+  rev.getCell(r,2).value = 'Beginning Balance Bank';
+  rev.getCell(r,3).value = 'Beginning Balance Bank';
+  rev.getCell(r,4).value = Number(rec.beginningBankBalance)||0;
+  r++;
+  const yrtBeforeRow = r;
+  rev.getCell(r,3).value = 'Yearly Running Total from Previous Month';
+  const yrtBefore = yearlyRunningTotalBefore(key);
+  REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r, 5+i).value = yrtBefore[c.key]; });
+  r++;
+
+  const dataStartRow = r;
+  rec.revenueEntries.forEach(entry=>{
+    rev.getCell(r,2).value = entry.date ? new Date(entry.date) : '';
+    if(entry.date) rev.getCell(r,2).numFmt = 'd/m/yyyy';
+    rev.getCell(r,3).value = entry.desc||'';
+    rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
+    REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(entry[c.key])||0; });
+    for(let c=2;c<=15;c++) rev.getCell(r,c).border = thin;
+    r++;
+  });
+  const dataEndRow = r-1;
+  if(dataEndRow < dataStartRow){ // no entries - keep a valid (empty) range
+    rev.getCell(dataStartRow,4).value = 0;
+  }
+
+  const totalIncomeRow = r;
+  rev.getCell(r,3).value = 'Total Income:'; rev.getCell(r,3).font = BOLD;
+  for(let c=4;c<=15;c++){
+    const colLetter = rev.getColumn(c).letter;
+    rev.getCell(r,c).value = dataEndRow>=dataStartRow ? {formula:`SUM(${colLetter}${dataStartRow}:${colLetter}${dataEndRow})`} : 0;
+    rev.getCell(r,c).font = BOLD;
+  }
+  r++;
+  const totalDueRow = r;
+  rev.getCell(r,3).value = 'Total Due';
+  rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
+  REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(rec.revenueTotalDue[c.key])||0; });
+  r++;
+  const transferRow = r;
+  rev.getCell(r,3).value = 'Transfer between categories';
+  rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
+  REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(rec.revenueTransfer[c.key])||0; });
+  r++;
+  const yrtNewRow = r;
+  rev.getCell(r,3).value = 'Yearly Running Total'; rev.getCell(r,3).font = BOLD;
+  REVENUE_CATS.forEach((c,i)=>{
+    const colLetter = rev.getColumn(5+i).letter;
+    rev.getCell(r,5+i).value = {formula:`${colLetter}${totalIncomeRow}+${colLetter}${transferRow}+${colLetter}${yrtBeforeRow}`};
+    rev.getCell(r,5+i).font = BOLD;
+  });
+  r++;
+  const totalAmountRow = r;
+  rev.getCell(r,3).value = 'Total Amount'; rev.getCell(r,3).font = BOLD;
+  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${dataStartRow-2}`};
+  rev.getCell(r,4).font = BOLD;
+
+  /* ---- Monthly Expenditure sheet ---- */
+  const exp = wb.addWorksheet('Monthly Expenditure');
+  exp.getColumn(1).width = 12; exp.getColumn(2).width = 34;
+  for(let c=3;c<=3+rec.expenditureColumns.length;c++) exp.getColumn(c).width = 14;
+
+  exp.getCell('A1').value = 'INTERNATIONAL ISLAMIC INSTITUTE (MADRASHA ACCT)'; exp.getCell('A1').font = BOLD;
+  exp.getCell('A2').value = `Monthly Expenditure: Month of ${monthKeyLabel(key)}`; exp.getCell('A2').font = BOLD;
+  exp.getCell('A3').value = 'Madrash Acct';
+
+  const expHeaderRow = 4;
+  exp.getCell(expHeaderRow,1).value = 'Date'; exp.getCell(expHeaderRow,1).font = BOLD;
+  exp.getCell(expHeaderRow,2).value = 'Description'; exp.getCell(expHeaderRow,2).font = BOLD;
+  exp.getCell(expHeaderRow,3).value = 'Total'; exp.getCell(expHeaderRow,3).font = BOLD;
+  rec.expenditureColumns.forEach((col,i)=>{
+    const cell = exp.getCell(expHeaderRow, 4+i);
+    cell.value = col.label; cell.font = BOLD; cell.alignment = {wrapText:true};
+  });
+
+  const liveCoaTotals = key===monthKeyFor(state.month,state.year) ? currentDailyLedgerCoaTotals() : null;
+  const expDataRow = expHeaderRow+2;
+  exp.getCell(expDataRow,1).value = 'Recorded in Daily Ledger';
+  exp.getCell(expDataRow,2).value = 'Category totals for the month';
+  exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
+  rec.expenditureColumns.forEach((col,i)=>{
+    const amt = col.source==='coa' ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : (Number(col.amount)||0);
+    exp.getCell(expDataRow, 4+i).value = amt;
+  });
+  const expTotalRow = expDataRow+1;
+  exp.getCell(expTotalRow,2).value = 'Total Expenditure:'; exp.getCell(expTotalRow,2).font = BOLD;
+  for(let i=0;i<=rec.expenditureColumns.length;i++){
+    const colLetter = exp.getColumn(3+i).letter;
+    exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataRow}:${colLetter}${expDataRow})`};
+    exp.getCell(expTotalRow, 3+i).font = BOLD;
+  }
+  const balanceRow = expTotalRow+1;
+  exp.getCell(balanceRow,2).value = 'Total Balance:';
+  exp.getCell(balanceRow,3).value = {formula:`C${balanceRow+1}-C${expTotalRow}`};
+  const incomeRefRow = balanceRow+1;
+  exp.getCell(incomeRefRow,2).value = 'Total Income:';
+  exp.getCell(incomeRefRow,3).value = {formula:`'Monthly Revenue'!D${totalAmountRow}`};
+
+  // Balance Sheet block
+  let bs = incomeRefRow+2;
+  exp.getCell(bs,5).value = 'Balance Sheet'; exp.getCell(bs,5).font = BOLD;
+  bs++;
+  exp.getCell(bs,5).value = 'Asset'; exp.getCell(bs,5).font = BOLD;
+  exp.getCell(bs,10).value = 'Liabilities'; exp.getCell(bs,10).font = BOLD;
+  const assetStartRow = bs+1;
+  const computedNow = key===monthKeyFor(state.month,state.year) ? computeAll() : null;
+  const latestDay = state.days.length ? state.days[state.days.length-1] : null;
+  const autoCash = computedNow && latestDay ? computedNow[latestDay.id].cashInHand : 0;
+  const cashInHand = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCash;
+
+  exp.getCell(assetStartRow,5).value = 1; exp.getCell(assetStartRow,6).value = 'Cash in Hand'; exp.getCell(assetStartRow,9).value = Number(cashInHand)||0;
+  exp.getCell(assetStartRow,10).value = 1; exp.getCell(assetStartRow,11).value = 'Equity';
+  exp.getCell(assetStartRow+1,5).value = 2; exp.getCell(assetStartRow+1,6).value = 'Balance in Bank Account'; exp.getCell(assetStartRow+1,9).value = {formula:`C${balanceRow}`};
+  exp.getCell(assetStartRow+1,10).value = 2; exp.getCell(assetStartRow+1,11).value = 'Advance Payment'; exp.getCell(assetStartRow+1,14).value = Number(rec.balanceSheet.advancePayment)||0;
+  const gratuityColLetter = rev.getColumn(5 + REVENUE_CATS.findIndex(c=>c.key==='gratuity')).letter;
+  const eduAssistColLetter = rev.getColumn(5 + REVENUE_CATS.findIndex(c=>c.key==='eduAssist')).letter;
+  exp.getCell(assetStartRow+2,5).value = 3; exp.getCell(assetStartRow+2,6).value = 'Due Payment'; exp.getCell(assetStartRow+2,9).value = {formula:`'Monthly Revenue'!D${totalDueRow}`};
+  exp.getCell(assetStartRow+2,10).value = 3; exp.getCell(assetStartRow+2,11).value = 'Gratuity Payable'; exp.getCell(assetStartRow+2,14).value = {formula:`'Monthly Revenue'!${gratuityColLetter}${yrtNewRow}`};
+
+  let liabRow = assetStartRow+3;
+  const eduAssistRow = liabRow;
+  exp.getCell(liabRow,10).value = 4; exp.getCell(liabRow,11).value = 'Education Assistance Payable';
+  const eduCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
+  const eduColIdx = eduCol ? rec.expenditureColumns.indexOf(eduCol) : -1;
+  const eduExpLetter = eduColIdx>=0 ? exp.getColumn(4+eduColIdx).letter : null;
+  exp.getCell(liabRow,14).value = eduExpLetter
+    ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-${eduExpLetter}${expDataRow}`}
+    : {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}`};
+  liabRow++;
+
+  rec.balanceSheet.debtItems.forEach((d,i)=>{
+    exp.getCell(liabRow,10).value = 5+i; exp.getCell(liabRow,11).value = d.label||'Other liability'; exp.getCell(liabRow,14).value = Number(d.amount)||0;
+    liabRow++;
+  });
+
+  const totalRow = Math.max(assetStartRow+3, liabRow)+1;
+  exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
+  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${assetStartRow+2})`};
+  exp.getCell(totalRow,10).value = 'Total'; exp.getCell(totalRow,10).font = BOLD;
+  exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow+1}:N${liabRow-1})`};
+  const debtRowsFormula = rec.balanceSheet.debtItems.length>0
+    ? `-SUM(N${liabRow-rec.balanceSheet.debtItems.length}:N${liabRow-1})`
+    : '';
+  exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}${debtRowsFormula}`};
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${monthKeyLabel(key).replace(/\s+/g,'_')}_Madrasa_Account.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 3000);
+}
+
 function renderSearchCard(){
   const years = voucherYearsPresent();
   const card = el(`
@@ -2136,6 +3077,7 @@ function renderSearchCard(){
             <th style="padding:6px 8px;">Category</th>
             <th style="padding:6px 8px;">Voucher</th>
             <th style="padding:6px 8px;">Description</th>
+            <th style="padding:6px 8px;">Internal note</th>
             <th style="padding:6px 8px; text-align:right;">Amount</th>
           </tr></thead>
           <tbody></tbody>
@@ -2150,6 +3092,7 @@ function renderSearchCard(){
           <td style="padding:6px 8px;">${escapeHtml(v.cat.label)}</td>
           <td style="padding:6px 8px;" class="mono">${highlightMatches(v.voucher, searchFilters.text)}</td>
           <td style="padding:6px 8px;">${highlightMatches(v.desc, searchFilters.text)}</td>
+          <td style="padding:6px 8px; color:var(--ink-soft); font-size:12.5px;">${v.note?highlightMatches(v.note, searchFilters.text):''}</td>
           <td style="padding:6px 8px; text-align:right;" class="mono">${money(v.amount)}</td>
         </tr>
       `));
@@ -2382,6 +3325,10 @@ function renderNotesheetCard(){
       <div id="ns-settings" style="${notesheetSettingsOpen?'':'display:none;'}margin-top:12px;"></div>
       <div class="computed total" style="margin-top:14px;"><span class="lbl">Grand total across all categories in range</span><span id="ns-grand-total">${money(grandTotal)}</span></div>
       <button type="button" id="ns-generate" style="margin-top:12px;" ${cats.length===0?'disabled':''}>Generate Notesheets &amp; Summary (Excel)</button>
+      <button type="button" class="secondary" id="ns-preview-btn" style="margin-top:12px; margin-left:8px;" ${cats.length===0?'disabled':''}>&#128065; Preview</button>
+      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin:6px 0 0;">
+        <input type="checkbox" id="ns-save-toggle" checked> Save this to history (used by Monthly Ledger for cross-checking)
+      </label>
     </div>
   `);
 
@@ -2455,8 +3402,139 @@ function renderNotesheetCard(){
     card.querySelector('#ns-toggle-settings').textContent = (notesheetSettingsOpen?'Hide':'Show')+' numbering & signatory settings';
   };
 
-  card.querySelector('#ns-generate').onclick = ()=>{ exportNotesheets(notesheetRange.start, notesheetRange.end); };
+  card.querySelector('#ns-generate').onclick = ()=>{
+    const shouldSave = card.querySelector('#ns-save-toggle').checked;
+    exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave);
+  };
+  card.querySelector('#ns-preview-btn').onclick = ()=>{
+    const shouldSave = card.querySelector('#ns-save-toggle').checked;
+    exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true);
+  };
 
+  if((state.withdrawNotesheetLog||[]).length){
+    card.appendChild(el(`
+      <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+          <tbody>
+            ${state.withdrawNotesheetLog.slice(-5).reverse().map(l=>`
+              <tr style="border-bottom:1px solid var(--line-soft);">
+                <td style="padding:4px 6px;" class="mono">${l.summaryLabel}</td>
+                <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
+                <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
+                <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" data-action="delete-withdraw-log" data-id="${l.id}" title="Delete this saved record">&times;</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `));
+  }
+
+  return card;
+}
+
+function renderDepositNotesheetCard(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128190;</span> Deposit Notesheet</h3>
+      <p class="subnote">Upload a raw "Collection Register Account Wise Summary" export and generate a Deposit Notesheet in the same format as the institute's template &mdash; description, category sums and the collection date range are all pulled from the file.</p>
+      <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
+        <div class="field" style="max-width:220px;">
+          <label>Next Deposit Notesheet #</label>
+          <input type="text" inputmode="numeric" id="dns-number" value="${state.nextDepositNotesheetNo||117}">
+        </div>
+        <div class="field" style="max-width:170px;">
+          <label>Collection start date</label>
+          <input type="date" id="dns-start-date">
+        </div>
+        <div class="field" style="max-width:170px;">
+          <label>Collection end date</label>
+          <input type="date" id="dns-end-date">
+        </div>
+        <div class="field" style="flex:1 1 260px;">
+          <label>Raw Collection Register file (.xlsx)</label>
+          <input type="file" id="dns-file-input" accept=".xlsx">
+        </div>
+        <button class="secondary" type="button" id="dns-generate">&#128190; Generate Deposit Notesheet</button>
+        <button class="secondary" type="button" id="dns-preview-btn">&#128065; Preview</button>
+      </div>
+      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin:4px 0 0;">
+        <input type="checkbox" id="dns-save-toggle" checked> Save this to history &amp; Monthly Ledger revenue
+      </label>
+      <p class="subnote" style="margin-top:-4px;">Dates auto-fill from the uploaded file's own date range when possible &mdash; adjust them here if that's wrong or missing; whatever is set in these two boxes is what prints on the notesheet.</p>
+      <div id="dns-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
+      ${(state.depositNotesheetLog||[]).length ? `
+      <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+          <tbody>
+            ${state.depositNotesheetLog.slice(-5).reverse().map(l=>`
+              <tr style="border-bottom:1px solid var(--line-soft);">
+                <td style="padding:4px 6px;" class="mono">#${l.noteNum}</td>
+                <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
+                <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
+                <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" data-action="delete-deposit-log" data-id="${l.id}" title="Delete this saved record">&times;</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+    </div>
+  `);
+  const numInp = card.querySelector('#dns-number');
+  numInp.onchange = ()=>{
+    const n = parseInt(numInp.value, 10);
+    if(n>0){ state.nextDepositNotesheetNo = n; saveState(); }
+  };
+  const fileInp = card.querySelector('#dns-file-input');
+  const startInp = card.querySelector('#dns-start-date');
+  const endInp = card.querySelector('#dns-end-date');
+  const statusEl = card.querySelector('#dns-status');
+  fileInp.onchange = async ()=>{
+    const file = fileInp.files && fileInp.files[0];
+    if(!file) return;
+    try{
+      await loadExcelJS();
+      const buf = await file.arrayBuffer();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buf);
+      const rawText = wb.worksheets[0].getCell('B3').value;
+      const iso = depositParseRawRangeToISO(rawText);
+      if(iso){
+        if(!startInp.value) startInp.value = iso.start;
+        if(!endInp.value) endInp.value = iso.end;
+      }
+    }catch(e){ /* auto-fill is best-effort; user can still type the dates in manually */ }
+  };
+  card.querySelector('#dns-generate').onclick = async ()=>{
+    const file = fileInp.files && fileInp.files[0];
+    if(!file){ showAlert('Choose a raw Collection Register Account Wise Summary .xlsx file first.'); return; }
+    if(!startInp.value || !endInp.value){ showAlert('Pick the collection start and end dates first.'); return; }
+    const shouldSave = card.querySelector('#dns-save-toggle').checked;
+    statusEl.textContent = 'Generating\u2026';
+    try{
+      await generateDepositNotesheet(file, startInp.value, endInp.value, shouldSave);
+      statusEl.textContent = 'Done \u2014 file downloaded.';
+    }catch(e){
+      statusEl.textContent = '';
+      showAlert('Could not generate the Deposit Notesheet: ' + e.message);
+    }
+  };
+  card.querySelector('#dns-preview-btn').onclick = async ()=>{
+    const file = fileInp.files && fileInp.files[0];
+    if(!file){ showAlert('Choose a raw Collection Register Account Wise Summary .xlsx file first.'); return; }
+    if(!startInp.value || !endInp.value){ showAlert('Pick the collection start and end dates first.'); return; }
+    const shouldSave = card.querySelector('#dns-save-toggle').checked;
+    statusEl.textContent = 'Building preview\u2026';
+    try{
+      await generateDepositNotesheet(file, startInp.value, endInp.value, shouldSave, true);
+      statusEl.textContent = '';
+    }catch(e){
+      statusEl.textContent = '';
+      showAlert('Could not preview the Deposit Notesheet: ' + e.message);
+    }
+  };
   return card;
 }
 
@@ -2530,7 +3608,14 @@ function drawBankTransferList(container, day){
 function descriptionSuggestions(catKey){
   const seen = new Set();
   allVouchers().forEach(v=>{
-    if(v.catKey===catKey && v.desc && v.desc.trim()) seen.add(v.desc.trim());
+    if(v.catKey===catKey && v.desc && v.desc.trim()){
+      const raw = v.desc.trim();
+      if(raw.includes(',')){
+        raw.split(',').forEach(part=>{ const t = part.trim(); if(t) seen.add(t); });
+      } else {
+        seen.add(raw);
+      }
+    }
   });
   return Array.from(seen).sort((a,b)=>a.localeCompare(b));
 }
@@ -2568,7 +3653,7 @@ function addCoaVoucher(day, catKey){
   const yearShort = String(state.year).slice(-2);
   const monthNum = MONTHS.indexOf(state.month)+1;
   const voucher = `${cat.short}${state.voucherCounters[catKey]}/${monthNum}/${yearShort}`;
-  const item = {id:uid(), voucher, desc:'', amount:0, status:'draft'};
+  const item = {id:uid(), voucher, desc:'', note:'', amount:0, status:'draft'};
   day.coa[catKey].push(item);
   return item;
 }
@@ -2584,10 +3669,15 @@ function drawCoaList(container, day, catKey, arr){
       <div class="line-item">
         <div class="voucher-badge mono">${item.voucher}</div>
         <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
-        <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?"></div>
+        <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?" required></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-move-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Move to a different category" ${day.locked?'disabled':''}>&#8646; Move</button>
         <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    const noteRow = el(`
+      <div class="coa-note-row" style="margin:-4px 0 10px 0;">
+        <input type="text" class="note-input" style="width:100%;font-size:12.5px;padding:5px 8px;border:1px dashed var(--line-soft);border-radius:6px;background:#FBFBF7;" value="${escapeHtml(item.note||'')}" placeholder="ঐচ্ছিক অভ্যন্তরীণ নোট (বাংলা) — প্রিন্টে আসবে না, শুধু সার্চে পাওয়া যাবে">
       </div>
     `);
     const descInp = row.querySelector('.desc-input');
@@ -2617,7 +3707,15 @@ function drawCoaList(container, day, catKey, arr){
     descInp.addEventListener('keydown', (e)=>{
       if(e.key==='Enter'){ e.preventDefault(); amtInp.focus(); amtInp.select(); }
     });
+    const syncDescRequired = ()=>{ descInp.classList.toggle('input-missing', !descInp.value.trim()); };
+    syncDescRequired();
+    descInp.addEventListener('blur', syncDescRequired);
+    descInp.addEventListener('input', syncDescRequired);
     container.appendChild(row);
+    const noteInp = noteRow.querySelector('.note-input');
+    noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
+    wireLockableTextInput(noteInp);
+    container.appendChild(noteRow);
   });
 }
 
@@ -2632,8 +3730,8 @@ function drawIouList(container, day){
     const row = el(`
       <div class="line-item">
         <div class="field desc" style="margin-bottom:0;">
-          <label>Description ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
-          <input type="text" class="desc-input" list="iou-desc-suggest" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load">
+          <label>Description <span style="color:var(--danger);">*</span> ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
+          <input type="text" class="desc-input" list="iou-desc-suggest" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load" required>
         </div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-settle-iou" data-day="${day.id}" data-item="${item.id}" title="Record a receipt/repayment against this IOU">Settle</button>
@@ -2644,6 +3742,10 @@ function drawIouList(container, day){
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
     wireLockableTextInput(descInp);
+    const syncDescRequired = ()=>{ descInp.classList.toggle('input-missing', !descInp.value.trim()); };
+    syncDescRequired();
+    descInp.addEventListener('blur', syncDescRequired);
+    descInp.addEventListener('input', syncDescRequired);
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
@@ -2724,6 +3826,99 @@ function wireDelegation(){
     if(action==='toggle-summary'){ summaryOpen = !summaryOpen; render(); return; }
     if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
     if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
+    if(action==='toggle-monthly-ledger'){
+      monthlyLedgerOpen = true;
+      monthlyLedgerMinimized = false;
+      if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
+      render(); return;
+    }
+    if(action==='minimize-monthly-ledger'){
+      monthlyLedgerMinimized = !monthlyLedgerMinimized;
+      render(); return;
+    }
+    if(action==='close-monthly-ledger'){
+      monthlyLedgerOpen = false;
+      render(); return;
+    }
+    if(action==='delete-withdraw-log'){
+      const id = t.dataset.id;
+      state.withdrawNotesheetLog = (state.withdrawNotesheetLog||[]).filter(l=>l.id!==id);
+      saveState(); render(); return;
+    }
+    if(action==='delete-deposit-log'){
+      const id = t.dataset.id;
+      state.depositNotesheetLog = (state.depositNotesheetLog||[]).filter(l=>l.id!==id);
+      saveState(); render(); return;
+    }
+    if(action==='ml-add-month'){
+      showMlAddMonthModal();
+      return;
+    }
+    if(action==='ml-add-revenue'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const entry = {id:uid(), date:'', desc:''};
+      REVENUE_CATS.forEach(c=>{ entry[c.key] = 0; });
+      rec.revenueEntries.push(entry);
+      saveState(); render();
+      return;
+    }
+    if(action==='ml-remove-revenue'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const idx = rec.revenueEntries.findIndex(x=>x.id===t.dataset.item);
+      const removed = rec.revenueEntries[idx];
+      rec.revenueEntries = rec.revenueEntries.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Revenue entry removed.', ()=>{ rec.revenueEntries.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
+    if(action==='ml-add-expcol'){
+      showMlAddColumnModal(true);
+      return;
+    }
+    if(action==='ml-add-expcol-manual'){
+      showMlAddColumnModal(false);
+      return;
+    }
+    if(action==='ml-remove-expcol'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const idx = rec.expenditureColumns.findIndex(x=>x.id===t.dataset.item);
+      const removed = rec.expenditureColumns[idx];
+      rec.expenditureColumns = rec.expenditureColumns.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Expenditure column removed.', ()=>{ rec.expenditureColumns.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
+    if(action==='ml-add-debt'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      rec.balanceSheet.debtItems.push({id:uid(), label:'', amount:0});
+      saveState(); render();
+      return;
+    }
+    if(action==='ml-remove-debt'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const idx = rec.balanceSheet.debtItems.findIndex(x=>x.id===t.dataset.item);
+      const removed = rec.balanceSheet.debtItems[idx];
+      rec.balanceSheet.debtItems = rec.balanceSheet.debtItems.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Liability removed.', ()=>{ rec.balanceSheet.debtItems.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
+    if(action==='ml-set-seed'){
+      showMlSeedModal();
+      return;
+    }
+    if(action==='ml-import'){
+      document.getElementById('ml-import-input').click();
+      return;
+    }
+    if(action==='ml-export'){
+      exportMonthlyLedger(monthlyLedgerViewKey);
+      return;
+    }
+    if(action==='ml-preview'){
+      exportMonthlyLedger(monthlyLedgerViewKey, true);
+      return;
+    }
     if(action==='remove-template'){
       const idx = state.templates.findIndex(x=>x.id===t.dataset.item);
       const removed = state.templates[idx];
@@ -2982,6 +4177,8 @@ function base64ToArrayBuffer(base64){
 }
 
 let debitVoucherTemplatePromise = null;
+const DEPOSIT_NOTESHEET_TEMPLATE_B64 = "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";
+
 function loadDebitVoucherTemplate(){
   if(debitVoucherTemplatePromise) return debitVoucherTemplatePromise;
   debitVoucherTemplatePromise = (async ()=>{
@@ -2991,6 +4188,239 @@ function loadDebitVoucherTemplate(){
     return tmplWb.worksheets[0];
   })();
   return debitVoucherTemplatePromise;
+}
+
+/* ======================================================================
+   Deposit Notesheet — companion to the withdrawal Notesheets & Withdraw
+   Summary section above. Reads a raw "Collection Register Account Wise
+   Summary" export, sums TotalAmount for the grand total and each fee
+   column for the category lines (Tuition Fee + Late Fine combine into
+   one "Tuition Fees & Late Fine" line; Admission Fee + Admission Form
+   combine into one "Admission fee & Form" line; every other category
+   gets its own line when non-zero), then clones the Revenue_deposit
+   template cell-for-cell and fills in only the numbered lines, total,
+   amount-in-words, and the collection date range - matching the
+   institute's exact layout, fonts, merges and signature blocks.
+   ====================================================================== */
+let depositNotesheetTemplatePromise = null;
+function loadDepositNotesheetTemplate(){
+  if(depositNotesheetTemplatePromise) return depositNotesheetTemplatePromise;
+  depositNotesheetTemplatePromise = (async ()=>{
+    const buf = base64ToArrayBuffer(DEPOSIT_NOTESHEET_TEMPLATE_B64);
+    const tmplWb = new ExcelJS.Workbook();
+    await tmplWb.xlsx.load(buf);
+    return tmplWb.worksheets[0];
+  })();
+  return depositNotesheetTemplatePromise;
+}
+
+const DEPOSIT_ONES = ['','one','two','three','four','five','six','seven','eight','nine','ten',
+  'eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+const DEPOSIT_TENS = ['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+function depositTwoDigitWords(n){
+  if(n<20) return DEPOSIT_ONES[n];
+  return (DEPOSIT_TENS[Math.floor(n/10)] + (n%10 ? ' '+DEPOSIT_ONES[n%10] : '')).trim();
+}
+function depositThreeDigitWords(n){
+  const parts = [];
+  if(n>=100){ parts.push(DEPOSIT_ONES[Math.floor(n/100)]+' hundred'); n%=100; if(n) parts.push(depositTwoDigitWords(n)); }
+  else if(n) parts.push(depositTwoDigitWords(n));
+  return parts.join(' ');
+}
+function depositNumberToWordsIndian(n){
+  if(n===0) return 'zero';
+  const crore = Math.floor(n/10000000); n%=10000000;
+  const lakh = Math.floor(n/100000); n%=100000;
+  const thousand = Math.floor(n/1000); n%=1000;
+  const rest = n;
+  const parts = [];
+  if(crore) parts.push(depositThreeDigitWords(crore)+' crore');
+  if(lakh) parts.push(depositThreeDigitWords(lakh)+' lakh');
+  if(thousand) parts.push(depositThreeDigitWords(thousand)+' thousand');
+  if(rest) parts.push(depositThreeDigitWords(rest));
+  return parts.join(' ');
+}
+function depositOrdinal(day){
+  const suf = (day%100>=11 && day%100<=13) ? 'th' : ({1:'st',2:'nd',3:'rd'}[day%10] || 'th');
+  return day+suf;
+}
+const DEPOSIT_MONTH_MAP = {Jan:'January',Feb:'February',Mar:'March',Apr:'April',May:'May',Jun:'June',
+  Jul:'July',Aug:'August',Sep:'September',Oct:'October',Nov:'November',Dec:'December'};
+function depositFormatDateRangeText(rawText){
+  const m = /^(\d{2})-(\w{3})-(\d{4}) to (\d{2})-(\w{3})-(\d{4})/.exec((rawText||'').trim());
+  if(!m) return null;
+  const [,d1,mo1,y1,d2,mo2,y2] = m;
+  const mo1full = DEPOSIT_MONTH_MAP[mo1], mo2full = DEPOSIT_MONTH_MAP[mo2];
+  if(!mo1full || !mo2full) return null;
+  return `${depositOrdinal(parseInt(d1,10))} ${mo1full} ${y1}- ${depositOrdinal(parseInt(d2,10))} ${mo2full} ${y2}`;
+}
+
+const DEPOSIT_CAT_COLS = ['Tuition Fee -I','Admission Fee -I','Exam Fee -I','Admission Form-I',
+  'Session Fees -I','Muqaddam Fees -I','Uniform Fees -I','Books & Stationeries -I','Transport -I',
+  'Late Fine-I','Event\u00A0Fee -I'];
+
+async function parseDepositRawFile(arrayBuffer){
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
+  const ws = wb.worksheets[0];
+  const dateRangeRaw = ws.getCell('B3').value;
+  const headerRow = ws.getRow(5);
+  const headers = {};
+  headerRow.eachCell({includeEmpty:false}, (cell, colNum)=>{ headers[String(cell.value||'').trim()] = colNum; });
+  const tranIdCol = headers['TranID'];
+  const totalAmtCol = headers['TotalAmount'];
+  if(!tranIdCol || !totalAmtCol) throw new Error('Could not find TranID/TotalAmount columns - is this the right raw file?');
+  const catCols = {};
+  DEPOSIT_CAT_COLS.forEach(name=>{ catCols[name] = headers[name] || null; });
+  let grand = 0;
+  const totals = {}; DEPOSIT_CAT_COLS.forEach(c=>totals[c]=0);
+  for(let r=6; r<=ws.rowCount; r++){
+    const row = ws.getRow(r);
+    const tranId = row.getCell(tranIdCol).value;
+    if(tranId===null || tranId===undefined || tranId==='') continue;
+    grand += Number(row.getCell(totalAmtCol).value) || 0;
+    DEPOSIT_CAT_COLS.forEach(name=>{
+      const col = catCols[name];
+      if(col) totals[name] += Number(row.getCell(col).value) || 0;
+    });
+  }
+  return {dateRangeRaw, totals, grand};
+}
+
+function buildDepositLines(totals){
+  const defs = [
+    ['Tuition Fees & Late Fine', totals['Tuition Fee -I'] + totals['Late Fine-I']],
+    ['Admission fee & Form', totals['Admission Fee -I'] + totals['Admission Form-I']],
+    ['Exam Fee', totals['Exam Fee -I']],
+    ['Session Fees', totals['Session Fees -I']],
+    ['Muqaddam', totals['Muqaddam Fees -I']],
+    ['Books & Sty', totals['Books & Stationeries -I']],
+    ['Transport', totals['Transport -I']],
+    ['Uniform', totals['Uniform Fees -I']],
+    ['Event Fee', totals['Event\u00A0Fee -I']],
+  ];
+  return defs.filter(([,amt])=>amt);
+}
+
+function depositParseRawRangeToISO(rawText){
+  const m = /^(\d{2})-(\w{3})-(\d{4}) to (\d{2})-(\w{3})-(\d{4})/.exec((rawText||'').trim());
+  if(!m) return null;
+  const [,d1,mo1,y1,d2,mo2,y2] = m;
+  const monIdx = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  if(!monIdx[mo1] || !monIdx[mo2]) return null;
+  return {start:`${y1}-${monIdx[mo1]}-${d1}`, end:`${y2}-${monIdx[mo2]}-${d2}`};
+}
+function depositFormatISODateRangeText(startISO, endISO){
+  const fmt = (iso)=>{
+    const [y,m,d] = iso.split('-').map(Number);
+    return `${depositOrdinal(d)} ${MONTHS[m-1]} ${y}`;
+  };
+  return `${fmt(startISO)}- ${fmt(endISO)}`;
+}
+
+async function generateDepositNotesheet(file, startISO, endISO, shouldSave, previewOnly){
+  if(shouldSave===undefined) shouldSave = true;
+  try{
+    await loadExcelJS();
+  }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+
+  let parsed;
+  try{
+    const buf = await file.arrayBuffer();
+    parsed = await parseDepositRawFile(buf);
+  }catch(e){
+    showAlert('Could not read that file as a Collection Register Account Wise Summary export: ' + e.message);
+    return;
+  }
+
+  const dateText = depositFormatISODateRangeText(startISO, endISO);
+  const lines = buildDepositLines(parsed.totals);
+  if(!lines.length){ showAlert('No non-zero fee categories were found in that file.'); return; }
+
+  const noteNum = state.nextDepositNotesheetNo || 117;
+  const srcWs = await loadDepositNotesheetTemplate();
+  const wb = new ExcelJS.Workbook();
+  const ws = cloneTemplateSheet(wb, srcWs, String(noteNum - 1));
+
+  ws.getCell('B3').value = `III/Acct/Madrasa/revenue/${noteNum}`;
+  ws.getCell('B7').value = dateText
+    ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
+    : `Following amount of cash collected may be deposited to madrasa account`;
+
+  const firstRow = 11;
+  lines.forEach(([desc, amt], i)=>{
+    const r = firstRow + i;
+    ws.getCell(r, 3).value = String(i+1).padStart(2,'0');
+    ws.getCell(r, 4).value = desc;
+    ws.getCell(r, 10).value = amt;
+  });
+  const lastRow = firstRow + lines.length - 1;
+  const totalRow = firstRow + lines.length;
+  ws.getCell(totalRow, 3).value = 'Total collected amount';
+  ws.getCell(totalRow, 10).value = {formula: `SUM(J${firstRow}:J${lastRow})`};
+  const words = depositNumberToWordsIndian(Math.round(parsed.grand));
+  ws.getCell(totalRow+1, 3).value = `${words.charAt(0).toUpperCase()+words.slice(1)} taka only.`;
+
+  if(previewOnly){
+    showWorkbookPreview(wb, {
+      title: `Deposit Notesheet #${noteNum}`,
+      onDownload: async ()=>{
+        const outBuf2 = await wb.xlsx.writeBuffer();
+        const blob2 = new Blob([outBuf2], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+        const url2 = URL.createObjectURL(blob2);
+        const a2 = document.createElement('a');
+        a2.href = url2; a2.download = `Revenue_deposit-${noteNum}.xlsx`;
+        document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
+        setTimeout(()=>URL.revokeObjectURL(url2), 4000);
+      }
+    });
+  } else {
+    const outBuf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([outBuf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Revenue_deposit-${noteNum}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  }
+
+  state.nextDepositNotesheetNo = noteNum + 1;
+
+  const DEPOSIT_TO_REVENUE_KEY = {
+    'Tuition Fees & Late Fine': 'tuitionFee',
+    'Admission fee & Form': 'admissionFee',
+    'Session Fees': 'sessionFee',
+    'Muqaddam': 'mqmFee',
+    'Books & Sty': 'booksSty',
+    'Transport': 'transportFee',
+    'Uniform': 'uniform',
+    'Event Fee': 'eventFee',
+    'Exam Fee': 'misc',
+  };
+  const revEntry = {id:uid(), date:endISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
+  REVENUE_CATS.forEach(c=>{ revEntry[c.key] = 0; });
+  lines.forEach(([desc, amt])=>{
+    const key = DEPOSIT_TO_REVENUE_KEY[desc];
+    if(key) revEntry[key] = (revEntry[key]||0) + amt;
+  });
+  const [endYear, endMonthNum] = endISO.split('-');
+  const monthName = MONTHS[parseInt(endMonthNum,10)-1];
+  const mlKey = monthKeyFor(monthName, endYear);
+  const mlRec = getMonthlyLedgerMonth(mlKey);
+  mlRec.revenueEntries.push(revEntry);
+
+  if(!Array.isArray(state.depositNotesheetLog)) state.depositNotesheetLog = [];
+  state.depositNotesheetLog.push({
+    id:uid(), generatedAt:new Date().toISOString(), noteNum, startDate:startISO, endDate:endISO,
+    lines: lines.map(([desc,amt])=>({desc,amt})),
+    grandTotal: parsed.grand
+  });
+
+  saveState();
+  render();
 }
 
 /* Clones a worksheet cell-for-cell (values, styles, merges, column widths,
@@ -3317,7 +4747,14 @@ async function exportAnnualSummary(year){
   for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, monthColTotals[m], {bold:true, numFmt:ASIAN_NUMFMT}); }
   put('N'+r, monthColTotals.reduce((s,v)=>s+v,0), {bold:true, numFmt:ASIAN_NUMFMT});
 
-  await downloadWorkbook(wb, `Annual_Summary_${year}.xlsx`);
+  if(previewOnly){
+    showWorkbookPreview(wb, {
+      title: `Monthly Ledger \u2014 ${monthKeyLabel(key)}`,
+      onDownload: ()=> downloadWorkbook(wb, `${key}_Monthly_Ledger.xlsx`)
+    });
+  } else {
+    await downloadWorkbook(wb, `${key}_Monthly_Ledger.xlsx`);
+  }
 }
 
 function uniqueSheetName(base, used){
@@ -3433,7 +4870,8 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   put(`I${totalRow+4}`, 'Principal', {size:14, bold:true, name:'Calibri'});
 }
 
-async function exportNotesheets(startDate, endDate){
+async function exportNotesheets(startDate, endDate, shouldSave, previewOnly){
+  if(shouldSave===undefined) shouldSave = true;
   if(!startDate || !endDate){ showAlert('Pick a from and to date.'); return; }
   if(startDate > endDate){ showAlert('The "From date" must be before the "To date".'); return; }
   const {cats, grandTotal} = collectNotesheetRange(startDate, endDate);
@@ -3457,9 +4895,143 @@ async function exportNotesheets(startDate, endDate){
   writeWithdrawSummary(wsSummary, summaryRows, grandTotal, state.summaryCounterYear, summaryNum);
   state.summaryCounterNum = summaryNum;
 
+  if(shouldSave){
+    if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
+    state.withdrawNotesheetLog.push({
+      id:uid(), generatedAt:new Date().toISOString(), startDate, endDate,
+      summaryLabel:`${state.summaryCounterYear}-${summaryNum}`,
+      categories: summaryRows.map(r=>({label:r.label, total:r.total})),
+      grandTotal
+    });
+  }
+
   await saveState();
-  await downloadWorkbook(wb, `Notesheets_${startDate}_to_${endDate}.xlsx`);
+  if(previewOnly){
+    showWorkbookPreview(wb, {
+      title: `Notesheets & Summary (${startDate} to ${endDate})`,
+      onDownload: ()=> downloadWorkbook(wb, `Notesheets_${startDate}_to_${endDate}.xlsx`)
+    });
+  } else {
+    await downloadWorkbook(wb, `Notesheets_${startDate}_to_${endDate}.xlsx`);
+  }
   render();
+}
+
+/* ---- Excel-like preview modal: renders an ExcelJS workbook as HTML
+   tables (one tab per sheet, merged cells respected) so the user can
+   eyeball a notesheet/summary before it's actually downloaded. Since
+   ExcelJS doesn't evaluate formulas, evalPreviewFormula() resolves the
+   simple SUM(range) formulas this app generates so totals still show. ----*/
+function evalPreviewFormula(ws, formula){
+  const m = /^SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)$/.exec((formula||'').trim());
+  if(!m) return null;
+  const [,colA,rowA,,rowB] = m;
+  let sum = 0;
+  for(let r=parseInt(rowA,10); r<=parseInt(rowB,10); r++){
+    const v = ws.getCell(`${colA}${r}`).value;
+    sum += (typeof v === 'number') ? v : 0;
+  }
+  return sum;
+}
+function previewCellText(ws, cell){
+  const v = cell.value;
+  if(v===null || v===undefined) return '';
+  if(v instanceof Date) return v.toLocaleDateString('en-GB');
+  if(typeof v === 'object' && v.formula) {
+    const evald = evalPreviewFormula(ws, v.formula);
+    return evald===null ? '' : moneyPlain(evald);
+  }
+  if(typeof v === 'object' && v.richText) return v.richText.map(t=>t.text).join('');
+  if(typeof v === 'number') return moneyPlain(v);
+  return String(v);
+}
+function moneyPlain(n){
+  return Number(n).toLocaleString('en-IN', {maximumFractionDigits:2});
+}
+function buildSheetPreviewTable(ws){
+  const merges = (ws.model && ws.model.merges) || [];
+  const covered = {}; // "r-c" -> {rowspan, colspan} on top-left, or 'skip' on covered-but-not-topleft
+  merges.forEach(rangeStr=>{
+    const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(rangeStr);
+    if(!m) return;
+    const [,c1,r1,c2,r2] = m;
+    const colNum = s=>{ let n=0; for(const ch of s) n = n*26 + (ch.charCodeAt(0)-64); return n; };
+    const R1=+r1, R2=+r2, C1=colNum(c1), C2=colNum(c2);
+    covered[`${R1}-${C1}`] = {rowspan:R2-R1+1, colspan:C2-C1+1};
+    for(let r=R1;r<=R2;r++) for(let c=C1;c<=C2;c++){ if(r===R1&&c===C1) continue; covered[`${r}-${c}`] = 'skip'; }
+  });
+  const maxRow = Math.max(ws.rowCount, 1);
+  const maxCol = Math.max(ws.columnCount, 1);
+  let html = '<table class="xlsx-preview-table"><tbody>';
+  for(let r=1; r<=maxRow; r++){
+    html += '<tr>';
+    for(let c=1; c<=maxCol; c++){
+      const key = `${r}-${c}`;
+      if(covered[key]==='skip') continue;
+      const span = covered[key];
+      const cell = ws.getCell(r,c);
+      const bold = cell.font && cell.font.bold;
+      const align = (cell.alignment && cell.alignment.horizontal) || (typeof cell.value==='number' ? 'right' : 'left');
+      const attrs = span ? ` rowspan="${span.rowspan}" colspan="${span.colspan}"` : '';
+      html += `<td${attrs} contenteditable="true" data-r="${r}" data-c="${c}" style="${bold?'font-weight:700;':''}text-align:${align};">${escapeHtml(previewCellText(ws,cell))}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+function showWorkbookPreview(wb, {title, onDownload}){
+  let activeIdx = 0;
+  const overlay = el(`
+    <div class="xlsx-preview-overlay">
+      <div class="xlsx-preview-modal">
+        <div class="xlsx-preview-head">
+          <h4>${escapeHtml(title||'Preview')}</h4>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:12px; color:var(--ink-soft);">Click any cell to correct it before downloading</span>
+            ${onDownload ? '<button type="button" class="secondary" id="xlsxp-download">&#11015; Download this file</button>' : ''}
+            <button type="button" class="secondary" id="xlsxp-close">&times; Close preview</button>
+          </div>
+        </div>
+        <div class="xlsx-preview-tabs" id="xlsxp-tabs"></div>
+        <div class="xlsx-preview-body" id="xlsxp-body"></div>
+      </div>
+    </div>
+  `);
+  const tabsEl = overlay.querySelector('#xlsxp-tabs');
+  const bodyEl = overlay.querySelector('#xlsxp-body');
+  function draw(){
+    tabsEl.innerHTML = '';
+    wb.worksheets.forEach((ws,i)=>{
+      const b = document.createElement('button');
+      b.type='button'; b.textContent = ws.name; b.className = i===activeIdx ? 'active' : '';
+      b.onclick = ()=>{ activeIdx = i; draw(); };
+      tabsEl.appendChild(b);
+    });
+    bodyEl.innerHTML = buildSheetPreviewTable(wb.worksheets[activeIdx]);
+    bodyEl.querySelectorAll('td[contenteditable]').forEach(td=>{
+      td.addEventListener('blur', ()=>{
+        const ws = wb.worksheets[activeIdx];
+        const r = parseInt(td.dataset.r, 10), c = parseInt(td.dataset.c, 10);
+        const cell = ws.getCell(r, c);
+        const raw = td.textContent.trim();
+        const cleaned = raw.replace(/,/g, '');
+        if(raw==='') { cell.value = null; }
+        else if(!isNaN(cleaned) && cleaned!=='') { cell.value = Number(cleaned); }
+        else { cell.value = raw; }
+      });
+      td.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter'){ e.preventDefault(); td.blur(); }
+      });
+    });
+  }
+  draw();
+  overlay.querySelector('#xlsxp-close').onclick = ()=> overlay.remove();
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  if(onDownload){
+    overlay.querySelector('#xlsxp-download').onclick = async ()=>{ await onDownload(); overlay.remove(); };
+  }
+  document.body.appendChild(overlay);
 }
 
 async function downloadWorkbook(wb, filename){
