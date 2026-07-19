@@ -439,6 +439,7 @@ let state = null;
 let selectedDayId = null;
 let notesheetRange = null; // {start, end} - lazily defaulted to the full recorded month
 let notesheetSettingsOpen = false;
+let reconDetailOpen = {};
 let voucherCounterSettingsOpen = false;
 let searchOpen = false;
 let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
@@ -2092,9 +2093,44 @@ function renderDayPanel(dayId, computed){
         </div>
         ${bd.reconciledBalance!=null ? (()=>{
           const diff = Math.round((bc.closing - bd.reconciledBalance)*100)/100;
-          return diff===0
-            ? `<div class="computed" style="background:#DDEEE3;border-style:solid;border-color:var(--primary);"><span class="lbl">&#9989; Reconciled &mdash; matches the bank statement</span><span>${money(bc.closing)}</span></div>`
-            : `<div class="computed" style="background:var(--danger-soft);border-style:solid;border-color:var(--danger);"><span class="lbl">&#9888; Difference (ledger &minus; statement)</span><span style="color:var(--danger);font-weight:700;">${money(diff)}</span></div>`;
+          if(diff===0){
+            return `<div class="computed" style="background:#DDEEE3;border-style:solid;border-color:var(--primary);"><span class="lbl">&#9989; Reconciled &mdash; matches the bank statement</span><span>${money(bc.closing)}</span></div>`;
+          }
+          const rows = [
+            ['Opening balance', bc.opening],
+            ['+ Other deposit / SSL Commerz', bc.sslDeposit],
+            ['+ Deposits transferred into this bank', bc.transferIn],
+            ['+ Bank-to-bank transfer in', bc.bankXferIn],
+            ['&minus; Bank fees', -bc.fees],
+            ['&minus; Salary paid by account', -bc.salaryAccount],
+            ['&minus; Salary paid by cash', -bc.salaryCash],
+            ['&minus; Withdrawn from this bank (Cash Disbursed)', -bc.transferOut],
+            ['&minus; Bank-to-bank transfer out', -bc.bankXferOut],
+          ].filter(([,v])=>v);
+          return `
+            <div class="computed" style="background:var(--danger-soft);border-style:solid;border-color:var(--danger);"><span class="lbl">&#9888; Difference (ledger &minus; statement)</span><span style="color:var(--danger);font-weight:700;">${money(diff)}</span></div>
+            <button type="button" class="secondary small" data-action="toggle-recon-detail" data-bank="${b.id}" style="margin-top:6px;">${reconDetailOpen[b.id] ? 'Hide' : 'Show'} details &mdash; where might this mismatch be?</button>
+            ${reconDetailOpen[b.id] ? `
+              <table style="width:100%; font-size:12.5px; border-collapse:collapse; margin-top:8px;">
+                <tbody>
+                  ${rows.map(([label,val])=>`
+                    <tr style="border-bottom:1px solid var(--line-soft);">
+                      <td style="padding:4px 6px;">${label}</td>
+                      <td style="padding:4px 6px; text-align:right;" class="mono">${money(val)}</td>
+                    </tr>`).join('')}
+                  <tr style="border-top:2px solid var(--line);">
+                    <td style="padding:4px 6px; font-weight:700;">= Ledger's closing balance</td>
+                    <td style="padding:4px 6px; text-align:right; font-weight:700;" class="mono">${money(bc.closing)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 6px;">Bank statement balance (what you entered)</td>
+                    <td style="padding:4px 6px; text-align:right;" class="mono">${money(bd.reconciledBalance)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="subnote" style="margin-top:4px;">Check each line above against the physical bank statement one at a time &mdash; the first line where they stop matching is where the mismatch is. Common causes: a fee or SSL Commerz credit the bank posted on a different date than the ledger, a transfer recorded on the wrong day, or a transaction missing from one side.</p>
+            ` : ''}
+          `;
         })() : ''}
       </div>
     `);
@@ -3845,6 +3881,11 @@ function wireDelegation(){
       state.withdrawNotesheetLog = (state.withdrawNotesheetLog||[]).filter(l=>l.id!==id);
       saveState(); render(); return;
     }
+    if(action==='toggle-recon-detail'){
+      const bankId = t.dataset.bank;
+      reconDetailOpen[bankId] = !reconDetailOpen[bankId];
+      render(); return;
+    }
     if(action==='delete-deposit-log'){
       const id = t.dataset.id;
       state.depositNotesheetLog = (state.depositNotesheetLog||[]).filter(l=>l.id!==id);
@@ -4841,19 +4882,51 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
 
   const my = monthYearAbbr();
   const s = state.signatories;
+
+  // Left/right border down the notesheet body from row 6 through the
+  // taka-in-words line (no bottom border there anymore - that moved to
+  // the gap area between the words line and the signature blocks below).
+  for(let row=6; row<=wordsRow; row++){
+    const leftCell = ws.getCell(`B${row}`);
+    leftCell.border = {...(leftCell.border||{}), left:THIN};
+    const rightCell = ws.getCell(`F${row}`);
+    rightCell.border = {...(rightCell.border||{}), right:THIN};
+  }
+  // Right border on F4:F5 (attach/sheet-no header rows)
+  ws.getCell('F4').border = {...(ws.getCell('F4').border||{}), right:THIN};
+  ws.getCell('F5').border = {...(ws.getCell('F5').border||{}), right:THIN};
+
+  // Bordered box (left, right, bottom) around the blank gap between the
+  // taka-in-words line and the first signature block.
+  const gapStart = wordsRow+1, gapEnd = wordsRow+11;
+  for(let row=gapStart; row<=gapEnd; row++){
+    const leftCell = ws.getCell(`B${row}`);
+    leftCell.border = {...(leftCell.border||{}), left:THIN};
+    const rightCell = ws.getCell(`F${row}`);
+    rightCell.border = {...(rightCell.border||{}), right:THIN};
+  }
+  for(let col=2; col<=6; col++){
+    const c = ws.getCell(gapEnd, col);
+    c.border = {...(c.border||{}), bottom:THIN};
+  }
+
   let rr = wordsRow+4;
-  ws.mergeCells(`E${rr}:F${rr}`);
-  put(`E${rr}`, `${s.accountant}\n${s.accountantRole}\n${my}`, {size:13, border:false, wrap:true});
+  ws.mergeCells(`D${rr}:E${rr}`);
+  put(`E${rr}`, `${' '.repeat(60)}${s.accountant}\n${' '.repeat(60)}${s.accountantRole}\n${' '.repeat(60)}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = 50;
   rr = wordsRow+5;
   put(`C${rr}`, 'Admin Manager', {size:13, border:false});
   rr = wordsRow+8;
-  ws.mergeCells(`E${rr}:F${rr}`);
-  put(`E${rr}`, `${s.adminManager}\n${s.adminManagerRole}\n${my}`, {size:13, border:false, wrap:true});
+  ws.mergeCells(`D${rr}:E${rr}`);
+  put(`E${rr}`, `${' '.repeat(60)}${s.adminManager}\n${' '.repeat(60)}${s.adminManagerRole}\n${' '.repeat(60)}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = 50;
+  ws.getRow(rr).height = 50;
   rr = wordsRow+10;
   put(`C${rr}`, 'Principal', {size:13, border:false});
   rr = wordsRow+11;
-  ws.mergeCells(`E${rr}:F${rr}`);
-  put(`E${rr}`, `${s.principal}\n${s.principalRole}\n${my}`, {size:13, border:false, wrap:true});
+  ws.mergeCells(`D${rr}:E${rr}`);
+  put(`E${rr}`, `${' '.repeat(60)}${s.principal}\n${' '.repeat(60)}${s.principalRole}\n${' '.repeat(60)}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = 50;
 }
 
 /* --- Consolidated Withdraw Summary sheet --- */
