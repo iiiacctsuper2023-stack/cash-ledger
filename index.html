@@ -4348,6 +4348,28 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
     : `Following amount of cash collected may be deposited to madrasa account`;
 
   const firstRow = 11;
+  const fixedLastCatRow = 16; // template's 6 pre-formatted category-line rows
+  const fixedTotalRow = 17;   // template's merged "Total collected amount" row (fixed, do not shift)
+  const fixedWordsRow = 18;   // template's merged amount-in-words row (fixed, do not shift)
+
+  // Clear all 6 category slots first so nothing from the template (or a
+  // shorter previous run) leaks through when this run has fewer lines.
+  for(let r = firstRow; r <= fixedLastCatRow; r++){
+    ws.getCell(r, 3).value = null;
+    ws.getCell(r, 4).value = null;
+    ws.getCell(r, 10).value = null;
+  }
+
+  if(lines.length > (fixedLastCatRow - firstRow + 1)){
+    // More non-zero categories than the template has rows for - insert
+    // extra rows above the fixed Total row, copied from row 16's style.
+    const extra = lines.length - (fixedLastCatRow - firstRow + 1);
+    for(let i=0;i<extra;i++) ws.duplicateRow(fixedLastCatRow, 1, true);
+  }
+  const lastCatRow = fixedLastCatRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
+  const totalRow = fixedTotalRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
+  const wordsRow = fixedWordsRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
+
   lines.forEach(([desc, amt], i)=>{
     const r = firstRow + i;
     ws.getCell(r, 3).value = String(i+1).padStart(2,'0');
@@ -4355,11 +4377,10 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
     ws.getCell(r, 10).value = amt;
   });
   const lastRow = firstRow + lines.length - 1;
-  const totalRow = firstRow + lines.length;
   ws.getCell(totalRow, 3).value = 'Total collected amount';
   ws.getCell(totalRow, 10).value = {formula: `SUM(J${firstRow}:J${lastRow})`};
   const words = depositNumberToWordsIndian(Math.round(parsed.grand));
-  ws.getCell(totalRow+1, 3).value = `${words.charAt(0).toUpperCase()+words.slice(1)} taka only.`;
+  ws.getCell(wordsRow, 3).value = `${words.charAt(0).toUpperCase()+words.slice(1)} taka only.`;
 
   if(previewOnly){
     showWorkbookPreview(wb, {
