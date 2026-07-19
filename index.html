@@ -4857,7 +4857,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
 function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   ws.getColumn(2).width = 4; ws.getColumn(3).width = 12;
   for(let i=4;i<=8;i++) ws.getColumn(i).width = 10;
-  ws.getColumn(9).width = 12;
+  ws.getColumn(9).width = 18;
 
   function put(addr, value, {size=20, bold=false, name=FONT, center=false, numFmt}={}){
     const c = ws.getCell(addr);
@@ -4868,7 +4868,8 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
     return c;
   }
 
-  put('B1', `III/Acct/Madrasa/Withdraw Summary/${yearCode}-${num}`, {size:14, bold:true});
+  ws.mergeCells('B1:I1');
+  put('B1', `III/Acct/Madrasa/Withdraw Summary/${yearCode}-${num}`, {size:14, bold:true, center:true});
   ws.mergeCells('B2:I2');
   put('B2', 'Cash withdraw Summary', {size:20, bold:true, center:true});
 
@@ -4883,9 +4884,18 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   const firstRow = 3, lastRow = r-1;
 
   ws.mergeCells(`B${r}:H${r}`);
-  put(`B${r}`, `Total: ${takaInWords(grandTotal)}`, {size:20, bold:true});
+  const wordsCell = put(`B${r}`, `Total: ${takaInWords(grandTotal)}`, {size:20, bold:true});
+  wordsCell.alignment = {wrapText:true, vertical:'middle'};
   put(`I${r}`, {formula:`SUM(I${firstRow}:I${lastRow})`}, {size:16, bold:true, name:'Arial', numFmt:ASIAN_NUMFMT});
   const totalRow = r;
+  ws.getRow(totalRow).height = 60; // room for wrapped taka-in-words text
+
+  const thin = {style:'thin'};
+  for(let row=1; row<=totalRow; row++){
+    for(let col=2; col<=9; col++){
+      ws.getCell(row, col).border = {top:thin, bottom:thin, left:thin, right:thin};
+    }
+  }
 
   put(`B${totalRow+4}`, 'Accountant', {size:14, bold:true, name:'Calibri'});
   put(`I${totalRow+4}`, 'Principal', {size:14, bold:true, name:'Calibri'});
