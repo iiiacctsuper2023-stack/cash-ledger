@@ -394,7 +394,9 @@ function getMonthlyLedgerMonth(key){
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       beginningBankBalance:0,
       expenditureColumns:defaultExpenditureColumns(),
-      balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[] },
+      balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
+        bankBalanceOverride:null, bankBreakdown:{},
+        otherAsset:{label:'Debt to III Assets Ltd', amount:250000} },
     };
   }
   return state.monthlyLedger.months[key];
@@ -1150,6 +1152,12 @@ function migrateState(){
   if(state.settings.revenueLabelOverrides===undefined) state.settings.revenueLabelOverrides = {};
   if(!state.archive) state.archive = [];
   if(!state.templates) state.templates = [];
+  Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
+    if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0, debtItems:[] };
+    if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
+    if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
+    if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
+  });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
     COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(it=>{ if(it.status===undefined) it.status = 'draft'; }); });
@@ -2451,6 +2459,20 @@ function buildSparklineSvg(values, labels){
 /* All derived figures for one month's ledger, in one place so the
    initial render and the lightweight live-refresh (below) can't drift
    out of sync with each other. */
+/* Cash in Hand for the Balance Sheet's Cash in Hand row: the previous
+   month's last recorded day's closing cash (not the selected month's own
+   days) - runs the same day-to-day chain as the Daily Ledger, across
+   every day ever entered, so it works for any selected month. */
+function lastDayCashInHandBeforeMonth(monthKey){
+  const [y, m] = monthKey.split('-');
+  const monthStart = `${y}-${m}-01`;
+  const days = state.days.filter(d=>d.date < monthStart).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  if(days.length===0) return null;
+  const computed = computeAll();
+  const last = days[days.length-1];
+  return computed[last.id] ? computed[last.id].cashInHand : null;
+}
+
 function computeMonthlyLedgerFigures(key){
   const rec = getMonthlyLedgerMonth(key);
   const isLiveMonth = key === monthKeyFor(state.month, state.year);
@@ -2481,18 +2503,49 @@ function computeMonthlyLedgerFigures(key){
   const latestDay = state.days.length ? state.days[state.days.length-1] : null;
   const computed = isLiveMonth ? computeAll() : null;
   const latestComputed = latestDay && computed ? computed[latestDay.id] : null;
-  const autoCashInHand = latestComputed ? latestComputed.cashInHand : null;
+  const autoCashInHand = lastDayCashInHandBeforeMonth(key);
   const autoBankTotal = latestComputed ? state.banks.reduce((s,b)=>s+latestComputed.banks[b.id].closing,0) : null;
   const cashInHandShown = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCashInHand;
 
-  const debtTotal = rec.balanceSheet.debtItems.reduce((s,d)=>s+(Number(d.amount)||0),0);
+  const debtTotal = rec.balanceSheet.debtItems.reduce((s,d)=>s+(Number(d.amount)||0),0); // legacy, unused going forward
   const gratuityPayable = yrtNew.gratuity;
   const eduAssistPayable = yrtNew.eduAssist - expAssistAmt;
-  const totalAssets = (Number(cashInHandShown)||0) + totalBalance + totalDueSum;
-  const equity = totalAssets - (Number(rec.balanceSheet.advancePayment)||0) - gratuityPayable - eduAssistPayable - debtTotal;
+
+  // "Balance in Bank Account" = the actual bank total on the last day of the
+  // selected month (auto-pulled for the live month; typed in for other
+  // months, same pattern as Cash in Hand), cross-checked against the
+  // Beginning Balance + Income - Expenditure formula so a mismatch can be flagged.
+  const bankBalanceShown = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : (isLiveMonth ? autoBankTotal : null);
+  const formulaBankTotal = (Number(rec.beginningBankBalance)||0) + totalBalance;
+  const bankFormulaMismatch = bankBalanceShown!==null && Math.abs((Number(bankBalanceShown)||0) - formulaBankTotal) > 1;
+
+  const bankBreakdownShown = {};
+  state.banks.forEach(b=>{
+    const ov = rec.balanceSheet.bankBreakdown[b.id];
+    bankBreakdownShown[b.id] = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
+  });
+  const bankBreakdownSum = state.banks.reduce((s,b)=>s+(Number(bankBreakdownShown[b.id])||0),0);
+  const bankBreakdownMismatch = bankBalanceShown!==null && Math.abs(bankBreakdownSum - (Number(bankBalanceShown)||0)) > 1;
+
+  const otherAsset = rec.balanceSheet.otherAsset || {label:'Debt to III Assets Ltd', amount:250000};
+  const otherAssetAmount = Number(otherAsset.amount)||0;
+
+  // Head-wise distribution of the bank balance (Gratuity + Education
+  // Assistance + Remaining = Total), where Total should match "Balance in
+  // Bank Account" above.
+  const remainingBalance = (Number(bankBalanceShown)||0) - gratuityPayable - eduAssistPayable;
+  const noteTotal = gratuityPayable + eduAssistPayable + remainingBalance;
+  const noteTotalMismatch = bankBalanceShown!==null && Math.abs(noteTotal - (Number(bankBalanceShown)||0)) > 1;
+
+  const totalAssets = (Number(cashInHandShown)||0) + (Number(bankBalanceShown)||0) + totalDueSum + otherAssetAmount;
+  const equity = totalAssets - (Number(rec.balanceSheet.advancePayment)||0) - gratuityPayable - eduAssistPayable;
+  const totalLiabilities = equity + (Number(rec.balanceSheet.advancePayment)||0) + gratuityPayable + eduAssistPayable;
+  const assetLiabilityMismatch = Math.abs(totalAssets - totalLiabilities) > 1;
 
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
+    bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
+    otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity};
 }
 
@@ -2609,6 +2662,7 @@ function renderMlSettingsModal(){
    Monthly Ledger card, without rebuilding the DOM - rebuilding on every
    keystroke (the way a full render() would) steals focus out of
    whichever input the person is still typing in. */
+function setDisplay(id, show){ const e=document.getElementById(id); if(e) e.style.display = show?'':'none'; }
 function refreshMonthlyLedgerComputedOnly(){
   if(!monthlyLedgerOpen || !monthlyLedgerViewKey) return;
   const f = computeMonthlyLedgerFigures(monthlyLedgerViewKey);
@@ -2617,12 +2671,19 @@ function refreshMonthlyLedgerComputedOnly(){
   setText('ml-total-amount', money(f.totalAmount));
   setText('ml-total-expenditure', money(f.expTotal));
   setText('ml-total-balance', money(f.totalBalance));
-  setText('ml-bs-balance-bank', money(f.totalBalance));
+  setText('ml-bs-balance-bank', money(f.bankBalanceShown||0));
   setText('ml-bs-due-payment', money(f.totalDueSum));
   setText('ml-bs-gratuity', money(f.gratuityPayable));
   setText('ml-bs-eduassist', money(f.eduAssistPayable));
   setText('ml-total-assets', money(f.totalAssets));
   setText('ml-equity', money(f.equity));
+  setText('ml-bank-breakdown-sum', money(f.bankBreakdownSum));
+  setText('ml-note-remaining', money(f.remainingBalance));
+  setText('ml-note-total', money(f.noteTotal));
+  setDisplay('ml-warn-bank-formula', f.bankFormulaMismatch);
+  setDisplay('ml-warn-bank-breakdown', f.bankBreakdownMismatch);
+  setDisplay('ml-warn-note-total', f.noteTotalMismatch);
+  setDisplay('ml-warn-asset-liability', f.assetLiabilityMismatch);
   const yrtNewBox = document.getElementById('ml-yrt-new');
   if(yrtNewBox) yrtNewBox.innerHTML = REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(f.yrtNew[c.key])}</div>`).join('');
 }
@@ -2682,6 +2743,8 @@ function renderMonthlyLedgerCard(){
   const f = computeMonthlyLedgerFigures(key);
   const {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoBankTotal,
+    bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
+    otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity} = f;
 
   const monthOptions = (()=>{
@@ -2758,27 +2821,59 @@ function renderMonthlyLedgerCard(){
       <h3 style="font-size:14px;">Balance Sheet</h3>
       <div class="row">
         <div class="field">
-          <label>Cash in Hand ${isLiveMonth?'<span class="tag">auto from Daily Ledger</span>':''}</label>
+          <label>Cash in Hand ${autoCashInHand!==null?'<span class="tag">auto: previous month\'s last day</span>':''}</label>
           <input type="text" inputmode="decimal" id="ml-cash-override" value="${formatAsianAmount(cashInHandShown||0)}" ${isLiveMonth && rec.balanceSheet.cashInHandOverride===null ? 'placeholder="auto"' : ''}>
         </div>
+        <div class="field">
+          <label>Balance in Bank Account ${isLiveMonth?'<span class="tag">auto from Daily Ledger</span>':''}</label>
+          <input type="text" inputmode="decimal" id="ml-bank-balance-override" value="${formatAsianAmount(bankBalanceShown||0)}" ${isLiveMonth && rec.balanceSheet.bankBalanceOverride===null ? 'placeholder="auto"' : ''}>
+        </div>
+      </div>
+      <p id="ml-warn-bank-formula" class="subnote" style="margin-top:-6px;color:#B3261E;${bankFormulaMismatch?'':'display:none;'}">&#9888; This doesn't match Beginning Balance + Income &minus; Expenditure (${money(formulaBankTotal)}). Check for a data entry mistake.</p>
+
+      <div class="row">
+        <div class="field">
+          <label>Due Payment <span class="tag">from Total Due, above</span></label>
+          <input type="text" disabled value="${formatAsianAmount(totalDueSum)}">
+        </div>
+        <div class="field">
+          <label>Other asset name</label>
+          <input type="text" class="ml-other-asset-label" value="${escapeHtml(otherAsset.label)}">
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="text" inputmode="decimal" id="ml-other-asset-amount" value="${formatAsianAmount(otherAsset.amount)}">
+        </div>
+      </div>
+
+      <div class="computed"><span class="lbl">Due Payment</span><span id="ml-bs-due-payment">${money(totalDueSum)}</span></div>
+      <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${money(gratuityPayable)}</span></div>
+      <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${money(eduAssistPayable)}</span></div>
+      <div class="computed"><span class="lbl">Advance Payment</span><span></span></div>
+      <div class="row">
         <div class="field">
           <label>Advance Payment (liability, manual)</label>
           <input type="text" inputmode="decimal" id="ml-advance-payment" value="${formatAsianAmount(rec.balanceSheet.advancePayment)}">
         </div>
       </div>
-      ${isLiveMonth && autoBankTotal!==null ? `<p class="subnote" style="margin-top:-6px;">Cross-check: Daily Ledger's actual tracked bank total right now is ${money(autoBankTotal)} (Balance Sheet below uses the Income&minus;Expenditure formula, matching the workbook's own convention - compare the two to catch mismatches).</p>` : ''}
-      <div class="computed"><span class="lbl">Balance in Bank Account</span><span id="ml-bs-balance-bank">${money(totalBalance)}</span></div>
-      <div class="computed"><span class="lbl">Due Payment</span><span id="ml-bs-due-payment">${money(totalDueSum)}</span></div>
-      <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${money(gratuityPayable)}</span></div>
-      <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${money(eduAssistPayable)}</span></div>
 
       <div class="divider"></div>
-      <label>Other liabilities / debts (ad-hoc, e.g. a loan taken)</label>
-      <div id="ml-debt-list"></div>
-      <button class="secondary small" type="button" data-action="ml-add-debt">+ Add liability</button>
+      <label>Bank Balance breakdown</label>
+      <div id="ml-bank-breakdown-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
+      <div class="computed"><span class="lbl">Total Balance</span><span id="ml-bank-breakdown-sum">${money(bankBreakdownSum)}</span></div>
+      <p id="ml-warn-bank-breakdown" class="subnote" style="color:#B3261E;${bankBreakdownMismatch?'':'display:none;'}">&#9888; Bank breakdown total doesn't match Balance in Bank Account above.</p>
+
+      <div class="divider"></div>
+      <label>Note: Head wise distribution of Balance in Account</label>
+      <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span>${money(gratuityPayable)}</span></div>
+      <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span>${money(eduAssistPayable)}</span></div>
+      <div class="computed"><span class="lbl">Remaining Balance</span><span id="ml-note-remaining">${money(remainingBalance)}</span></div>
+      <div class="computed total"><span class="lbl">Total</span><span id="ml-note-total">${money(noteTotal)}</span></div>
+      <p id="ml-warn-note-total" class="subnote" style="color:#B3261E;${noteTotalMismatch?'':'display:none;'}">&#9888; This total doesn't match Balance in Bank Account above.</p>
 
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Assets</span><span id="ml-total-assets">${money(totalAssets)}</span></div>
       <div class="computed total"><span class="lbl">Equity (balancing figure)</span><span id="ml-equity">${money(equity)}</span></div>
+      <p id="ml-warn-asset-liability" class="subnote" style="color:#B3261E;${assetLiabilityMismatch?'':'display:none;'}">&#9888; Asset total and Liability total don't match. Check the figures above.</p>
     </div>
   `);
 
@@ -2790,6 +2885,15 @@ function renderMonthlyLedgerCard(){
   };
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  const bankInp = card.querySelector('#ml-bank-balance-override');
+  if(bankInp) wireAmountInput(bankInp, (num)=>{ rec.balanceSheet.bankBalanceOverride = num; saveState(); renderMonthlyLedgerWindowInPlace(); });
+  const otherAssetAmtInp = card.querySelector('#ml-other-asset-amount');
+  if(otherAssetAmtInp) wireAmountInput(otherAssetAmtInp, (num)=>{ rec.balanceSheet.otherAsset.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  const otherAssetLabelInp = card.querySelector('.ml-other-asset-label');
+  if(otherAssetLabelInp){
+    wireLockableTextInput(otherAssetLabelInp);
+    otherAssetLabelInp.oninput = (e)=>{ rec.balanceSheet.otherAsset.label = e.target.value; saveState(); };
+  }
   const cashInp = card.querySelector('#ml-cash-override');
   if(cashInp) wireAmountInput(cashInp, (num)=>{ rec.balanceSheet.cashInHandOverride = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
 
@@ -2797,7 +2901,7 @@ function renderMonthlyLedgerCard(){
   drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
   drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
   drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
-  drawMlDebtList(card.querySelector('#ml-debt-list'), rec);
+  drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
 
   return card;
 }
@@ -2873,6 +2977,25 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
     const resetBtn = row.querySelector('.ml-exp-reset');
     if(resetBtn) resetBtn.onclick = ()=>{ col.override = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
     container.appendChild(row);
+  });
+}
+
+/* Per-bank closing balance for the selected month's Balance Sheet - auto
+   from the Daily Ledger for the live month, typed in for other months
+   (same override pattern as Cash in Hand / Balance in Bank Account). */
+function drawMlBankBreakdownList(container, rec, bankBreakdownShown, isLiveMonth){
+  container.innerHTML = '';
+  if(state.banks.length===0){ container.appendChild(el(`<p class="empty">No bank accounts set up yet.</p>`)); return; }
+  state.banks.forEach(b=>{
+    const val = bankBreakdownShown[b.id];
+    const isAuto = isLiveMonth && (rec.balanceSheet.bankBreakdown[b.id]===undefined || rec.balanceSheet.bankBreakdown[b.id]===null);
+    const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(b.name)} ${isAuto?'<span class="tag">auto</span>':''}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(val||0)}" ${isAuto?'placeholder="auto"':''}></div>`);
+    const inp = wrap.querySelector('input');
+    wireAmountInput(inp, (num)=>{
+      rec.balanceSheet.bankBreakdown[b.id] = num;
+      saveState(); renderMonthlyLedgerWindowInPlace();
+    });
+    container.appendChild(wrap);
   });
 }
 
@@ -3243,41 +3366,35 @@ async function exportMonthlyLedger(key, previewOnly){
   const latestDay = state.days.length ? state.days[state.days.length-1] : null;
   const autoCash = computedNow && latestDay ? computedNow[latestDay.id].cashInHand : 0;
   const cashInHand = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCash;
+  const autoBankTotalExp = computedNow && latestDay ? state.banks.reduce((s,b)=>s+computedNow[latestDay.id].banks[b.id].closing,0) : 0;
+  const bankBalanceVal = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : autoBankTotalExp;
+  const otherAsset = rec.balanceSheet.otherAsset || {label:'Debt to III Assets Ltd', amount:250000};
 
   exp.getCell(assetStartRow,5).value = 1; exp.getCell(assetStartRow,6).value = 'Cash in Hand'; exp.getCell(assetStartRow,9).value = Number(cashInHand)||0;
   exp.getCell(assetStartRow,10).value = 1; exp.getCell(assetStartRow,11).value = 'Equity';
-  exp.getCell(assetStartRow+1,5).value = 2; exp.getCell(assetStartRow+1,6).value = 'Balance in Bank Account'; exp.getCell(assetStartRow+1,9).value = {formula:`C${balanceRow}`};
+  exp.getCell(assetStartRow+1,5).value = 2; exp.getCell(assetStartRow+1,6).value = 'Balance in Bank Account'; exp.getCell(assetStartRow+1,9).value = Number(bankBalanceVal)||0;
   exp.getCell(assetStartRow+1,10).value = 2; exp.getCell(assetStartRow+1,11).value = 'Advance Payment'; exp.getCell(assetStartRow+1,14).value = Number(rec.balanceSheet.advancePayment)||0;
   const gratuityColLetter = rev.getColumn(5 + REVENUE_CATS.findIndex(c=>c.key==='gratuity')).letter;
   const eduAssistColLetter = rev.getColumn(5 + REVENUE_CATS.findIndex(c=>c.key==='eduAssist')).letter;
   exp.getCell(assetStartRow+2,5).value = 3; exp.getCell(assetStartRow+2,6).value = 'Due Payment'; exp.getCell(assetStartRow+2,9).value = {formula:`'Monthly Revenue'!D${totalDueRow}`};
   exp.getCell(assetStartRow+2,10).value = 3; exp.getCell(assetStartRow+2,11).value = 'Gratuity Payable'; exp.getCell(assetStartRow+2,14).value = {formula:`'Monthly Revenue'!${gratuityColLetter}${yrtNewRow}`};
+  exp.getCell(assetStartRow+3,5).value = 4; exp.getCell(assetStartRow+3,6).value = otherAsset.label||'Debt to III Assets Ltd'; exp.getCell(assetStartRow+3,9).value = Number(otherAsset.amount)||0;
 
-  let liabRow = assetStartRow+3;
-  const eduAssistRow = liabRow;
-  exp.getCell(liabRow,10).value = 4; exp.getCell(liabRow,11).value = 'Education Assistance Payable';
+  const eduAssistRow = assetStartRow+3;
+  exp.getCell(eduAssistRow,10).value = 4; exp.getCell(eduAssistRow,11).value = 'Education Assistance Payable';
   const eduCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
   const eduColIdx = eduCol ? rec.expenditureColumns.indexOf(eduCol) : -1;
   const eduExpLetter = eduColIdx>=0 ? exp.getColumn(4+eduColIdx).letter : null;
-  exp.getCell(liabRow,14).value = eduExpLetter
+  exp.getCell(eduAssistRow,14).value = eduExpLetter
     ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-${eduExpLetter}${expDataRow}`}
     : {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}`};
-  liabRow++;
 
-  rec.balanceSheet.debtItems.forEach((d,i)=>{
-    exp.getCell(liabRow,10).value = 5+i; exp.getCell(liabRow,11).value = d.label||'Other liability'; exp.getCell(liabRow,14).value = Number(d.amount)||0;
-    liabRow++;
-  });
-
-  const totalRow = Math.max(assetStartRow+3, liabRow)+1;
+  const totalRow = assetStartRow+4;
   exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
-  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${assetStartRow+2})`};
+  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${assetStartRow+3})`};
   exp.getCell(totalRow,10).value = 'Total'; exp.getCell(totalRow,10).font = BOLD;
-  exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow+1}:N${liabRow-1})`};
-  const debtRowsFormula = rec.balanceSheet.debtItems.length>0
-    ? `-SUM(N${liabRow-rec.balanceSheet.debtItems.length}:N${liabRow-1})`
-    : '';
-  exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}${debtRowsFormula}`};
+  exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow+1}:N${eduAssistRow})`};
+  exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`};
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
