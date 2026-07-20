@@ -144,6 +144,22 @@
   .xlsx-preview-body{flex:1 1 auto;overflow:auto;background:#fff;padding:14px;}
   table.xlsx-preview-table{border-collapse:collapse;font-size:12.5px;font-family:Calibri,Arial,sans-serif;}
   table.xlsx-preview-table td{border:1px solid #D6D6D6;padding:3px 6px;white-space:pre-wrap;vertical-align:middle;min-width:24px;}
+  .doc-preview{max-width:640px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-md);padding:10px 6px;}
+  .doc-row{display:flex;align-items:baseline;gap:10px;padding:9px 16px;border-radius:8px;transition:background .15s ease;}
+  .doc-row:hover{background:var(--paper);}
+  .doc-row--title{justify-content:center;text-align:center;font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:var(--primary-dark);padding-top:14px;padding-bottom:6px;}
+  .doc-row--note{justify-content:center;text-align:center;font-size:13px;color:var(--ink-soft);line-height:1.55;padding:6px 22px;}
+  .doc-row--caption{justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;letter-spacing:.03em;color:var(--accent-deep);text-transform:uppercase;padding-top:16px;}
+  .doc-row--line{justify-content:space-between;border-bottom:1px dashed var(--line-soft);font-size:13.5px;}
+  .doc-row--line:last-of-type{border-bottom:none;}
+  .doc-row--total{font-weight:700;background:var(--primary-tint);border-radius:8px;border-bottom:none;margin-top:4px;font-size:14.5px;}
+  .doc-desc{flex:1 1 auto;color:var(--ink);}
+  .doc-sep{color:var(--line);margin:0 2px;}
+  .doc-amt{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;color:var(--primary-dark);white-space:nowrap;font-weight:600;}
+  .doc-row--total .doc-amt{color:var(--accent-deep);}
+  .doc-editable{outline:none;border-radius:4px;padding:1px 3px;margin:-1px -3px;cursor:text;}
+  .doc-editable:hover{background:var(--accent-soft);}
+  .doc-editable:focus{background:#fff;box-shadow:0 0 0 2px var(--primary-tint);}
   .floating-window{
     position:fixed;top:6vh;right:2vw;width:min(880px,60vw);height:88vh;
     min-width:340px;min-height:220px;max-width:96vw;max-height:94vh;
@@ -421,11 +437,46 @@ function yearlyRunningTotalBefore(key){
    state.days) matching the requested month - callers should check
    monthKeyFor(state.month, state.year) === key first for an accurate
    result. */
+/* Returns the effective (possibly user-overridden) text for a COA
+   category field, so Settings-panel edits apply everywhere the field is
+   used without touching every call site's data. */
+function coaText(cat, field){
+  const ov = state.settings && state.settings.coaOverrides && state.settings.coaOverrides[cat.key];
+  return (ov && ov[field]!==undefined && ov[field]!=='') ? ov[field] : cat[field];
+}
+function revenueLabel(catKey){
+  const ov = state.settings && state.settings.revenueLabelOverrides;
+  return (ov && ov[catKey]) ? ov[catKey] : (REVENUE_CATS.find(c=>c.key===catKey)||{}).label;
+}
 function currentDailyLedgerCoaTotals(){
   const totals = {};
   COA.forEach(c=>{ totals[c.key] = 0; });
   state.days.forEach(day=>{
     COA.forEach(cat=>{ (day.coa[cat.key]||[]).forEach(item=>{ totals[cat.key] += Number(item.amount)||0; }); });
+  });
+  return totals;
+}
+/* Per-category expenditure totals for a given month, pulled from the
+   saved Withdraw Notesheet history (state.withdrawNotesheetLog) instead
+   of the live Daily Ledger - this is the actual source of truth for
+   "what left the bank and which khat it was withdrawn for", and (unlike
+   currentDailyLedgerCoaTotals) works for any month, not just whichever
+   one is currently loaded in the Daily Ledger. A notesheet run is
+   attributed to the month of its End Date. Matched by comparing each
+   saved category's label against COA.summaryLabel, the same label the
+   notesheet-generation step wrote it with. */
+function monthWithdrawCoaTotals(key){
+  const totals = {};
+  COA.forEach(c=>{ totals[c.key] = 0; });
+  (state.withdrawNotesheetLog||[]).forEach(log=>{
+    if(!log.endDate) return;
+    const [y, m] = log.endDate.split('-');
+    const monthName = MONTHS[parseInt(m,10)-1];
+    if(monthKeyFor(monthName, y) !== key) return;
+    (log.categories||[]).forEach(cat=>{
+      const coa = COA.find(c=>coaText(c,'summaryLabel')===cat.label || c.summaryLabel===cat.label);
+      if(coa) totals[coa.key] += Number(cat.total)||0;
+    });
   });
   return totals;
 }
@@ -448,6 +499,7 @@ let summaryFilters = { catKey:'', mode:'month', year:'', fromDate:'', toDate:'' 
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false;
+let mlSettingsOpen = false;
 let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
 let locked = false;            // true = show the lock screen instead of the app
@@ -486,6 +538,32 @@ function defaultState(){
     dayLockPasswordHash:null,
     archive:[],
     templates:[],
+    /* User-editable "data link" and "export formatting" knobs, so small
+       fixes (a deposit description that should map to a different
+       revenue category, or an export border/row-height that looks off)
+       can be corrected directly in the Settings panel - no prompting
+       Claude needed, and the fix persists in state from then on. */
+    settings:{
+      depositRevenueMap:{
+        'Tuition Fees & Late Fine': 'tuitionFee',
+        'Admission fee & Form': 'admissionFee',
+        'Session Fees': 'sessionFee',
+        'Muqaddam': 'mqmFee',
+        'Books & Sty': 'booksSty',
+        'Transport': 'transportFee',
+        'Uniform': 'uniform',
+        'Event Fee': 'eventFee',
+        'Exam Fee': 'misc',
+      },
+      coaOverrides:{},          // key -> {label?, notesheetLabel?, expensePhrase?, summaryLabel?}
+      revenueLabelOverrides:{}, // key -> label
+      exportFormat:{
+        borderStyle:'thin',        // thin | medium | thick | double
+        wordsRowHeight:60,          // Withdraw Summary: taka-in-words row height
+        sigRowHeight:50,            // signature block row height
+        sigIndentSpaces:60          // spaces before each signature line
+      }
+    },
     /* Monthly Ledger (Revenue/Expenditure/Balance Sheet workbook) - keyed
        by "YYYY-MM" so it persists independently of state.days, which
        resets/archives whenever the Daily Ledger's active month changes.
@@ -1065,6 +1143,11 @@ function migrateState(){
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(state.payableRegistry===undefined) state.payableRegistry = [];
   if(state.monthlyLedger===undefined) state.monthlyLedger = { months:{}, seed:null };
+  if(state.settings===undefined) state.settings = defaultState().settings;
+  if(state.settings.depositRevenueMap===undefined) state.settings.depositRevenueMap = defaultState().settings.depositRevenueMap;
+  if(state.settings.exportFormat===undefined) state.settings.exportFormat = defaultState().settings.exportFormat;
+  if(state.settings.coaOverrides===undefined) state.settings.coaOverrides = {};
+  if(state.settings.revenueLabelOverrides===undefined) state.settings.revenueLabelOverrides = {};
   if(!state.archive) state.archive = [];
   if(!state.templates) state.templates = [];
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
@@ -1590,12 +1673,14 @@ function render(){
     app.appendChild(el(`
       <div class="card" style="text-align:center;">
         <button class="secondary" data-action="toggle-monthly-ledger">&#128220; Generate Monthly Ledger</button>
+        <button class="secondary" data-action="toggle-ml-settings">&#9881; Data Links &amp; Export Format</button>
       </div>
     `));
     app.appendChild(renderAnnualSummaryCard());
   }
   app.appendChild(renderFooter());
   if(monthlyLedgerOpen) app.appendChild(renderMonthlyLedgerWindow());
+  if(mlSettingsOpen) app.appendChild(renderMlSettingsModal());
   if(lastUndo) app.appendChild(renderUndoToast());
   if(duplicateWarning) app.appendChild(renderDuplicateWarningToast());
 }
@@ -1965,7 +2050,7 @@ function renderDayPanel(dayId, computed){
     COA.forEach(cat=>{
       const field = el(`
         <div class="field" style="min-width:170px;flex:1;">
-          <label>Next ${cat.label} voucher # <span class="tag">${cat.short}</span></label>
+          <label>Next ${coaText(cat,'label')} voucher # <span class="tag">${cat.short}</span></label>
           <input type="number" min="1" value="${(state.voucherCounters[cat.key]||0)+1}">
         </div>
       `);
@@ -1991,12 +2076,12 @@ function renderDayPanel(dayId, computed){
     const section = el(`
       <div id="cat-section-${cat.key}" style="margin-bottom:14px;padding-bottom:12px;${ci<COA.length-1?'border-bottom:1px solid var(--line-soft);':''}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;">
-          <strong style="font-size:13.5px;">${String(ci+1).padStart(2,'0')} &middot; ${cat.label} <span class="tag">${cat.short}</span></strong>
+          <strong style="font-size:13.5px;">${String(ci+1).padStart(2,'0')} &middot; ${coaText(cat,'label')} <span class="tag">${cat.short}</span></strong>
           <span class="mono" style="font-size:12.5px;color:var(--ink-soft);">Category total: <span id="coa-cat-total-${cat.key}">${money(c.coaTotals[cat.key]||0)}</span></span>
         </div>
-        <div class="coa-desc">${cat.desc}</div>
+        <div class="coa-desc">${coaText(cat,'desc')}</div>
         <div id="coa-list-${cat.key}"></div>
-        <button class="secondary small" data-action="add-coa" data-day="${day.id}" data-cat="${cat.key}">+ Add ${cat.label} voucher</button>
+        <button class="secondary small" data-action="add-coa" data-day="${day.id}" data-cat="${cat.key}">+ Add ${coaText(cat,'label')} voucher</button>
         ${catTemplates.map(tpl=>`<button class="secondary small" type="button" data-action="add-coa-from-template" data-day="${day.id}" data-tpl="${tpl.id}" title="${escapeHtml(tpl.desc)}${tpl.amount?' - '+money(tpl.amount):''}">&#128203; ${escapeHtml(tpl.desc)}</button>`).join('')}
       </div>
     `);
@@ -2079,18 +2164,19 @@ function renderDayPanel(dayId, computed){
         <div class="computed"><span class="lbl">Total out (fees + salary + transfers out)</span><span id="bc-totalOut-${b.id}">${money(bc.totalOut)}</span></div>
         <div class="computed total"><span class="lbl">Closing balance &mdash; ${escapeHtml(b.name)}</span><span id="bc-closing-${b.id}">${money(bc.closing)}</span></div>
         <div class="divider"></div>
-        <label>Bank Reconciliation <span class="tag">optional</span></label>
-        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.</p>
+        <label>Bank Reconciliation ${/tbl/i.test(b.name) ? '<span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory</span>' : '<span class="tag">optional</span>'}</label>
+        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.${/tbl/i.test(b.name) ? ' TBL must be reconciled before you can consider the day fully closed.' : ''}</p>
         <div class="row">
           <div class="field">
             <label>Bank statement balance</label>
-            <input type="text" inputmode="decimal" class="amt-input" id="recon-bal-${b.id}" value="${bd.reconciledBalance!=null?formatAsianAmount(bd.reconciledBalance):''}" placeholder="Not checked yet">
+            <input type="text" inputmode="decimal" class="amt-input ${/tbl/i.test(b.name) && bd.reconciledBalance==null ? 'input-missing' : ''}" id="recon-bal-${b.id}" value="${bd.reconciledBalance!=null?formatAsianAmount(bd.reconciledBalance):''}" placeholder="${/tbl/i.test(b.name) ? 'Required \u2014 not checked yet' : 'Not checked yet'}">
           </div>
           <div class="field">
             <label>Note <span class="tag">optional</span></label>
             <input type="text" id="recon-note-${b.id}" value="${escapeHtml(bd.reconcileNote)}" placeholder="e.g. matches statement dated...">
           </div>
         </div>
+        ${/tbl/i.test(b.name) && bd.reconciledBalance==null ? `<p class="subnote" style="color:var(--danger);margin-top:-2px;">&#9888; TBL reconciliation is required for this day.</p>` : ''}
         ${bd.reconciledBalance!=null ? (()=>{
           const diff = Math.round((bc.closing - bd.reconciledBalance)*100)/100;
           if(diff===0){
@@ -2179,9 +2265,14 @@ function renderDayPanel(dayId, computed){
 function renderSectionNav(day){
   const sections = [
     {id:'section-cash-received', num:'1', label:'Cash received'},
-    {id:'section-cash-disbursed', num:'2', label:'Cash disbursed', flyout:COA.map((cat,i)=>({id:'cat-section-'+cat.key, num:String(i+1).padStart(2,'0'), label:cat.label}))},
+    {id:'section-cash-disbursed', num:'2', label:'Cash disbursed', flyout:COA.map((cat,i)=>({id:'cat-section-'+cat.key, num:String(i+1).padStart(2,'0'), label:coaText(cat,'label')}))},
     {id:'section-deposits-iou', num:'3', label:'Deposits & IOUs'},
     ...state.banks.map((b,bi)=>({id:'section-bank-'+b.id, num:String(4+bi), label:b.name})),
+    {id:'section-notesheets', num:String(4+state.banks.length), label:'Notesheets', flyout:[
+      {id:'section-notesheets', num:'', label:'Withdraw Notesheets & Summary'},
+      {id:'section-deposit-notesheet', num:'', label:'Deposit Notesheet'},
+      {id:'__open-monthly-ledger__', num:'', label:'Monthly Ledger'},
+    ]},
   ];
   const nav = el(`<nav class="section-nav" aria-label="Jump to section"></nav>`);
   const scrollToId = (id)=>{
@@ -2204,7 +2295,17 @@ function renderSectionNav(day){
       flyout.appendChild(el(`<div class="section-nav-flyout-title">${escapeHtml(sec.label)}</div>`));
       sec.flyout.forEach(sub=>{
         const subBtn = el(`<button type="button" class="section-nav-flyout-item">${sub.num} &middot; ${escapeHtml(sub.label)}</button>`);
-        subBtn.onclick = ()=>{ scrollToId(sub.id); dot.classList.remove('open'); };
+        subBtn.onclick = ()=>{
+          if(sub.id==='__open-monthly-ledger__'){
+            monthlyLedgerOpen = true;
+            monthlyLedgerMinimized = false;
+            if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
+            render();
+          } else {
+            scrollToId(sub.id);
+          }
+          dot.classList.remove('open');
+        };
         flyout.appendChild(subBtn);
       });
       dotBtn.onclick = ()=>{ closeOtherFlyouts(); dot.classList.toggle('open'); };
@@ -2357,7 +2458,7 @@ function computeMonthlyLedgerFigures(key){
   const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
   const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome;
 
-  const liveCoaTotals = isLiveMonth ? currentDailyLedgerCoaTotals() : null;
+  const liveCoaTotals = monthWithdrawCoaTotals(key);
   let expTotal = 0;
   const expColAmounts = rec.expenditureColumns.map(col=>{
     let amt = 0;
@@ -2390,6 +2491,115 @@ function computeMonthlyLedgerFigures(key){
     debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity};
 }
 
+/* Self-service editing modal: lets the user fix small "data link" and
+   "export formatting" issues himself, directly in the tool, without
+   needing to prompt Claude each time. Two sections:
+   1. Data Links - which Deposit Notesheet line description maps to
+      which Revenue category (state.settings.depositRevenueMap).
+   2. Export Formatting - border style + row heights + signature indent
+      used when generating the Withdraw Summary sheet
+      (state.settings.exportFormat). */
+function renderMlSettingsModal(){
+  const s = state.settings;
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal" style="max-width:640px;">
+        <div class="modal-header">
+          <h3>&#9881; Data Links &amp; Export Format</h3>
+          <button class="icon-btn" data-action="toggle-ml-settings" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="subnote">Fix these yourself, any time - changes save immediately and apply to every future notesheet/ledger you generate.</p>
+
+          <h4 style="margin-bottom:4px;">Data Links: Deposit description &rarr; Revenue category</h4>
+          <p class="subnote" style="margin-top:0;">If a Collection Register line isn't landing in the right Monthly Ledger revenue column, fix the mapping here.</p>
+          <div id="ml-deplink-list"></div>
+          <button class="secondary small" type="button" data-action="ml-deplink-add" style="margin-top:6px;">+ Add mapping</button>
+
+          <div class="divider"></div>
+
+          <h4 style="margin-bottom:4px;">Export Formatting (Withdraw Summary sheet)</h4>
+          <div class="row">
+            <div class="field">
+              <label>Border style</label>
+              <select id="ml-fmt-border">
+                ${['thin','medium','thick','double'].map(v=>`<option value="${v}" ${s.exportFormat.borderStyle===v?'selected':''}>${v}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Taka-in-words row height</label>
+              <input type="text" inputmode="numeric" id="ml-fmt-wordsrow" value="${s.exportFormat.wordsRowHeight}">
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Signature row height</label>
+              <input type="text" inputmode="numeric" id="ml-fmt-sigrow" value="${s.exportFormat.sigRowHeight}">
+            </div>
+            <div class="field">
+              <label>Signature indent (spaces)</label>
+              <input type="text" inputmode="numeric" id="ml-fmt-sigindent" value="${s.exportFormat.sigIndentSpaces}">
+            </div>
+          </div>
+          <p class="subnote">If a signature line or the taka-in-words line looks cramped/misaligned in the exported Excel, nudge these numbers and re-export - no code changes needed.</p>
+          <button class="secondary small" type="button" data-action="ml-fmt-reset">Reset export formatting to default</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  function drawDepLinks(){
+    const list = overlay.querySelector('#ml-deplink-list');
+    list.innerHTML = '';
+    Object.keys(s.depositRevenueMap).forEach(desc=>{
+      const row = el(`
+        <div class="line-item">
+          <div class="field desc" style="margin-bottom:0;"><label>Deposit description</label><input type="text" class="ml-deplink-desc" value="${escapeHtml(desc)}"></div>
+          <div class="field" style="margin-bottom:0;"><label>Revenue category</label>
+            <select class="ml-deplink-cat">
+              ${REVENUE_CATS.map(c=>`<option value="${c.key}" ${s.depositRevenueMap[desc]===c.key?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}
+            </select>
+          </div>
+          <button class="danger small" type="button" data-action="ml-deplink-remove" title="Remove">&times;</button>
+        </div>
+      `);
+      const descInp = row.querySelector('.ml-deplink-desc');
+      const catSel = row.querySelector('.ml-deplink-cat');
+      descInp.addEventListener('change', ()=>{
+        const oldKey = desc, newKey = descInp.value.trim();
+        if(!newKey || newKey===oldKey) { descInp.value = oldKey; return; }
+        const catVal = s.depositRevenueMap[oldKey];
+        delete s.depositRevenueMap[oldKey];
+        s.depositRevenueMap[newKey] = catVal;
+        saveState(); drawDepLinks();
+      });
+      catSel.onchange = ()=>{ s.depositRevenueMap[desc] = catSel.value; saveState(); };
+      row.querySelector('[data-action="ml-deplink-remove"]').onclick = ()=>{ delete s.depositRevenueMap[desc]; saveState(); drawDepLinks(); };
+      list.appendChild(row);
+    });
+  }
+  drawDepLinks();
+
+  overlay.querySelector('[data-action="ml-deplink-add"]').onclick = ()=>{
+    let base = 'New line', n = 1, key = base;
+    while(s.depositRevenueMap[key]!==undefined){ key = `${base} ${++n}`; }
+    s.depositRevenueMap[key] = REVENUE_CATS[0].key;
+    saveState(); drawDepLinks();
+  };
+
+  overlay.querySelector('#ml-fmt-border').onchange = (e)=>{ s.exportFormat.borderStyle = e.target.value; saveState(); };
+  overlay.querySelector('#ml-fmt-wordsrow').onchange = (e)=>{ s.exportFormat.wordsRowHeight = Number(e.target.value)||60; saveState(); };
+  overlay.querySelector('#ml-fmt-sigrow').onchange = (e)=>{ s.exportFormat.sigRowHeight = Number(e.target.value)||50; saveState(); };
+  overlay.querySelector('#ml-fmt-sigindent').onchange = (e)=>{ s.exportFormat.sigIndentSpaces = Number(e.target.value)||0; saveState(); };
+  overlay.querySelector('[data-action="ml-fmt-reset"]').onclick = ()=>{
+    s.exportFormat = defaultState().settings.exportFormat;
+    saveState(); render();
+  };
+
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay){ mlSettingsOpen = false; render(); } });
+  return overlay;
+}
+
 /* Updates just the read-only computed figures in an already-rendered
    Monthly Ledger card, without rebuilding the DOM - rebuilding on every
    keystroke (the way a full render() would) steals focus out of
@@ -2410,6 +2620,14 @@ function refreshMonthlyLedgerComputedOnly(){
   setText('ml-equity', money(f.equity));
   const yrtNewBox = document.getElementById('ml-yrt-new');
   if(yrtNewBox) yrtNewBox.innerHTML = REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(f.yrtNew[c.key])}</div>`).join('');
+}
+
+function renderMonthlyLedgerWindowInPlace(){
+  if(!monthlyLedgerOpen || monthlyLedgerMinimized) return;
+  const body = document.getElementById('ml-floating-body');
+  if(!body) return;
+  body.innerHTML = '';
+  body.appendChild(renderMonthlyLedgerCard());
 }
 
 function renderMonthlyLedgerWindow(){
@@ -2483,7 +2701,7 @@ function renderMonthlyLedgerCard(){
         <button type="button" data-action="ml-export">&#11015; Export this month (.xlsx)</button>
         <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
       </div>
-      ${!isLiveMonth ? `<p class="subnote" style="color:var(--danger);">This isn't the month currently open in the Daily Ledger (${state.month} ${state.year}) - Cash in Hand and any "Auto from CoA" expenditure columns can't be pulled live for it here, so they show as 0/blank until you switch the Daily Ledger to that month, or enter them manually below.</p>` : ''}
+      ${!isLiveMonth ? `<p class="subnote" style="color:var(--danger);">This isn't the month currently open in the Daily Ledger (${state.month} ${state.year}) - Cash in Hand can't be pulled live for it here, so it shows as 0/blank until you switch the Daily Ledger to that month, or enter it manually below. ("Auto" expenditure columns are unaffected - they're pulled from saved Withdraw Notesheet history, not the live Daily Ledger.)</p>` : ''}
 
       <div class="divider"></div>
       <h3 style="font-size:14px;">Revenue</h3>
@@ -2573,7 +2791,7 @@ function renderMonthlyLedgerCard(){
   drawMlRevenueList(card.querySelector('#ml-revenue-list'), rec, key);
   drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
   drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
-  drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, isLiveMonth?liveCoaTotals:null);
+  drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
   drawMlDebtList(card.querySelector('#ml-debt-list'), rec);
 
   return card;
@@ -2621,12 +2839,15 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
   container.innerHTML = '';
   rec.expenditureColumns.forEach(col=>{
     const isCoa = col.source==='coa';
-    const amt = isCoa ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : (Number(col.amount)||0);
+    const autoAmt = isCoa ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : null;
+    const overridden = isCoa && col.override!==undefined && col.override!==null;
+    const amt = isCoa ? (overridden ? col.override : autoAmt) : (Number(col.amount)||0);
     const row = el(`
       <div class="line-item">
         <div class="field desc" style="margin-bottom:0;"><label>Column</label><input type="text" class="ml-exp-label" value="${escapeHtml(col.label)}"></div>
         ${isCoa
-          ? `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">auto from ${escapeHtml(COA.find(c=>c.key===col.coaKey)?.label||col.coaKey)}</span></label><input type="text" value="${formatAsianAmount(amt)}" disabled></div>`
+          ? `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">${overridden?'manually overridden':'auto from Withdraw Notesheet: '+escapeHtml(COA.find(c=>c.key===col.coaKey)?.label||col.coaKey)}</span></label><input type="text" inputmode="decimal" class="ml-exp-amt-coa" value="${formatAsianAmount(amt)}"></div>
+             <button type="button" class="secondary small ml-exp-reset" title="Clear override, go back to auto" ${overridden?'':'style="visibility:hidden;"'}>&#8635;</button>`
           : `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">manual</span></label><input type="text" inputmode="decimal" class="ml-exp-amt" value="${formatAsianAmount(amt)}"></div>`
         }
         <button class="danger small" type="button" data-action="ml-remove-expcol" data-item="${col.id}" title="Remove">&times;</button>
@@ -2637,6 +2858,15 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
     labelInp.oninput = (e)=>{ col.label = e.target.value; saveState(); };
     const amtInp = row.querySelector('.ml-exp-amt');
     if(amtInp) wireAmountInput(amtInp, (num)=>{ col.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    const coaAmtInp = row.querySelector('.ml-exp-amt-coa');
+    if(coaAmtInp){
+      wireAmountInput(coaAmtInp, (num)=>{
+        col.override = (num===autoAmt) ? null : num;
+        saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
+      });
+    }
+    const resetBtn = row.querySelector('.ml-exp-reset');
+    if(resetBtn) resetBtn.onclick = ()=>{ col.override = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
     container.appendChild(row);
   });
 }
@@ -2974,9 +3204,9 @@ async function exportMonthlyLedger(key, previewOnly){
     cell.value = col.label; cell.font = BOLD; cell.alignment = {wrapText:true};
   });
 
-  const liveCoaTotals = key===monthKeyFor(state.month,state.year) ? currentDailyLedgerCoaTotals() : null;
+  const liveCoaTotals = monthWithdrawCoaTotals(key);
   const expDataRow = expHeaderRow+2;
-  exp.getCell(expDataRow,1).value = 'Recorded in Daily Ledger';
+  exp.getCell(expDataRow,1).value = 'Recorded in Withdraw Notesheets';
   exp.getCell(expDataRow,2).value = 'Category totals for the month';
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
   rec.expenditureColumns.forEach((col,i)=>{
@@ -3343,7 +3573,7 @@ function renderNotesheetCard(){
   const {cats, grandTotal} = collectNotesheetRange(notesheetRange.start, notesheetRange.end);
 
   const card = el(`
-    <div class="card">
+    <div class="card" id="section-notesheets">
       <h3><span class="num">&#9776;</span> Notesheets &amp; Withdraw Summary</h3>
       <p class="subnote">Pick a date range to generate one notesheet per Chart of Accounts category that had expenses (categories with none are skipped automatically), plus one consolidated Withdraw Summary &mdash; matching the existing notesheet format, voucher numbering and signature blocks.</p>
       <div class="row">
@@ -3429,8 +3659,46 @@ function renderNotesheetCard(){
     sigRow.querySelector('#ns-sig-adm').oninput = (e)=>{ s.adminManager = e.target.value; saveState(); };
     sigRow.querySelector('#ns-sig-prin').oninput = (e)=>{ s.principal = e.target.value; saveState(); };
     settings.appendChild(sigRow);
+    const roleRow = el(`
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:200px;"><label>Accountant role title</label><input type="text" id="ns-sig-acct-role" value="${escapeHtml(s.accountantRole)}"></div>
+        <div class="field" style="min-width:200px;"><label>Admin Manager role title</label><input type="text" id="ns-sig-adm-role" value="${escapeHtml(s.adminManagerRole)}"></div>
+        <div class="field" style="min-width:200px;"><label>Principal role title</label><input type="text" id="ns-sig-prin-role" value="${escapeHtml(s.principalRole)}"></div>
+      </div>
+    `);
+    roleRow.querySelector('#ns-sig-acct-role').oninput = (e)=>{ s.accountantRole = e.target.value; saveState(); };
+    roleRow.querySelector('#ns-sig-adm-role').oninput = (e)=>{ s.adminManagerRole = e.target.value; saveState(); };
+    roleRow.querySelector('#ns-sig-prin-role').oninput = (e)=>{ s.principalRole = e.target.value; saveState(); };
+    settings.appendChild(roleRow);
+    settings.appendChild(el(`<div class="divider"></div>`));
+    settings.appendChild(el(`<p class="subnote" style="margin:0 0 6px;">Category names &amp; wording used across notesheets - edit if any label doesn't match how the institution refers to it:</p>`));
+    const coaList = el(`<div></div>`);
+    COA.forEach(cat=>{
+      const ov = state.settings.coaOverrides[cat.key] || (state.settings.coaOverrides[cat.key] = {});
+      const row = el(`
+        <div class="line-item" style="flex-wrap:wrap;">
+          <div class="field" style="min-width:120px;"><label>Category name</label><input type="text" value="${escapeHtml(coaText(cat,'label'))}" data-coa-field="label"></div>
+          <div class="field" style="min-width:160px;flex:1;"><label>Notesheet title text</label><input type="text" value="${escapeHtml(coaText(cat,'notesheetLabel'))}" data-coa-field="notesheetLabel"></div>
+          <div class="field" style="min-width:160px;flex:1;"><label>"...as ___ expense may be withdrawn"</label><input type="text" value="${escapeHtml(coaText(cat,'expensePhrase'))}" data-coa-field="expensePhrase"></div>
+          <div class="field" style="min-width:160px;flex:1;"><label>Withdraw Summary row label</label><input type="text" value="${escapeHtml(coaText(cat,'summaryLabel'))}" data-coa-field="summaryLabel"></div>
+        </div>
+      `);
+      row.querySelectorAll('[data-coa-field]').forEach(inp=>{
+        inp.oninput = (e)=>{ ov[e.target.dataset.coaField] = e.target.value; saveState(); };
+      });
+      coaList.appendChild(row);
+    });
+    settings.appendChild(coaList);
+    settings.appendChild(el(`<div class="divider"></div>`));
+    settings.appendChild(el(`<p class="subnote" style="margin:0 0 6px;">Revenue category names (Monthly Ledger &amp; Deposit Notesheet):</p>`));
+    const revGrid = el(`<div class="row" style="flex-wrap:wrap;"></div>`);
+    REVENUE_CATS.forEach(c=>{
+      const field = el(`<div class="field" style="min-width:170px;flex:1;"><label>${escapeHtml(c.key)}</label><input type="text" value="${escapeHtml(revenueLabel(c.key))}"></div>`);
+      field.querySelector('input').oninput = (e)=>{ state.settings.revenueLabelOverrides[c.key] = e.target.value; saveState(); };
+      revGrid.appendChild(field);
+    });
+    settings.appendChild(revGrid);
   }
-  drawSettings();
 
   card.querySelector('#ns-toggle-settings').onclick = ()=>{
     notesheetSettingsOpen = !notesheetSettingsOpen;
@@ -3472,7 +3740,7 @@ function renderNotesheetCard(){
 
 function renderDepositNotesheetCard(){
   const card = el(`
-    <div class="card">
+    <div class="card" id="section-deposit-notesheet">
       <h3><span class="num">&#128190;</span> Deposit Notesheet</h3>
       <p class="subnote">Upload a raw "Collection Register Account Wise Summary" export and generate a Deposit Notesheet in the same format as the institute's template &mdash; description, category sums and the collection date range are all pulled from the file.</p>
       <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
@@ -3866,6 +4134,10 @@ function wireDelegation(){
       monthlyLedgerOpen = true;
       monthlyLedgerMinimized = false;
       if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
+      render(); return;
+    }
+    if(action==='toggle-ml-settings'){
+      mlSettingsOpen = !mlSettingsOpen;
       render(); return;
     }
     if(action==='minimize-monthly-ledger'){
@@ -4451,17 +4723,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   state.nextDepositNotesheetNo = noteNum + 1;
 
-  const DEPOSIT_TO_REVENUE_KEY = {
-    'Tuition Fees & Late Fine': 'tuitionFee',
-    'Admission fee & Form': 'admissionFee',
-    'Session Fees': 'sessionFee',
-    'Muqaddam': 'mqmFee',
-    'Books & Sty': 'booksSty',
-    'Transport': 'transportFee',
-    'Uniform': 'uniform',
-    'Event Fee': 'eventFee',
-    'Exam Fee': 'misc',
-  };
+  const DEPOSIT_TO_REVENUE_KEY = state.settings.depositRevenueMap;
   const revEntry = {id:uid(), date:endISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
   REVENUE_CATS.forEach(c=>{ revEntry[c.key] = 0; });
   lines.forEach(([desc, amt])=>{
@@ -4848,14 +5110,14 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   put('B1','Note Sheet',{size:12, center:true, border:false});
 
   ws.mergeCells('B3:E3');
-  put('B3', `III/Acct/Madrasa/Withdraw/${cat.notesheetLabel}/${number}`, {size:12, bold:true});
+  put('B3', `III/Acct/Madrasa/Withdraw/${coaText(cat,'notesheetLabel')}/${number}`, {size:12, bold:true});
   put('F3','Attach',{size:12});
 
   ws.mergeCells('B4:E4');
   put('B4','Sheet No 01',{size:12});
 
   ws.mergeCells('B5:E5');
-  const sentence = `Following amount of money disbursed from ${dayLabelFull(firstDate)} ${state.year} - ${dayLabelFull(lastDate)} ${state.year} (voucher no: ${items[0].voucher} - ${items[items.length-1].voucher}) as ${cat.expensePhrase} expense may be withdrawn from madrasa acct:`;
+  const sentence = `Following amount of money disbursed from ${dayLabelFull(firstDate)} ${state.year} - ${dayLabelFull(lastDate)} ${state.year} (voucher no: ${items[0].voucher} - ${items[items.length-1].voucher}) as ${coaText(cat,'expensePhrase')} expense may be withdrawn from madrasa acct:`;
   put('B5', sentence, {size:12, wrap:true});
   ws.getRow(5).height = 30;
 
@@ -4910,23 +5172,29 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
     c.border = {...(c.border||{}), bottom:THIN};
   }
 
+  const fmt = (state.settings && state.settings.exportFormat) || {};
+  const sigIndent = ' '.repeat(Number(fmt.sigIndentSpaces)>=0 ? Number(fmt.sigIndentSpaces) : 60);
+  const sigRowH = Number(fmt.sigRowHeight) || 50;
   let rr = wordsRow+4;
   ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${' '.repeat(60)}${s.accountant}\n${' '.repeat(60)}${s.accountantRole}\n${' '.repeat(60)}${my}`, {size:13, border:false, wrap:true});
-  ws.getRow(rr).height = 50;
+  put(`E${rr}`, `${sigIndent}${s.accountant}\n${sigIndent}${s.accountantRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = sigRowH;
   rr = wordsRow+5;
   put(`C${rr}`, 'Admin Manager', {size:13, border:false});
+  ws.getCell(`B${rr}`).border = {bottom:THIN};
+  ws.getCell(`C${rr}`).border = {bottom:THIN};
   rr = wordsRow+8;
   ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${' '.repeat(60)}${s.adminManager}\n${' '.repeat(60)}${s.adminManagerRole}\n${' '.repeat(60)}${my}`, {size:13, border:false, wrap:true});
-  ws.getRow(rr).height = 50;
-  ws.getRow(rr).height = 50;
+  put(`E${rr}`, `${sigIndent}${s.adminManager}\n${sigIndent}${s.adminManagerRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = sigRowH;
   rr = wordsRow+10;
   put(`C${rr}`, 'Principal', {size:13, border:false});
+  ws.getCell(`B${rr}`).border = {bottom:THIN};
+  ws.getCell(`C${rr}`).border = {bottom:THIN};
   rr = wordsRow+11;
   ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${' '.repeat(60)}${s.principal}\n${' '.repeat(60)}${s.principalRole}\n${' '.repeat(60)}${my}`, {size:13, border:false, wrap:true});
-  ws.getRow(rr).height = 50;
+  put(`E${rr}`, `${sigIndent}${s.principal}\n${sigIndent}${s.principalRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = sigRowH;
 }
 
 /* --- Consolidated Withdraw Summary sheet --- */
@@ -4964,9 +5232,10 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   wordsCell.alignment = {wrapText:true, vertical:'middle'};
   put(`I${r}`, {formula:`SUM(I${firstRow}:I${lastRow})`}, {size:16, bold:true, name:'Arial', numFmt:ASIAN_NUMFMT});
   const totalRow = r;
-  ws.getRow(totalRow).height = 60; // room for wrapped taka-in-words text
+  const fmt = (state.settings && state.settings.exportFormat) || {};
+  ws.getRow(totalRow).height = Number(fmt.wordsRowHeight) || 60; // room for wrapped taka-in-words text
 
-  const thin = {style:'thin'};
+  const thin = {style: fmt.borderStyle || 'thin'};
   for(let row=1; row<=totalRow; row++){
     for(let col=2; col<=9; col++){
       ws.getCell(row, col).border = {top:thin, bottom:thin, left:thin, right:thin};
@@ -4991,10 +5260,10 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly){
 
   cats.forEach(({key, cat, items, total, firstDate, lastDate})=>{
     const number = (state.notesheetCounters[key]||0) + 1;
-    const ws = wb.addWorksheet(uniqueSheetName(`${cat.notesheetLabel} ${number}`.replace(/[\\\/\?\*\[\]:]/g,''), used));
+    const ws = wb.addWorksheet(uniqueSheetName(`${coaText(cat,'notesheetLabel')} ${number}`.replace(/[\\\/\?\*\[\]:]/g,''), used));
     writeNotesheet(ws, cat, number, items, total, firstDate, lastDate);
     state.notesheetCounters[key] = number;
-    summaryRows.push({label:cat.summaryLabel, total});
+    summaryRows.push({label:coaText(cat,'summaryLabel'), total});
   });
 
   const summaryNum = (state.summaryCounterNum||0) + 1;
@@ -5069,22 +5338,71 @@ function buildSheetPreviewTable(ws){
   });
   const maxRow = Math.max(ws.rowCount, 1);
   const maxCol = Math.max(ws.columnCount, 1);
-  let html = '<table class="xlsx-preview-table"><tbody>';
+
+  // Gather each row into {cells:[{r,c,text,bold,numeric}], wide} - "wide"
+  // means one cell spans (via merge) more than half the sheet's columns,
+  // a strong signal it's a title/sentence/section banner rather than a
+  // label+amount line.
+  const rows = [];
   for(let r=1; r<=maxRow; r++){
-    html += '<tr>';
+    const cells = [];
+    let hasContent = false;
     for(let c=1; c<=maxCol; c++){
       const key = `${r}-${c}`;
       if(covered[key]==='skip') continue;
       const span = covered[key];
       const cell = ws.getCell(r,c);
-      const bold = cell.font && cell.font.bold;
-      const align = (cell.alignment && cell.alignment.horizontal) || (typeof cell.value==='number' ? 'right' : 'left');
-      const attrs = span ? ` rowspan="${span.rowspan}" colspan="${span.colspan}"` : '';
-      html += `<td${attrs} contenteditable="true" data-r="${r}" data-c="${c}" style="${bold?'font-weight:700;':''}text-align:${align};">${escapeHtml(previewCellText(ws,cell))}</td>`;
+      const text = previewCellText(ws, cell);
+      const bold = !!(cell.font && cell.font.bold);
+      const numeric = typeof cell.value === 'number' || (typeof cell.value==='object' && cell.value && cell.value.formula);
+      if(text!=='') hasContent = true;
+      cells.push({r, c, text, bold, numeric, colspan:(span&&span.colspan)||1});
     }
-    html += '</tr>';
+    if(cells.length) rows.push({r, cells, hasContent});
   }
-  html += '</tbody></table>';
+
+  let html = '<div class="doc-preview">';
+  rows.forEach(({cells, hasContent})=>{
+    if(!hasContent) return; // skip blank spacer rows entirely - cleaner reading
+    const textCells = cells.filter(c=>!c.numeric);
+    const numCells = cells.filter(c=>c.numeric);
+    const wideTextCell = textCells.find(c=>c.colspan>=4);
+    const anyBold = cells.some(c=>c.bold);
+
+    if(wideTextCell && numCells.length===0){
+      // A single wide sentence/title with no amount alongside it - treat
+      // as a heading or narrative line (sheet title, instruction sentence,
+      // "Total: <amount in words>", signatory name/role, etc).
+      const isBig = wideTextCell.text.length < 60 && anyBold;
+      html += `<div class="doc-row doc-row--${isBig?'title':'note'}">
+        <span class="doc-editable" contenteditable="true" data-r="${wideTextCell.r}" data-c="${wideTextCell.c}">${escapeHtml(wideTextCell.text)}</span>
+      </div>`;
+      return;
+    }
+
+    if(textCells.length && numCells.length){
+      // The common case: a description (one or more text cells) on the
+      // left, an amount on the right - render as a clean receipt-style line.
+      const isTotal = anyBold && /total/i.test(textCells.map(c=>c.text).join(' '));
+      html += `<div class="doc-row doc-row--line${isTotal?' doc-row--total':''}">
+        <span class="doc-desc">${textCells.map(c=>`<span class="doc-editable" contenteditable="true" data-r="${c.r}" data-c="${c.c}">${escapeHtml(c.text)}</span>`).join(' <span class="doc-sep">&middot;</span> ')}</span>
+        <span class="doc-amt">${numCells.map(c=>`<span class="doc-editable" contenteditable="true" data-r="${c.r}" data-c="${c.c}">${escapeHtml(c.text)}</span>`).join(' ')}</span>
+      </div>`;
+      return;
+    }
+
+    if(textCells.length && !numCells.length){
+      // Short text-only row (a label like "Accountant" / "Admin Manager") -
+      // render as a small caption.
+      html += `<div class="doc-row doc-row--caption">${textCells.map(c=>`<span class="doc-editable" contenteditable="true" data-r="${c.r}" data-c="${c.c}">${escapeHtml(c.text)}</span>`).join(' ')}</div>`;
+      return;
+    }
+
+    if(numCells.length){
+      html += `<div class="doc-row doc-row--line"><span class="doc-desc"></span><span class="doc-amt">${numCells.map(c=>`<span class="doc-editable" contenteditable="true" data-r="${c.r}" data-c="${c.c}">${escapeHtml(c.text)}</span>`).join(' ')}</span></div>`;
+    }
+  });
+  html += '</div>';
   return html;
 }
 function showWorkbookPreview(wb, {title, onDownload}){
