@@ -1408,7 +1408,7 @@ function showMoveVoucherModal(day, fromCatKey, item){
 
 /* Native confirm()/alert() are often blocked inside a sandboxed artifact
    iframe (they silently no-op). These custom modals work everywhere. */
-function showModal({message, confirmText='OK', cancelText=null, danger=false, onConfirm}){
+function showModal({message, confirmText='OK', cancelText=null, danger=false, onConfirm, onCancel}){
   const overlay = el(`
     <div class="modal-overlay">
       <div class="modal-box">
@@ -1425,7 +1425,7 @@ function showModal({message, confirmText='OK', cancelText=null, danger=false, on
   const confirmBtn = buttons[buttons.length-1];
   const cancelBtn = buttons.length>1 ? buttons[0] : null;
   confirmBtn.onclick = ()=>{ overlay.remove(); if(onConfirm) onConfirm(); };
-  if(cancelBtn) cancelBtn.onclick = ()=> overlay.remove();
+  if(cancelBtn) cancelBtn.onclick = ()=>{ overlay.remove(); if(onCancel) onCancel(); };
   wireBackdropClose(overlay);
 }
 function showAlert(message){ showModal({message, confirmText:'OK'}); }
@@ -3713,11 +3713,21 @@ function renderNotesheetCard(){
 
   card.querySelector('#ns-generate').onclick = ()=>{
     const shouldSave = card.querySelector('#ns-save-toggle').checked;
-    exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave);
+    showModal({
+      message: 'নোটশিট ও সামারির নাম্বার কি এগিয়ে যাবে (পরের সিরিয়াল নাম্বার স্থায়ীভাবে ব্যবহৃত হবে)?',
+      confirmText: 'হ্যাঁ', cancelText: 'না',
+      onConfirm: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, false, true),
+      onCancel: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, false, false)
+    });
   };
   card.querySelector('#ns-preview-btn').onclick = ()=>{
     const shouldSave = card.querySelector('#ns-save-toggle').checked;
-    exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true);
+    showModal({
+      message: 'নোটশিট ও সামারির নাম্বার কি এগিয়ে যাবে (পরের সিরিয়াল নাম্বার স্থায়ীভাবে ব্যবহৃত হবে)?',
+      confirmText: 'হ্যাঁ', cancelText: 'না',
+      onConfirm: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true, true),
+      onCancel: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true, false)
+    });
   };
 
   if((state.withdrawNotesheetLog||[]).length){
@@ -4166,6 +4176,9 @@ function wireDelegation(){
     if(action==='delete-deposit-log'){
       const id = t.dataset.id;
       state.depositNotesheetLog = (state.depositNotesheetLog||[]).filter(l=>l.id!==id);
+      Object.values(state.monthlyLedger.months).forEach(rec=>{
+        rec.revenueEntries = rec.revenueEntries.filter(e=>e.id!==id);
+      });
       saveState(); render(); return;
     }
     if(action==='ml-add-month'){
@@ -4729,7 +4742,8 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   state.nextDepositNotesheetNo = noteNum + 1;
 
   const DEPOSIT_TO_REVENUE_KEY = state.settings.depositRevenueMap;
-  const revEntry = {id:uid(), date:endISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
+  const depositLogId = uid();
+  const revEntry = {id:depositLogId, date:endISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
   REVENUE_CATS.forEach(c=>{ revEntry[c.key] = 0; });
   lines.forEach(([desc, amt])=>{
     const key = DEPOSIT_TO_REVENUE_KEY[desc];
@@ -4743,7 +4757,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   if(!Array.isArray(state.depositNotesheetLog)) state.depositNotesheetLog = [];
   state.depositNotesheetLog.push({
-    id:uid(), generatedAt:new Date().toISOString(), noteNum, startDate:startISO, endDate:endISO,
+    id:depositLogId, generatedAt:new Date().toISOString(), noteNum, startDate:startISO, endDate:endISO,
     lines: lines.map(([desc,amt])=>({desc,amt})),
     grandTotal: parsed.grand
   });
@@ -5251,8 +5265,8 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   put(`I${totalRow+4}`, 'Principal', {size:14, bold:true, name:'Calibri'});
 }
 
-async function exportNotesheets(startDate, endDate, shouldSave, previewOnly){
-  if(shouldSave===undefined) shouldSave = true;
+async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, incrementNumbering){
+  if(incrementNumbering===undefined) incrementNumbering = true;
   if(!startDate || !endDate){ showAlert('Pick a from and to date.'); return; }
   if(startDate > endDate){ showAlert('The "From date" must be before the "To date".'); return; }
   const {cats, grandTotal} = collectNotesheetRange(startDate, endDate);
@@ -5267,16 +5281,16 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly){
     const number = (state.notesheetCounters[key]||0) + 1;
     const ws = wb.addWorksheet(uniqueSheetName(`${coaText(cat,'notesheetLabel')} ${number}`.replace(/[\\\/\?\*\[\]:]/g,''), used));
     writeNotesheet(ws, cat, number, items, total, firstDate, lastDate);
-    state.notesheetCounters[key] = number;
+    if(incrementNumbering) state.notesheetCounters[key] = number;
     summaryRows.push({label:coaText(cat,'summaryLabel'), total});
   });
 
   const summaryNum = (state.summaryCounterNum||0) + 1;
   const wsSummary = wb.addWorksheet(uniqueSheetName(`${state.summaryCounterYear}-${summaryNum}`, used));
   writeWithdrawSummary(wsSummary, summaryRows, grandTotal, state.summaryCounterYear, summaryNum);
-  state.summaryCounterNum = summaryNum;
+  if(incrementNumbering) state.summaryCounterNum = summaryNum;
 
-  if(shouldSave){
+  if(shouldSave && incrementNumbering){
     if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
     state.withdrawNotesheetLog.push({
       id:uid(), generatedAt:new Date().toISOString(), startDate, endDate,
