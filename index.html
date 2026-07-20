@@ -1305,12 +1305,17 @@ function wireLockableTextInput(inputEl){
     inputEl.classList.toggle('locked-text', hasText);
   };
   syncLock();
-  inputEl.addEventListener('dblclick', ()=>{
-    inputEl.readOnly = false;
-    inputEl.classList.remove('locked-text');
-    inputEl.title = '';
-    inputEl.focus();
-    inputEl.select();
+  // Unlock on the *mousedown* of a double/triple click (before the browser
+  // applies its native selection for that click), so the field is already
+  // editable when selection happens. This lets native behavior take over:
+  // double-click selects the word under the cursor, triple-click selects
+  // the whole field's text.
+  inputEl.addEventListener('mousedown', (e)=>{
+    if(e.detail >= 2 && inputEl.readOnly){
+      inputEl.readOnly = false;
+      inputEl.classList.remove('locked-text');
+      inputEl.title = '';
+    }
   });
   inputEl.addEventListener('blur', syncLock);
 }
