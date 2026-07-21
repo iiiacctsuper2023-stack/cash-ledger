@@ -587,6 +587,7 @@ function newDay(dateStr){
     date:dateStr,
     openingCashManual:0,
     serviceRevenue:0,
+    serviceRevenueSections:[{id:uid(), desc:'', amount:0}],
     withdrawals:[],
     deposits:[],
     coa:coaEmpty,
@@ -1144,6 +1145,8 @@ function migrateState(){
     });
   }
   (state.days||[]).forEach(day=>{ if(!day.bankTransfers) day.bankTransfers = []; });
+  (state.days||[]).forEach(day=>{ ensureServiceRevenueSections(day); });
+  (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(day=>{ ensureServiceRevenueSections(day); }); });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(state.payableRegistry===undefined) state.payableRegistry = [];
@@ -1587,8 +1590,8 @@ function showSettleIouModal(day, item){
     const voucher = addCoaVoucher(day, catKey);
     voucher.desc = desc;
     voucher.amount = spent;
-    const prevRevenue = day.serviceRevenue;
-    if(returned>0) day.serviceRevenue = (Number(day.serviceRevenue)||0) + returned;
+    const prevSections = JSON.parse(JSON.stringify(ensureServiceRevenueSections(day)));
+    if(returned>0) adjustServiceRevenueBase(day, returned);
     const undoIou = reduceIou(spent + returned);
 
     let newPayable = null;
@@ -1599,7 +1602,8 @@ function showSettleIouModal(day, item){
 
     pushUndo('IOU settlement undone.', ()=>{
       day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==voucher.id);
-      day.serviceRevenue = prevRevenue;
+      day.serviceRevenueSections = prevSections;
+      syncServiceRevenueFromSections(day);
       undoIou();
       if(newPayable) state.payableRegistry = state.payableRegistry.filter(x=>x.id!==newPayable.id);
     });
@@ -2039,8 +2043,10 @@ function renderDayPanel(dayId, computed){
       ${idx===0 ? '' : `<p class="subnote" style="margin:4px 0 12px;">Tomorrow's opening cash comes from today's <strong>Closing amount</strong>, before IOUs are deducted &mdash; IOUs only affect today's own Cash In Hand.</p>`}
       <div class="field">
         <label>Service revenue collected</label>
-        <input type="text" inputmode="decimal" id="service-revenue" value="${formatAsianAmount(day.serviceRevenue)}">
+        <input type="text" inputmode="decimal" id="service-revenue" value="${formatAsianAmount(ensureServiceRevenueSections(day)[0].amount)}">
       </div>
+      <div id="service-revenue-extra" style="margin:2px 0 4px 0;"></div>
+      <button class="secondary small" type="button" data-action="add-service-revenue-section" data-day="${day.id}">+ Add section (collection from another head)</button>
 
       <label style="margin-top:6px;">Cash withdrawn from a bank (adds to cash, drains that bank) <span class="tag">optional</span></label>
       <div id="withdraw-list"></div>
@@ -2054,7 +2060,8 @@ function renderDayPanel(dayId, computed){
     wireAmountInput(cashCard.querySelector('#opening-cash-manual'), (num)=>{ day.openingCashManual = num; refreshComputedOnly(); });
   }
   cashCard.querySelector('#day-date').oninput = (e)=>{ day.date = e.target.value; refreshComputedOnly(); render(); };
-  wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ day.serviceRevenue = num; refreshComputedOnly(); });
+  wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ ensureServiceRevenueSections(day)[0].amount = num; syncServiceRevenueFromSections(day); refreshComputedOnly(); });
+  drawServiceRevenueExtra(cashCard.querySelector('#service-revenue-extra'), day);
   drawTransferList(cashCard.querySelector('#withdraw-list'), day, 'withdrawals', 'No withdrawals today.');
   if(day.locked) cashCard.classList.add('locked-day');
   wrap.appendChild(cashCard);
@@ -4145,9 +4152,69 @@ function addCoaVoucher(day, catKey){
   const yearShort = String(state.year).slice(-2);
   const monthNum = MONTHS.indexOf(state.month)+1;
   const voucher = `${cat.short}${state.voucherCounters[catKey]}/${monthNum}/${yearShort}`;
-  const item = {id:uid(), voucher, desc:'', note:'', amount:0, status:'draft'};
+  const item = {id:uid(), voucher, desc:'', note:'', amount:0, status:'draft', sections:[{id:uid(), desc:'', amount:0}]};
   day.coa[catKey].push(item);
   return item;
+}
+/* Keeps item.desc/item.amount (used everywhere - totals, exports, search)
+   in sync with item.sections. One section behaves exactly like the plain
+   desc/amount of old; 2+ sections becomes a numbered multi-line list with
+   the combined total, e.g. "1. Toner purchase\n2. Travel fare". */
+function syncCoaItemFromSections(item){
+  if(!item.sections || item.sections.length===0) item.sections = [{id:uid(), desc:item.desc||'', amount:item.amount||0}];
+  if(item.sections.length===1){
+    item.desc = item.sections[0].desc||'';
+    item.amount = Number(item.sections[0].amount)||0;
+  } else {
+    item.desc = item.sections.map((s,i)=>`${i+1}. ${s.desc||''}`).join('\n');
+    item.amount = item.sections.reduce((sum,s)=>sum+(Number(s.amount)||0),0);
+  }
+}
+
+/* Mirrors syncCoaItemFromSections but for the day's Service revenue line:
+   day.serviceRevenueSections[0] is the plain "Service revenue collected"
+   amount (no description needed); any sections after that are occasional
+   collections that actually came from a different head, noted via the
+   description box. day.serviceRevenue stays the summed total, since
+   everything else in the app (cash totals, exports, IOU logic) reads
+   that field directly. */
+function ensureServiceRevenueSections(day){
+  if(!day.serviceRevenueSections || day.serviceRevenueSections.length===0){
+    day.serviceRevenueSections = [{id:uid(), desc:'', amount:Number(day.serviceRevenue)||0}];
+  }
+  return day.serviceRevenueSections;
+}
+function syncServiceRevenueFromSections(day){
+  ensureServiceRevenueSections(day);
+  day.serviceRevenue = day.serviceRevenueSections.reduce((sum,s)=>sum+(Number(s.amount)||0),0);
+}
+/* Used by code that adjusts day.serviceRevenue as a side-effect (e.g. IOU
+   settlement returns) rather than through the UI - folds the delta into
+   the base (first) section so the breakdown stays consistent. */
+function adjustServiceRevenueBase(day, delta){
+  ensureServiceRevenueSections(day);
+  day.serviceRevenueSections[0].amount = (Number(day.serviceRevenueSections[0].amount)||0) + delta;
+  syncServiceRevenueFromSections(day);
+}
+
+function drawServiceRevenueExtra(container, day){
+  container.innerHTML = '';
+  const sections = ensureServiceRevenueSections(day);
+  sections.slice(1).forEach((sec, sIdx)=>{
+    const secRow = el(`
+      <div class="line-item" style="margin-left:0;">
+        <span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+2}.</span>
+        <div class="field desc" style="margin-bottom:0;"><label>Collected from (head)</label><input type="text" class="desc-input" value="${escapeHtml(sec.desc)}" placeholder="e.g. Tailor fees collected in cash today"></div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
+        <button class="danger small" type="button" data-action="remove-service-revenue-section" data-day="${day.id}" data-section="${sec.id}" title="Remove this section">&times;</button>
+      </div>
+    `);
+    const descInp = secRow.querySelector('.desc-input');
+    descInp.oninput = ()=>{ sec.desc = descInp.value; saveState(); };
+    wireLockableTextInput(descInp);
+    wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncServiceRevenueFromSections(day); refreshComputedOnly(); });
+    container.appendChild(secRow);
+  });
 }
 
 function drawCoaList(container, day, catKey, arr){
@@ -4157,16 +4224,33 @@ function drawCoaList(container, day, catKey, arr){
   const datalistId = `desc-suggest-${catKey}`;
   container.appendChild(el(`<datalist id="${datalistId}">${suggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
   arr.forEach((item)=>{
+    if(!item.sections || item.sections.length===0) item.sections = [{id:uid(), desc:item.desc||'', amount:item.amount||0}];
+    const sec0 = item.sections[0];
     const row = el(`
       <div class="line-item">
         <div class="voucher-badge mono">${item.voucher}</div>
         <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
-        <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(item.desc)}" placeholder="What was this voucher for?" required></div>
-        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(sec0.desc)}" placeholder="What was this voucher for?" required></div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec0.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-move-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Move to a different category" ${day.locked?'disabled':''}>&#8646; Move</button>
         <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
       </div>
     `);
+    const extraWrap = el(`<div class="coa-sections-extra" style="margin:2px 0 4px 0;"></div>`);
+    item.sections.slice(1).forEach((sec, sIdx)=>{
+      const secRow = el(`
+        <div class="line-item" style="margin-left:22px;">
+          <span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+2}.</span>
+          <div class="field desc" style="margin-bottom:0;"><label>Section description</label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(sec.desc)}" placeholder="Second item under this same voucher"></div>
+          <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
+          <button class="danger small" type="button" data-action="remove-coa-section" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" data-section="${sec.id}" title="Remove this section">&times;</button>
+        </div>
+      `);
+      secRow.querySelector('.desc-input').oninput = (e)=>{ sec.desc = e.target.value; syncCoaItemFromSections(item); saveState(); };
+      wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); });
+      extraWrap.appendChild(secRow);
+    });
+    const addSecBtn = el(`<button class="secondary small" type="button" style="margin-left:22px;" data-action="add-coa-section" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}">+ Add section (another item, same voucher)</button>`);
     const noteRow = el(`
       <div class="coa-note-row" style="margin:-4px 0 10px 0;">
         <input type="text" class="note-input" style="width:100%;font-size:12.5px;padding:5px 8px;border:1px dashed var(--line-soft);border-radius:6px;background:#FBFBF7;" value="${escapeHtml(item.note||'')}" placeholder="ঐচ্ছিক অভ্যন্তরীণ নোট (বাংলা) — প্রিন্টে আসবে না, শুধু সার্চে পাওয়া যাবে">
@@ -4174,9 +4258,9 @@ function drawCoaList(container, day, catKey, arr){
     `);
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
-    descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
+    descInp.oninput = ()=>{ sec0.desc = descInp.value; syncCoaItemFromSections(item); saveState(); };
     wireLockableTextInput(descInp);
-    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); }, ()=>{
+    wireAmountInput(amtInp, (num)=>{ sec0.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); }, ()=>{
       /* Fires only once the amount box already held a plain resolved
          number when Enter was pressed - i.e. the user is really done
          with this line, not just finishing a calculation. */
@@ -4620,6 +4704,43 @@ function wireDelegation(){
       const voucher = `${cat.short}${state.voucherCounters[tpl.catKey]}/${monthNum}/${yearShort}`;
       day.coa[tpl.catKey].push({id:uid(), voucher, desc:tpl.desc, amount:tpl.amount, status:'draft'});
       render();
+      return;
+    }
+    if(action==='add-service-revenue-section'){
+      if(day.locked) return;
+      ensureServiceRevenueSections(day).push({id:uid(), desc:'', amount:0});
+      saveState(); render();
+      return;
+    }
+    if(action==='remove-service-revenue-section'){
+      if(day.locked) return;
+      const sections = ensureServiceRevenueSections(day);
+      if(sections.length>1){
+        day.serviceRevenueSections = sections.filter(s=>s.id!==t.dataset.section);
+        syncServiceRevenueFromSections(day);
+        saveState(); render();
+      }
+      return;
+    }
+    if(action==='add-coa-section'){
+      const catKey = t.dataset.cat;
+      const item = (day.coa[catKey]||[]).find(x=>x.id===t.dataset.item);
+      if(item){
+        if(!item.sections) item.sections = [{id:uid(), desc:item.desc||'', amount:item.amount||0}];
+        item.sections.push({id:uid(), desc:'', amount:0});
+        syncCoaItemFromSections(item);
+        saveState(); render();
+      }
+      return;
+    }
+    if(action==='remove-coa-section'){
+      const catKey = t.dataset.cat;
+      const item = (day.coa[catKey]||[]).find(x=>x.id===t.dataset.item);
+      if(item && item.sections && item.sections.length>1){
+        item.sections = item.sections.filter(s=>s.id!==t.dataset.section);
+        syncCoaItemFromSections(item);
+        saveState(); render();
+      }
       return;
     }
     if(action==='remove-coa'){
