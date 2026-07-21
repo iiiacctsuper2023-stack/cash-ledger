@@ -85,7 +85,7 @@
   button.small{padding:5px 10px;font-size:12px;border-radius:6px;}
   button:disabled{opacity:.45;cursor:not-allowed;transform:none!important;box-shadow:none!important;}
 
-  .card{
+  .card{scroll-margin-top:16px;
     background:var(--card);
     border:1px solid var(--line);
     border-left:3px solid var(--accent-soft);
@@ -392,6 +392,8 @@ function getMonthlyLedgerMonth(key){
       revenueEntries:[],
       revenueTotalDue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
+      beginningRevenue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
+      beginningExpenditure:Object.fromEntries(COA.map(c=>[c.key,0])),
       beginningBankBalance:0,
       expenditureColumns:defaultExpenditureColumns(),
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
@@ -504,6 +506,7 @@ let monthlyLedgerOpen = false;
 let mlSettingsOpen = false;
 let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
+let mlBeginningOpen = false;
 let locked = false;            // true = show the lock screen instead of the app
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
@@ -1157,6 +1160,8 @@ function migrateState(){
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
     if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
+    if(!rec.beginningRevenue) rec.beginningRevenue = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
+    if(!rec.beginningExpenditure) rec.beginningExpenditure = Object.fromEntries(COA.map(c=>[c.key,0]));
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -1684,9 +1689,11 @@ function render(){
     app.appendChild(renderNotesheetCard());
     app.appendChild(renderDepositNotesheetCard());
     app.appendChild(el(`
-      <div class="card" style="text-align:center;">
-        <button class="secondary" data-action="toggle-monthly-ledger">&#128220; Generate Monthly Ledger</button>
-        <button class="secondary" data-action="toggle-ml-settings">&#9881; Data Links &amp; Export Format</button>
+      <div class="card" id="section-monthly-ledger-launch">
+        <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
+        <p class="subnote">Pulls together this month's Revenue, Expenditure and Balance Sheet in one place — Withdraw Notesheet totals feed the Expenditure columns automatically, and Deposit Notesheet totals feed Revenue, so most of it fills itself in as you generate notesheets above.</p>
+        <button type="button" data-action="toggle-monthly-ledger">Open Monthly Ledger</button>
+        <button type="button" class="secondary" data-action="toggle-ml-settings" style="margin-left:8px;">&#9881; Data Links &amp; Export Format</button>
       </div>
     `));
     app.appendChild(renderAnnualSummaryCard());
@@ -1947,6 +1954,13 @@ function renderDayTabs(){
   });
   tabs.appendChild(el(`<button class="secondary small" style="flex:none;" data-action="add-day">+ Add day</button>`));
   wrap.appendChild(tabs);
+  // Jump straight to the active (current) day tab instead of leaving the
+  // strip scrolled to the start of the month - the days you actually need
+  // (today and recent) are near the end, older ones rarely matter.
+  requestAnimationFrame(()=>{
+    const active = tabs.querySelector('.day-tab.active');
+    if(active) active.scrollIntoView({behavior:'instant', inline:'center', block:'nearest'});
+  });
   return wrap;
 }
 
@@ -2478,6 +2492,17 @@ function computeMonthlyLedgerFigures(key){
   const isLiveMonth = key === monthKeyFor(state.month, state.year);
 
   const revTotals = monthRevenueTotals(rec);
+  // Gratuity and Education Assistance Fund are no longer entered by hand:
+  // each month, 1/6 of that month's Admission Fee & Form income goes to
+  // Gratuity and 1/30 goes to the Education Assistance Fund.
+  const admissionRevenueThisMonth = revTotals.admissionFee||0;
+  revTotals.gratuity = admissionRevenueThisMonth/6;
+  revTotals.eduAssist = admissionRevenueThisMonth/30;
+  // Temporary one-time "beginning entry" per revenue category, on top of
+  // the above - used to seed a category with a pre-existing balance when
+  // switching to this tool mid-year. Off (hidden) unless the person turns
+  // it on; the stored numbers stay in effect either way.
+  REVENUE_CATS.forEach(c=>{ revTotals[c.key] += Number((rec.beginningRevenue||{})[c.key])||0; });
   const revTotalIncome = REVENUE_CATS.reduce((s,c)=>s+revTotals[c.key],0);
   const yrtBefore = yearlyRunningTotalBefore(key);
   const yrtNew = {};
@@ -2486,6 +2511,8 @@ function computeMonthlyLedgerFigures(key){
   const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome;
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
+  // Same one-time beginning-entry concept, for expenditure categories.
+  COA.forEach(c=>{ liveCoaTotals[c.key] = (liveCoaTotals[c.key]||0) + (Number((rec.beginningExpenditure||{})[c.key])||0); });
   let expTotal = 0;
   const expColAmounts = rec.expenditureColumns.map(col=>{
     let amt = 0;
@@ -2742,7 +2769,7 @@ function renderMonthlyLedgerCard(){
   monthlyLedgerViewKey = key;
   const f = computeMonthlyLedgerFigures(key);
   const {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
-    liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoBankTotal,
+    liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoCashInHand, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity} = f;
@@ -2764,6 +2791,7 @@ function renderMonthlyLedgerCard(){
           <select id="ml-month-select">${monthOptions}</select>
         </div>
         <button class="secondary small" type="button" data-action="ml-add-month">+ New month</button>
+        <button class="danger small" type="button" data-action="ml-delete-month">&#128465; Delete this month</button>
         <button class="secondary small" type="button" data-action="ml-import">&#11014; Import previous ledger (.xlsx)</button>
         <input type="file" id="ml-import-input" accept=".xlsx" style="display:none;">
         <button type="button" data-action="ml-export">&#11015; Export this month (.xlsx)</button>
@@ -2784,6 +2812,15 @@ function renderMonthlyLedgerCard(){
         ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtBefore[c.key])}</div>`).join('')}
       </div>
       ${!state.monthlyLedger.seed ? `<button class="secondary small" type="button" data-action="ml-set-seed">+ Set starting point (import or type in totals from before this tool)</button>` : `<button class="secondary small" type="button" data-action="ml-set-seed">Edit starting point (currently: through ${escapeHtml(state.monthlyLedger.seed.throughMonth)} ${escapeHtml(state.monthlyLedger.seed.year)})</button>`}
+      <button class="secondary small" type="button" data-action="ml-toggle-beginning" style="margin-left:6px;">${mlBeginningOpen?'&#9660;':'&#9654;'} Beginning entries (temporary, per category)</button>
+      ${mlBeginningOpen ? `
+      <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;">
+        <p class="subnote" style="margin-top:0;">One-time opening balance per category, added on top of everything else. Fill these in once (e.g. when switching to this tool mid-year), then collapse this box - deposits/withdrawals keep adding to these totals as normal going forward.</p>
+        <label style="font-size:12px;">Revenue categories</label>
+        <div id="ml-beginning-revenue-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px;"></div>
+        <label style="font-size:12px;">Expenditure categories</label>
+        <div id="ml-beginning-expenditure-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;"></div>
+      </div>` : ''}
 
       <div class="divider"></div>
       <label>Revenue entries</label>
@@ -2902,6 +2939,10 @@ function renderMonthlyLedgerCard(){
   drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
   drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
   drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
+  if(mlBeginningOpen){
+    drawMlBeginningGrid(card.querySelector('#ml-beginning-revenue-grid'), REVENUE_CATS, rec.beginningRevenue);
+    drawMlBeginningGrid(card.querySelector('#ml-beginning-expenditure-grid'), COA, rec.beginningExpenditure);
+  }
 
   return card;
 }
@@ -2921,16 +2962,17 @@ function drawMlRevenueList(container, rec, monthKey){
   if(rec.revenueEntries.length===0){ container.appendChild(el(`<p class="empty">No revenue entries yet this month.</p>`)); }
   rec.revenueEntries.forEach(entry=>{
     const row = el(`
-      <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
+      <div class="card" id="ml-rev-entry-${entry.id}" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
         <div class="row">
           <div class="field" style="max-width:150px;"><label>Date</label><input type="date" class="ml-rev-date" value="${entry.date||''}"></div>
           <div class="field"><label>Description</label><input type="text" class="ml-rev-desc" value="${escapeHtml(entry.desc||'')}"></div>
           <button class="danger small" type="button" data-action="ml-remove-revenue" data-item="${entry.id}" title="Remove">&times;</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
-          ${REVENUE_CATS.map(c=>`
-            <div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-rev-amt" data-cat="${c.key}" value="${formatAsianAmount(entry[c.key]||0)}"></div>
-          `).join('')}
+          ${REVENUE_CATS.map(c=>{
+            const isAuto = c.key==='gratuity' || c.key==='eduAssist';
+            return `<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}${isAuto?' <span class="tag">auto, see below</span>':''}</label><input type="text" inputmode="decimal" class="ml-rev-amt" data-cat="${c.key}" value="${formatAsianAmount(entry[c.key]||0)}" ${isAuto?'disabled':''}></div>`;
+          }).join('')}
         </div>
       </div>
     `);
@@ -2983,6 +3025,20 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
 /* Per-bank closing balance for the selected month's Balance Sheet - auto
    from the Daily Ledger for the live month, typed in for other months
    (same override pattern as Cash in Hand / Balance in Bank Account). */
+/* One-time per-category opening balance grid, shared by the Revenue and
+   Expenditure beginning-entries sections. */
+function drawMlBeginningGrid(container, cats, store){
+  container.innerHTML = '';
+  cats.forEach(c=>{
+    const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(store[c.key]||0)}"></div>`);
+    wireAmountInput(wrap.querySelector('input'), (num)=>{
+      store[c.key] = num;
+      saveState(); renderMonthlyLedgerWindowInPlace();
+    });
+    container.appendChild(wrap);
+  });
+}
+
 function drawMlBankBreakdownList(container, rec, bankBreakdownShown, isLiveMonth){
   container.innerHTML = '';
   if(state.banks.length===0){ container.appendChild(el(`<p class="empty">No bank accounts set up yet.</p>`)); return; }
@@ -4272,6 +4328,11 @@ function wireDelegation(){
       mlSettingsOpen = !mlSettingsOpen;
       render(); return;
     }
+    if(action==='ml-toggle-beginning'){
+      mlBeginningOpen = !mlBeginningOpen;
+      renderMonthlyLedgerWindowInPlace();
+      return;
+    }
     if(action==='minimize-monthly-ledger'){
       monthlyLedgerMinimized = !monthlyLedgerMinimized;
       render(); return;
@@ -4302,12 +4363,25 @@ function wireDelegation(){
       showMlAddMonthModal();
       return;
     }
+    if(action==='ml-delete-month'){
+      const keyToDelete = monthlyLedgerViewKey;
+      if(!keyToDelete || !state.monthlyLedger.months[keyToDelete]){ return; }
+      showConfirm(`Delete ${monthKeyLabel(keyToDelete)} from the Monthly Ledger? This can't be undone.`, ()=>{
+        delete state.monthlyLedger.months[keyToDelete];
+        const remaining = Object.keys(state.monthlyLedger.months).sort();
+        monthlyLedgerViewKey = remaining.length ? remaining[remaining.length-1] : null;
+        saveState(); render();
+      });
+      return;
+    }
     if(action==='ml-add-revenue'){
       const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
       const entry = {id:uid(), date:'', desc:''};
       REVENUE_CATS.forEach(c=>{ entry[c.key] = 0; });
       rec.revenueEntries.push(entry);
-      saveState(); render();
+      saveState(); renderMonthlyLedgerWindowInPlace();
+      const newRow = document.getElementById('ml-rev-entry-'+entry.id);
+      if(newRow) newRow.scrollIntoView({behavior:'smooth', block:'center'});
       return;
     }
     if(action==='ml-remove-revenue'){
