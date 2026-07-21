@@ -587,7 +587,8 @@ function newDay(dateStr){
     date:dateStr,
     openingCashManual:0,
     serviceRevenue:0,
-    serviceRevenueSections:[{id:uid(), desc:'', amount:0}],
+    miscCollection:0,
+    miscCollectionSections:[],
     withdrawals:[],
     deposits:[],
     coa:coaEmpty,
@@ -1145,8 +1146,8 @@ function migrateState(){
     });
   }
   (state.days||[]).forEach(day=>{ if(!day.bankTransfers) day.bankTransfers = []; });
-  (state.days||[]).forEach(day=>{ ensureServiceRevenueSections(day); });
-  (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(day=>{ ensureServiceRevenueSections(day); }); });
+  (state.days||[]).forEach(day=>{ ensureMiscCollectionSections(day); });
+  (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(day=>{ ensureMiscCollectionSections(day); }); });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(state.payableRegistry===undefined) state.payableRegistry = [];
@@ -1237,7 +1238,7 @@ function computeAll(){
   state.days.forEach((day, idx)=>{
     const openingCash = idx===0 ? (Number(day.openingCashManual)||0) : prevCash;
     const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
-    const cashCollected = (Number(day.serviceRevenue)||0) + withdrawTotal;
+    const cashCollected = (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0) + withdrawTotal;
     const totalAmountCash = openingCash + cashCollected;
 
     let coaTotal = 0;
@@ -1590,8 +1591,8 @@ function showSettleIouModal(day, item){
     const voucher = addCoaVoucher(day, catKey);
     voucher.desc = desc;
     voucher.amount = spent;
-    const prevSections = JSON.parse(JSON.stringify(ensureServiceRevenueSections(day)));
-    if(returned>0) adjustServiceRevenueBase(day, returned);
+    const prevRevenue = day.serviceRevenue;
+    if(returned>0) day.serviceRevenue = (Number(day.serviceRevenue)||0) + returned;
     const undoIou = reduceIou(spent + returned);
 
     let newPayable = null;
@@ -1602,8 +1603,7 @@ function showSettleIouModal(day, item){
 
     pushUndo('IOU settlement undone.', ()=>{
       day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==voucher.id);
-      day.serviceRevenueSections = prevSections;
-      syncServiceRevenueFromSections(day);
+      day.serviceRevenue = prevRevenue;
       undoIou();
       if(newPayable) state.payableRegistry = state.payableRegistry.filter(x=>x.id!==newPayable.id);
     });
@@ -1663,6 +1663,14 @@ function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToChec
    Rendering
    ====================================================================== */
 function render(){
+  const scrollY = window.scrollY;
+  renderApp();
+  /* app.innerHTML='' briefly collapses page height, which makes the
+     browser clamp/reset scroll position; restore it right after the
+     new content is back in so edits/deletes don't jump to the top. */
+  if(window.scrollY !== scrollY) window.scrollTo(0, scrollY);
+}
+function renderApp(){
   const app = document.getElementById('app');
   app.innerHTML = '';
   if(state.lockPasswordHash && locked){
@@ -2043,10 +2051,12 @@ function renderDayPanel(dayId, computed){
       ${idx===0 ? '' : `<p class="subnote" style="margin:4px 0 12px;">Tomorrow's opening cash comes from today's <strong>Closing amount</strong>, before IOUs are deducted &mdash; IOUs only affect today's own Cash In Hand.</p>`}
       <div class="field">
         <label>Service revenue collected</label>
-        <input type="text" inputmode="decimal" id="service-revenue" value="${formatAsianAmount(ensureServiceRevenueSections(day)[0].amount)}">
+        <input type="text" inputmode="decimal" id="service-revenue" value="${formatAsianAmount(day.serviceRevenue)}">
       </div>
-      <div id="service-revenue-extra" style="margin:2px 0 4px 0;"></div>
-      <button class="secondary small" type="button" data-action="add-service-revenue-section" data-day="${day.id}">+ Add section (collection from another head)</button>
+
+      <label style="margin-top:6px;">Miscellaneous collection &mdash; income collected from another head, not service revenue <span class="tag">optional</span></label>
+      <div id="misc-collection-list"></div>
+      <button class="secondary small" type="button" data-action="add-misc-collection-section" data-day="${day.id}">+ Add ${(day.miscCollectionSections&&day.miscCollectionSections.length)?'section (another receipt, same voucher)':'collection'}</button>
 
       <label style="margin-top:6px;">Cash withdrawn from a bank (adds to cash, drains that bank) <span class="tag">optional</span></label>
       <div id="withdraw-list"></div>
@@ -2060,8 +2070,8 @@ function renderDayPanel(dayId, computed){
     wireAmountInput(cashCard.querySelector('#opening-cash-manual'), (num)=>{ day.openingCashManual = num; refreshComputedOnly(); });
   }
   cashCard.querySelector('#day-date').oninput = (e)=>{ day.date = e.target.value; refreshComputedOnly(); render(); };
-  wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ ensureServiceRevenueSections(day)[0].amount = num; syncServiceRevenueFromSections(day); refreshComputedOnly(); });
-  drawServiceRevenueExtra(cashCard.querySelector('#service-revenue-extra'), day);
+  wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ day.serviceRevenue = num; refreshComputedOnly(); });
+  drawMiscCollectionList(cashCard.querySelector('#misc-collection-list'), day);
   drawTransferList(cashCard.querySelector('#withdraw-list'), day, 'withdrawals', 'No withdrawals today.');
   if(day.locked) cashCard.classList.add('locked-day');
   wrap.appendChild(cashCard);
@@ -2380,7 +2390,7 @@ function renderDashboardCard(){
     COA.forEach(cat=>{
       (day.coa[cat.key]||[]).forEach(item=>{ catTotals[cat.key] += Number(item.amount)||0; });
     });
-    monthRevenue += Number(day.serviceRevenue)||0;
+    monthRevenue += (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0);
   });
   const monthTotal = Object.values(catTotals).reduce((s,v)=>s+v,0);
   const topCats = COA.map(c=>({cat:c, total:catTotals[c.key]})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
@@ -2930,7 +2940,7 @@ function renderMonthlyLedgerCard(){
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const bankInp = card.querySelector('#ml-bank-balance-override');
-  if(bankInp) wireAmountInput(bankInp, (num)=>{ rec.balanceSheet.bankBalanceOverride = num; saveState(); renderMonthlyLedgerWindowInPlace(); });
+  if(bankInp) wireAmountInput(bankInp, (num)=>{ rec.balanceSheet.bankBalanceOverride = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const otherAssetAmtInp = card.querySelector('#ml-other-asset-amount');
   if(otherAssetAmtInp) wireAmountInput(otherAssetAmtInp, (num)=>{ rec.balanceSheet.otherAsset.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const otherAssetLabelInp = card.querySelector('.ml-other-asset-label');
@@ -3020,7 +3030,7 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
     if(coaAmtInp){
       wireAmountInput(coaAmtInp, (num)=>{
         col.override = (num===autoAmt) ? null : num;
-        saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
+        saveState(); refreshMonthlyLedgerComputedOnly();
       });
     }
     const resetBtn = row.querySelector('.ml-exp-reset');
@@ -3040,7 +3050,7 @@ function drawMlBeginningGrid(container, cats, store){
     const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(store[c.key]||0)}"></div>`);
     wireAmountInput(wrap.querySelector('input'), (num)=>{
       store[c.key] = num;
-      saveState(); renderMonthlyLedgerWindowInPlace();
+      saveState(); refreshMonthlyLedgerComputedOnly();
     });
     container.appendChild(wrap);
   });
@@ -3056,7 +3066,7 @@ function drawMlBankBreakdownList(container, rec, bankBreakdownShown, isLiveMonth
     const inp = wrap.querySelector('input');
     wireAmountInput(inp, (num)=>{
       rec.balanceSheet.bankBreakdown[b.id] = num;
-      saveState(); renderMonthlyLedgerWindowInPlace();
+      saveState(); refreshMonthlyLedgerComputedOnly();
     });
     container.appendChild(wrap);
   });
@@ -4171,49 +4181,47 @@ function syncCoaItemFromSections(item){
   }
 }
 
-/* Mirrors syncCoaItemFromSections but for the day's Service revenue line:
-   day.serviceRevenueSections[0] is the plain "Service revenue collected"
-   amount (no description needed); any sections after that are occasional
-   collections that actually came from a different head, noted via the
-   description box. day.serviceRevenue stays the summed total, since
-   everything else in the app (cash totals, exports, IOU logic) reads
-   that field directly. */
-function ensureServiceRevenueSections(day){
-  if(!day.serviceRevenueSections || day.serviceRevenueSections.length===0){
-    day.serviceRevenueSections = [{id:uid(), desc:'', amount:Number(day.serviceRevenue)||0}];
-  }
-  return day.serviceRevenueSections;
+/* Miscellaneous Collection: occasional cash income collected under a
+   head other than Service Revenue (e.g. a Tailor fee paid in cash on a
+   day that isn't a formal deposit). Modeled exactly like a Cash
+   Disbursed voucher's sections: empty by default; the first entry
+   added behaves like a plain single line; a second+ becomes a
+   numbered list ("1. ...", "2. ...") under one voucher, with the
+   amounts summed into day.miscCollection, which feeds Cash In Hand
+   and the day's Excel export the same way Service Revenue does. */
+function ensureMiscCollectionSections(day){
+  if(!day.miscCollectionSections) day.miscCollectionSections = [];
+  return day.miscCollectionSections;
 }
-function syncServiceRevenueFromSections(day){
-  ensureServiceRevenueSections(day);
-  day.serviceRevenue = day.serviceRevenueSections.reduce((sum,s)=>sum+(Number(s.amount)||0),0);
+function syncMiscCollectionFromSections(day){
+  const sections = ensureMiscCollectionSections(day);
+  day.miscCollection = sections.reduce((sum,s)=>sum+(Number(s.amount)||0),0);
 }
-/* Used by code that adjusts day.serviceRevenue as a side-effect (e.g. IOU
-   settlement returns) rather than through the UI - folds the delta into
-   the base (first) section so the breakdown stays consistent. */
-function adjustServiceRevenueBase(day, delta){
-  ensureServiceRevenueSections(day);
-  day.serviceRevenueSections[0].amount = (Number(day.serviceRevenueSections[0].amount)||0) + delta;
-  syncServiceRevenueFromSections(day);
+function miscCollectionDescText(day){
+  const sections = ensureMiscCollectionSections(day);
+  if(sections.length===0) return '';
+  if(sections.length===1) return sections[0].desc||'';
+  return sections.map((s,i)=>`${i+1}. ${s.desc||''}`).join('\n');
 }
 
-function drawServiceRevenueExtra(container, day){
+function drawMiscCollectionList(container, day){
   container.innerHTML = '';
-  const sections = ensureServiceRevenueSections(day);
-  sections.slice(1).forEach((sec, sIdx)=>{
-    const secRow = el(`
-      <div class="line-item" style="margin-left:0;">
-        <span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+2}.</span>
-        <div class="field desc" style="margin-bottom:0;"><label>Collected from (head)</label><input type="text" class="desc-input" value="${escapeHtml(sec.desc)}" placeholder="e.g. Tailor fees collected in cash today"></div>
+  const sections = ensureMiscCollectionSections(day);
+  if(sections.length===0){ container.appendChild(el(`<p class="empty" style="margin:2px 0 6px;">No miscellaneous collection today.</p>`)); return; }
+  sections.forEach((sec, sIdx)=>{
+    const row = el(`
+      <div class="line-item"${sections.length>1?' style="margin-left:0;"':''}>
+        ${sections.length>1?`<span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+1}.</span>`:''}
+        <div class="field desc" style="margin-bottom:0;"><label>Collected from (head) <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" value="${escapeHtml(sec.desc)}" placeholder="e.g. Tailor fees collected in cash today" required></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
-        <button class="danger small" type="button" data-action="remove-service-revenue-section" data-day="${day.id}" data-section="${sec.id}" title="Remove this section">&times;</button>
+        <button class="danger small" type="button" data-action="remove-misc-collection-section" data-day="${day.id}" data-section="${sec.id}" title="Remove">&times;</button>
       </div>
     `);
-    const descInp = secRow.querySelector('.desc-input');
+    const descInp = row.querySelector('.desc-input');
     descInp.oninput = ()=>{ sec.desc = descInp.value; saveState(); };
     wireLockableTextInput(descInp);
-    wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncServiceRevenueFromSections(day); refreshComputedOnly(); });
-    container.appendChild(secRow);
+    wireAmountInput(row.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncMiscCollectionFromSections(day); refreshComputedOnly(); });
+    container.appendChild(row);
   });
 }
 
@@ -4706,20 +4714,19 @@ function wireDelegation(){
       render();
       return;
     }
-    if(action==='add-service-revenue-section'){
+    if(action==='add-misc-collection-section'){
       if(day.locked) return;
-      ensureServiceRevenueSections(day).push({id:uid(), desc:'', amount:0});
+      ensureMiscCollectionSections(day).push({id:uid(), desc:'', amount:0});
+      syncMiscCollectionFromSections(day);
       saveState(); render();
       return;
     }
-    if(action==='remove-service-revenue-section'){
+    if(action==='remove-misc-collection-section'){
       if(day.locked) return;
-      const sections = ensureServiceRevenueSections(day);
-      if(sections.length>1){
-        day.serviceRevenueSections = sections.filter(s=>s.id!==t.dataset.section);
-        syncServiceRevenueFromSections(day);
-        saveState(); render();
-      }
+      const sections = ensureMiscCollectionSections(day);
+      day.miscCollectionSections = sections.filter(s=>s.id!==t.dataset.section);
+      syncMiscCollectionFromSections(day);
+      saveState(); render();
       return;
     }
     if(action==='add-coa-section'){
@@ -5245,6 +5252,9 @@ function writeDaySheet(ws, day, cmp, beginRefs){
 
   const revenueStart = r;
   writeRow(ws, r, {label:'Service revenue collected', value:Number(day.serviceRevenue)||0}); r++;
+  if((Number(day.miscCollection)||0) > 0){
+    writeRow(ws, r, {label:'Miscellaneous collection'+(miscCollectionDescText(day)?' - '+miscCollectionDescText(day):''), value:Number(day.miscCollection)||0}); r++;
+  }
   day.withdrawals.forEach(w=>{
     const bank = state.banks.find(b=>b.id===w.bankId);
     writeRow(ws, r, {label:'Cash withdrawn from '+(bank?bank.name:'bank')+(w.note?' - '+w.note:''), value:Number(w.amount)||0});
