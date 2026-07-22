@@ -384,6 +384,15 @@ function monthKeyLabel(key){
   const [y,m] = key.split('-');
   return `${MONTHS[Number(m)-1]} ${y}`;
 }
+/* The chronologically-first month ever tracked in this tool (by key,
+   which sorts correctly as "YYYY-MM"). The one-time Starting Point
+   figures (Revenue, Expenditure, Bank) are applied to this month only,
+   so they add in exactly once no matter which month is being viewed. */
+function earliestTrackedMonthKey(){
+  const keys = Object.keys(state.monthlyLedger.months||{});
+  if(keys.length===0) return null;
+  return keys.sort()[0];
+}
 /* Gets (creating if needed) the persistent record for one month - never
    deleted by Daily Ledger month switches, unlike state.days. */
 function getMonthlyLedgerMonth(key){
@@ -392,9 +401,6 @@ function getMonthlyLedgerMonth(key){
       revenueEntries:[],
       revenueTotalDue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
-      beginningRevenue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
-      beginningExpenditure:Object.fromEntries(COA.map(c=>[c.key,0])),
-      beginningBankBreakdown:{},
       beginningBankBalance:0,
       expenditureColumns:defaultExpenditureColumns(),
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
@@ -507,8 +513,6 @@ let monthlyLedgerOpen = false;
 let mlSettingsOpen = false;
 let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
-let mlBeginningOpen = false;
-let mlBankBeginningOpen = false;
 let locked = false;            // true = show the lock screen instead of the app
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
@@ -1177,9 +1181,6 @@ function migrateState(){
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
     if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
-    if(!rec.beginningRevenue) rec.beginningRevenue = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
-    if(!rec.beginningExpenditure) rec.beginningExpenditure = Object.fromEntries(COA.map(c=>[c.key,0]));
-    if(!rec.beginningBankBreakdown) rec.beginningBankBreakdown = {};
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -2750,11 +2751,16 @@ function computeMonthlyLedgerFigures(key){
   const admissionRevenueThisMonth = revTotals.admissionFee||0;
   revTotals.gratuity = admissionRevenueThisMonth/6;
   revTotals.eduAssist = admissionRevenueThisMonth/30;
-  // Temporary one-time "beginning entry" per revenue category, on top of
-  // the above - used to seed a category with a pre-existing balance when
-  // switching to this tool mid-year. Off (hidden) unless the person turns
-  // it on; the stored numbers stay in effect either way.
-  REVENUE_CATS.forEach(c=>{ revTotals[c.key] += Number((rec.beginningRevenue||{})[c.key])||0; });
+  // One-time starting-point figures (entered once via "Set Starting
+  // Point", covering Revenue, Expenditure and Bank amounts together) -
+  // applied only to the earliest month ever tracked in this tool, so
+  // they add in exactly once instead of inflating every month.
+  const isEarliestTrackedMonth = key === earliestTrackedMonthKey();
+  const seed = state.monthlyLedger.seed;
+  const seedActive = isEarliestTrackedMonth && seed && seed.active!==false;
+  if(seedActive){
+    REVENUE_CATS.forEach(c=>{ revTotals[c.key] += Number((seed.revenue||{})[c.key])||0; });
+  }
   const revTotalIncome = REVENUE_CATS.reduce((s,c)=>s+revTotals[c.key],0);
   const yrtBefore = yearlyRunningTotalBefore(key);
   const yrtNew = {};
@@ -2763,8 +2769,9 @@ function computeMonthlyLedgerFigures(key){
   const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome;
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
-  // Same one-time beginning-entry concept, for expenditure categories.
-  COA.forEach(c=>{ liveCoaTotals[c.key] = (liveCoaTotals[c.key]||0) + (Number((rec.beginningExpenditure||{})[c.key])||0); });
+  if(seedActive){
+    COA.forEach(c=>{ liveCoaTotals[c.key] = (liveCoaTotals[c.key]||0) + (Number((seed.expenditure||{})[c.key])||0); });
+  }
   let expTotal = 0;
   const expColAmounts = rec.expenditureColumns.map(col=>{
     let amt = 0;
@@ -2802,7 +2809,7 @@ function computeMonthlyLedgerFigures(key){
   state.banks.forEach(b=>{
     const ov = rec.balanceSheet.bankBreakdown[b.id];
     const base = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
-    const beginningAdd = Number((rec.beginningBankBreakdown||{})[b.id])||0;
+    const beginningAdd = seedActive ? (Number((seed.bankBreakdown||{})[b.id])||0) : 0;
     bankBreakdownShown[b.id] = (base===null && beginningAdd===0) ? null : (Number(base)||0) + beginningAdd;
   });
   const bankBreakdownSum = state.banks.reduce((s,b)=>s+(Number(bankBreakdownShown[b.id])||0),0);
@@ -3065,14 +3072,11 @@ function renderMonthlyLedgerCard(){
       <div id="ml-yrt-before" style="font-size:12.5px;color:var(--ink-soft);display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 14px;margin-bottom:10px;">
         ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtBefore[c.key])}</div>`).join('')}
       </div>
-      ${!state.monthlyLedger.seed ? `<button class="secondary small" type="button" data-action="ml-set-seed">+ Set starting point (import or type in totals from before this tool)</button>` : `<button class="secondary small" type="button" data-action="ml-set-seed">Edit starting point (currently: through ${escapeHtml(state.monthlyLedger.seed.throughMonth)} ${escapeHtml(state.monthlyLedger.seed.year)})</button>`}
-      <button class="secondary small" type="button" data-action="ml-toggle-beginning" style="margin-left:6px;">${mlBeginningOpen?'&#9660;':'&#9654;'} Beginning entries (temporary, per category)</button>
-      ${mlBeginningOpen ? `
-      <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;">
-        <p class="subnote" style="margin-top:0;">One-time opening balance per category, added on top of everything else. Fill these in once (e.g. when switching to this tool mid-year), then collapse this box - deposits/withdrawals keep adding to these totals as normal going forward.</p>
-        <label style="font-size:12px;">Revenue categories</label>
-        <div id="ml-beginning-revenue-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;"></div>
-      </div>` : ''}
+      ${!state.monthlyLedger.seed ? `<button class="secondary small" type="button" data-action="ml-set-seed">+ Set starting point (all Revenue, Expenditure &amp; Bank opening figures, entered once)</button>` : `
+        <button class="secondary small" type="button" data-action="ml-set-seed">Edit starting point (currently: through ${escapeHtml(state.monthlyLedger.seed.throughMonth)} ${escapeHtml(state.monthlyLedger.seed.year)})</button>
+        <button class="${state.monthlyLedger.seed.active!==false?'danger':'secondary'} small" type="button" data-action="ml-toggle-seed-active" style="margin-left:6px;">${state.monthlyLedger.seed.active!==false ? 'Turn off starting point' : 'Turn on starting point'}</button>
+        ${state.monthlyLedger.seed.active===false ? `<span class="tag" style="margin-left:6px;">off &mdash; data kept, not applied</span>` : ''}
+      `}
 
       <div class="divider"></div>
       <label>Revenue entries</label>
@@ -3151,12 +3155,7 @@ function renderMonthlyLedgerCard(){
       <div id="ml-bank-breakdown-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Balance</span><span id="ml-bank-breakdown-sum">${money(bankBreakdownSum)}</span></div>
       <p id="ml-warn-bank-breakdown" class="subnote" style="color:#B3261E;${bankBreakdownMismatch?'':'display:none;'}">&#9888; Bank breakdown total doesn't match Balance in Bank Account above.</p>
-      <button class="secondary small" type="button" data-action="ml-toggle-bank-beginning" style="margin-top:4px;">${mlBankBeginningOpen?'&#9660;':'&#9654;'} Beginning entry per bank (temporary)</button>
-      ${mlBankBeginningOpen ? `
-      <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;">
-        <p class="subnote" style="margin-top:0;">One-time opening amount per bank, added on top of the breakdown figure above (e.g. when switching to this tool mid-year). Fill in once, then collapse this box.</p>
-        <div id="ml-beginning-bank-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;"></div>
-      </div>` : ''}
+      <p class="subnote" style="margin-top:2px;">A one-time opening amount per bank can be set in "Set starting point" above (applies to the earliest tracked month only).</p>
 
       <div class="divider"></div>
       <label>Bank Statement Cross-Check <span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory &mdash; both banks</span></label>
@@ -3233,13 +3232,6 @@ function renderMonthlyLedgerCard(){
   drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
   drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
   drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
-  if(mlBeginningOpen){
-    drawMlBeginningGrid(card.querySelector('#ml-beginning-revenue-grid'), REVENUE_CATS, rec.beginningRevenue);
-  }
-  if(mlBankBeginningOpen){
-    if(!rec.beginningBankBreakdown) rec.beginningBankBreakdown = {};
-    drawMlBeginningGrid(card.querySelector('#ml-beginning-bank-grid'), state.banks.map(b=>({key:b.id, label:b.name})), rec.beginningBankBreakdown);
-  }
 
   return card;
 }
@@ -3324,18 +3316,6 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
    (same override pattern as Cash in Hand / Balance in Bank Account). */
 /* One-time per-category opening balance grid, shared by the Revenue and
    Expenditure beginning-entries sections. */
-function drawMlBeginningGrid(container, cats, store){
-  container.innerHTML = '';
-  cats.forEach(c=>{
-    const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(store[c.key]||0)}"></div>`);
-    wireAmountInput(wrap.querySelector('input'), (num)=>{
-      store[c.key] = num;
-      saveState(); refreshMonthlyLedgerComputedOnly();
-    });
-    container.appendChild(wrap);
-  });
-}
-
 function drawMlBankBreakdownList(container, rec, bankBreakdownShown, isLiveMonth){
   container.innerHTML = '';
   if(state.banks.length===0){ container.appendChild(el(`<p class="empty">No bank accounts set up yet.</p>`)); return; }
@@ -3463,20 +3443,36 @@ function showMlSeedModal(){
   const existing = state.monthlyLedger.seed;
   const overlay = el(`
     <div class="modal-overlay">
-      <div class="modal-box">
-        <p><strong>Starting point for Yearly Running Total</strong><br>
-        <span style="color:var(--ink-soft);font-size:12.5px;">Cumulative totals for the year, as of the end of the last month before this tool started tracking. Every month you add after that is summed automatically on top of this.</span></p>
+      <div class="modal-box" style="max-width:560px;max-height:85vh;overflow-y:auto;">
+        <p><strong>Starting Point</strong><br>
+        <span style="color:var(--ink-soft);font-size:12.5px;">One-time opening figures for every Revenue, Expenditure and Bank amount in the Monthly Ledger, entered here once instead of per month. Applied automatically to the earliest month you track in this tool - the Balance Sheet then builds itself from this plus everything you enter going forward, same as always.</span></p>
         <div class="row">
           <div class="field"><label>Year</label><input type="text" id="ml-seed-year" value="${existing?escapeHtml(existing.year):(state.year||'')}"></div>
           <div class="field"><label>Through month</label>
             <select id="ml-seed-month">${MONTHS.map(m=>`<option value="${m}" ${existing&&existing.throughMonth===m?'selected':''}>${m}</option>`).join('')}</select>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin:8px 0 4px;">
+        <label style="font-size:12px;margin-top:6px;">Revenue categories</label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin:4px 0 10px;">
           ${REVENUE_CATS.map(c=>`
-            <div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-seed-amt" data-cat="${c.key}" value="${formatAsianAmount(existing?existing.revenue[c.key]:0)}"></div>
+            <div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-seed-amt" data-group="revenue" data-cat="${c.key}" value="${formatAsianAmount(existing?(existing.revenue||{})[c.key]:0)}"></div>
           `).join('')}
         </div>
+        <label style="font-size:12px;">Expenditure categories</label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin:4px 0 10px;">
+          ${COA.map(c=>`
+            <div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-seed-amt" data-group="expenditure" data-cat="${c.key}" value="${formatAsianAmount(existing?(existing.expenditure||{})[c.key]:0)}"></div>
+          `).join('')}
+        </div>
+        <label style="font-size:12px;">Bank amounts</label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin:4px 0 4px;">
+          ${state.banks.map(b=>`
+            <div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(b.name)}</label><input type="text" inputmode="decimal" class="ml-seed-amt" data-group="bank" data-cat="${b.id}" value="${formatAsianAmount(existing?(existing.bankBreakdown||{})[b.id]:0)}"></div>
+          `).join('') || '<p class="empty">No bank accounts set up yet.</p>'}
+        </div>
+        <div class="divider"></div>
+        <label style="font-size:12px;">Balance Sheet preview from the figures above</label>
+        <div id="ml-seed-preview" style="font-size:12.5px;background:var(--card-alt,#F7F8F4);border-radius:6px;padding:8px 10px;margin-top:4px;"></div>
         <div class="modal-actions">
           ${existing ? '<button class="secondary" type="button" id="ml-seed-clear">Clear</button>' : ''}
           <button class="secondary" type="button">Cancel</button>
@@ -3487,7 +3483,30 @@ function showMlSeedModal(){
   `);
   document.body.appendChild(overlay);
   const amtInputs = overlay.querySelectorAll('.ml-seed-amt');
-  amtInputs.forEach(inp=>wireAmountInput(inp, ()=>{}));
+  const previewBox = overlay.querySelector('#ml-seed-preview');
+  /* Recomputed straight from whatever is currently typed in the modal
+     (not yet saved) - lets the person see the resulting Balance Sheet
+     shape before committing, the same figures computeMonthlyLedgerFigures
+     will produce once saved and applied to the earliest tracked month. */
+  const updateSeedPreview = ()=>{
+    let revSum = 0, expSum = 0, bankSum = 0;
+    amtInputs.forEach(inp=>{
+      const val = parseAmountInput(inp.value)||0;
+      if(inp.dataset.group==='revenue') revSum += val;
+      else if(inp.dataset.group==='expenditure') expSum += val;
+      else if(inp.dataset.group==='bank') bankSum += val;
+    });
+    const net = revSum - expSum;
+    previewBox.innerHTML = `
+      <div class="computed"><span class="lbl">Total Revenue</span><span>${money(revSum)}</span></div>
+      <div class="computed"><span class="lbl">Total Expenditure</span><span>${money(expSum)}</span></div>
+      <div class="computed"><span class="lbl">Net (Revenue − Expenditure)</span><span>${money(net)}</span></div>
+      <div class="computed"><span class="lbl">Total Bank Balance</span><span>${money(bankSum)}</span></div>
+      <div class="computed total"><span class="lbl">Grand Total (Net + Bank)</span><span>${money(net+bankSum)}</span></div>
+    `;
+  };
+  amtInputs.forEach(inp=>{ wireAmountInput(inp, ()=>{ updateSeedPreview(); }); inp.addEventListener('input', updateSeedPreview); });
+  updateSeedPreview();
   const buttons = overlay.querySelectorAll('.modal-actions button');
   const clearBtn = existing ? overlay.querySelector('#ml-seed-clear') : null;
   const cancelBtn = buttons[existing?1:0], saveBtn = buttons[existing?2:1];
@@ -3495,9 +3514,14 @@ function showMlSeedModal(){
     const year = overlay.querySelector('#ml-seed-year').value.trim();
     const throughMonth = overlay.querySelector('#ml-seed-month').value;
     if(!year) return;
-    const revenue = {};
-    amtInputs.forEach(inp=>{ revenue[inp.dataset.cat] = parseAmountInput(inp.value); });
-    state.monthlyLedger.seed = {year, throughMonth, revenue};
+    const revenue = {}, expenditure = {}, bankBreakdown = {};
+    amtInputs.forEach(inp=>{
+      const val = parseAmountInput(inp.value);
+      if(inp.dataset.group==='revenue') revenue[inp.dataset.cat] = val;
+      else if(inp.dataset.group==='expenditure') expenditure[inp.dataset.cat] = val;
+      else if(inp.dataset.group==='bank') bankBreakdown[inp.dataset.cat] = val;
+    });
+    state.monthlyLedger.seed = {year, throughMonth, revenue, expenditure, bankBreakdown, active: existing ? existing.active!==false : true};
     saveState();
     overlay.remove();
     render();
@@ -4711,16 +4735,6 @@ function wireDelegation(){
       mlSettingsOpen = !mlSettingsOpen;
       render(); return;
     }
-    if(action==='ml-toggle-beginning'){
-      mlBeginningOpen = !mlBeginningOpen;
-      renderMonthlyLedgerWindowInPlace();
-      return;
-    }
-    if(action==='ml-toggle-bank-beginning'){
-      mlBankBeginningOpen = !mlBankBeginningOpen;
-      renderMonthlyLedgerWindowInPlace();
-      return;
-    }
     if(action==='minimize-monthly-ledger'){
       monthlyLedgerMinimized = !monthlyLedgerMinimized;
       render(); return;
@@ -4815,6 +4829,13 @@ function wireDelegation(){
     }
     if(action==='ml-set-seed'){
       showMlSeedModal();
+      return;
+    }
+    if(action==='ml-toggle-seed-active'){
+      if(state.monthlyLedger.seed){
+        state.monthlyLedger.seed.active = state.monthlyLedger.seed.active===false ? true : false;
+        saveState(); render();
+      }
       return;
     }
     if(action==='ml-import'){
