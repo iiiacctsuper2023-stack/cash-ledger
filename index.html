@@ -5588,6 +5588,21 @@ function cloneTemplateSheet(destWb, srcWs, name){
      instead of just the voucher area, printing everything smaller
      than intended. */
   ws.pageSetup = JSON.parse(JSON.stringify(srcWs.pageSetup));
+  /* The template's pageSetup carries both fitToPage:true AND a leftover
+     numeric scale (86%) from whenever it was last manually printed in
+     Excel/WPS. Excel itself correctly prioritizes fitToWidth/fitToHeight
+     over scale when fitToPage is true, but some spreadsheet apps (WPS
+     Office in particular) honor the leftover fixed scale% regardless -
+     so a voucher whose content is taller than what 86% happens to allow
+     (e.g. 3 sections' worth of description lines) spills onto a 2nd,
+     mostly-blank page even though the merged description cell (14 rows
+     tall) has plenty of room. Clearing scale and re-asserting
+     fitToWidth/fitToHeight removes that ambiguity everywhere. */
+  if(ws.pageSetup.fitToPage){
+    delete ws.pageSetup.scale;
+    ws.pageSetup.fitToWidth = 1;
+    ws.pageSetup.fitToHeight = 1;
+  }
   return ws;
 }
 
