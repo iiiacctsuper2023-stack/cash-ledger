@@ -576,7 +576,13 @@ function defaultState(){
        Yearly Running Total columns, covering whatever months predate
        this tool being used (before that, everything is derived live by
        summing each tracked month's revenue entries for the same year). */
-    monthlyLedger:{ months:{}, seed:null }
+    monthlyLedger:{ months:{}, seed:null },
+    /* Uploaded bank statements, keyed by bank id. Each holds the parsed
+       rows (date, deposit, withdrawal, closing balance) from an Excel
+       export of the real bank statement, used to auto-fill and
+       cross-check the per-day Bank Reconciliation fields above instead
+       of typing each day's closing balance by hand. */
+    bankStatements:{}
   };
 }
 function newDay(dateStr){
@@ -605,6 +611,10 @@ function ensureBankDaily(day, bankId){
   return bd;
 }
 function uid(){ return Math.random().toString(36).slice(2,10); }
+function todayDateStr(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 function dayLabel(dateStr){
   if(!dateStr) return 'Untitled day';
@@ -1159,6 +1169,7 @@ function migrateState(){
   if(state.settings.revenueLabelOverrides===undefined) state.settings.revenueLabelOverrides = {};
   if(!state.archive) state.archive = [];
   if(!state.templates) state.templates = [];
+  if(!state.bankStatements) state.bankStatements = {};
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0, debtItems:[] };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -1446,6 +1457,147 @@ function showModal({message, confirmText='OK', cancelText=null, danger=false, on
   wireBackdropClose(overlay);
 }
 function showAlert(message){ showModal({message, confirmText:'OK'}); }
+
+/* --- Direct browser printing (no Excel step) ---------------------------
+   Opens a plain, self-contained HTML document in a new tab styled to
+   look like the institute's printed forms (bordered boxes, serif
+   headings, right-aligned Taka figures) and triggers the browser's
+   print dialog. This is a close visual match to the Excel exports, not
+   a literal print of the .xlsx file - merged-cell quirks of the Excel
+   template aren't reproduced, but the layout, numbering and totals are
+   the same. */
+/* Prints the whole day's Daily Ledger sheet - Cash received, Cash
+   Disbursed (by category), Bank summary, and closing figures - on one
+   landscape A4 page, laid out to match the numbers shown on screen. */
+function printDaySheet(day, c){
+  const coaRows = COA.map(cat=>{
+    const items = (day.coa[cat.key]||[]).filter(it=>Number(it.amount)>0);
+    if(items.length===0) return '';
+    const lines = items.map(it=>{
+      const label = (it.desc && it.desc.trim()) ? it.desc.trim() : cat.label;
+      return `${it.voucher}: ${label}`;
+    }).join('; ');
+    return `<tr><td>${escapeHtml(cat.label)}</td><td class="desc">${escapeHtml(lines)}</td><td class="amt">${money(c.coaTotals[cat.key])}</td></tr>`;
+  }).join('');
+  const bankRows = state.banks.map(b=>{
+    const bc = c.banks[b.id];
+    return `<tr><td>${escapeHtml(b.name)}</td><td class="amt">${money(bc.opening)}</td><td class="amt">${money(bc.totalIn-bc.opening)}</td><td class="amt">${money(bc.totalOut)}</td><td class="amt bold">${money(bc.closing)}</td></tr>`;
+  }).join('');
+  const body = `
+    <h1>${escapeHtml(state.settings.instituteName || 'International Islamic Institute')}</h1>
+    <h2>Daily Cash &amp; Bank Ledger</h2>
+    <h3>${dayLabelFull(day.date)} ${state.year}</h3>
+    <div style="display:flex;gap:16px;margin-top:10px;">
+      <table style="flex:1;">
+        <tr><th colspan="2">Cash Received</th></tr>
+        <tr><td>Opening cash</td><td class="amt">${money(c.openingCash)}</td></tr>
+        <tr><td>Service revenue collected</td><td class="amt">${money(day.serviceRevenue)}</td></tr>
+        ${Number(day.miscCollection)>0 ? `<tr><td>Miscellaneous collection${miscCollectionDescText(day)?' ('+escapeHtml(miscCollectionDescText(day).replace(/\n/g,', '))+')':''}</td><td class="amt">${money(day.miscCollection)}</td></tr>` : ''}
+        ${day.withdrawals.map(w=>{ const bank=state.banks.find(bk=>bk.id===w.bankId); return `<tr><td>Cash withdrawn from ${escapeHtml(bank?bank.name:'bank')}${w.note?' - '+escapeHtml(w.note):''}</td><td class="amt">${money(w.amount)}</td></tr>`; }).join('')}
+        <tr><td class="bold">Total cash available</td><td class="amt bold">${money(c.totalAmountCash)}</td></tr>
+      </table>
+      <table style="flex:1;">
+        <tr><th colspan="2">Closing Summary</th></tr>
+        <tr><td>Total cash disbursed</td><td class="amt">${money(c.totalCashDisbursed)}</td></tr>
+        <tr><td>Bank deposit (from cash)</td><td class="amt">${money(c.depositTotal)}</td></tr>
+        <tr><td>Closing cash</td><td class="amt">${money(c.closingAmount)}</td></tr>
+        <tr><td>Outstanding IOU</td><td class="amt">${money(c.iouTotal)}</td></tr>
+        <tr><td class="bold">Cash in hand</td><td class="amt bold">${money(c.cashInHand)}</td></tr>
+        <tr><td class="bold">Grand total (cash + bank)</td><td class="amt bold">${money(c.grandTotal)}</td></tr>
+      </table>
+    </div>
+    <table style="margin-top:10px;">
+      <tr><th>Category</th><th>Vouchers</th><th style="width:110px;">Amount</th></tr>
+      ${coaRows || '<tr><td colspan="3" class="center">No Cash Disbursed vouchers today.</td></tr>'}
+      <tr><td class="bold" colspan="2">Total Cash Disbursed</td><td class="amt bold">${money(c.coaTotal)}</td></tr>
+    </table>
+    ${state.banks.length ? `
+    <table style="margin-top:10px;">
+      <tr><th>Bank</th><th style="width:100px;">Opening</th><th style="width:100px;">Deposit</th><th style="width:100px;">Withdrawal</th><th style="width:100px;">Closing</th></tr>
+      ${bankRows}
+    </table>` : ''}
+  `;
+  printHtmlDoc(`Daily Ledger - ${dayLabelFull(day.date)}`, body, true);
+}
+
+/* Prints every Cash Disbursed voucher for the day, one after another,
+   each on its own page break, in one print job instead of one at a time. */
+function printAllVouchersForDay(day){
+  const entries = [];
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(item=>{ if(Number(item.amount)>0) entries.push({cat, item}); });
+  });
+  if(entries.length===0){ showAlert('No Cash Disbursed vouchers with an amount recorded for this day yet.'); return; }
+  const pages = entries.map(({cat,item})=>debitVoucherHtml(day, cat, item));
+  printHtmlDoc(`All Vouchers - ${dayLabelFull(day.date)}`, pages.join('<div style="page-break-after:always;"></div>'));
+}
+
+/* Shared voucher markup, used by both the single-voucher print and the
+   print-all-vouchers-for-the-day print. */
+function debitVoucherHtml(day, cat, item){
+  const label = (item.desc && item.desc.trim()) ? item.desc.trim() : cat.label;
+  const descLines = formatMultiItemDescription(label).split('\n');
+  const amtLines = formatMultiItemAmounts(item).split('\n');
+  const rows = descLines.map((d,i)=>`<tr><td class="desc">${escapeHtml(d)}</td><td class="amt">${escapeHtml(amtLines[i]||'')}</td></tr>`).join('');
+  return `
+    <h1>${escapeHtml(state.settings.instituteName || 'International Islamic Institute')}</h1>
+    <h2>Debit Voucher</h2>
+    <div class="meta" style="display:flex;justify-content:space-between;margin-top:10px;">
+      <span><strong>No:</strong> ${escapeHtml(item.voucher||'')}</span>
+      <span><strong>Date:</strong> ${dayLabelFull(day.date)} ${state.year}</span>
+    </div>
+    <table>
+      <tr><th>Description</th><th style="width:120px;">Taka</th></tr>
+      ${rows}
+      ${Array(Math.max(0,6-descLines.length)).fill('<tr><td>&nbsp;</td><td></td></tr>').join('')}
+      <tr><td>In Words: ${escapeHtml(takaInWords(item.amount))}</td><td class="amt bold">${escapeHtml(formatTakaBox(item.amount))}</td></tr>
+    </table>
+    <div class="sig-row">
+      <div class="sig-box"><div class="sig-line"></div>Prepared by</div>
+      <div class="sig-box"><div class="sig-line"></div>Checked by</div>
+      <div class="sig-box"><div class="sig-line"></div>Approved by</div>
+    </div>
+  `;
+}
+/* Prints a single Cash Disbursed voucher directly, replicating the
+   Debit Voucher template's layout (No/Date, Description|Taka box with
+   one line per section, In Words + total) without going through Excel. */
+function printDebitVoucher(day, cat, item){
+  printHtmlDoc(`Debit Voucher ${item.voucher}`, debitVoucherHtml(day, cat, item));
+}
+
+function printHtmlDoc(title, bodyHtml, landscape){
+  const w = window.open('', '_blank');
+  if(!w){ showAlert('The browser blocked the print window - please allow pop-ups for this page and try again.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+  <style>
+    @page{ size:A4 ${landscape?'landscape':'portrait'}; margin:10mm; }
+    body{ font-family:'Times New Roman', Georgia, serif; color:#111; margin:0; }
+    h1,h2,h3{ text-align:center; margin:2px 0; }
+    h1{ font-size:16px; } h2{ font-size:13px;font-weight:600; } h3{ font-size:12px;font-weight:400;color:#333; }
+    table{ width:100%; border-collapse:collapse; margin-top:10px; }
+    td, th{ border:1px solid #000; padding:4px 7px; font-size:${landscape?'11.5':'12.5'}px; vertical-align:top; }
+    th{ background:#f0f0ea; font-weight:700; text-align:center; }
+    .amt{ text-align:right; white-space:pre-line; font-variant-numeric:tabular-nums; }
+    .desc{ white-space:pre-line; }
+    .no-border{ border:none; }
+    .right{ text-align:right; }
+    .center{ text-align:center; }
+    .bold{ font-weight:700; }
+    .meta{ font-size:12.5px; margin:2px 0; }
+    .sig-row{ display:flex; justify-content:space-between; margin-top:60px; }
+    .sig-box{ text-align:center; font-size:12px; }
+    .sig-line{ border-top:1px solid #000; width:170px; margin-bottom:4px; }
+    .print-bar{ text-align:center; margin:10px 0; }
+    @media print{ .print-bar{ display:none; } }
+  </style></head><body>
+  <div class="print-bar"><button onclick="window.print()" style="padding:6px 16px;">Print</button></div>
+  ${bodyHtml}
+  </body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(()=>{ try{ w.print(); }catch(e){} }, 300);
+}
 function showConfirm(message, onConfirm, confirmText='Delete'){ showModal({message, confirmText, cancelText:'Cancel', danger:true, onConfirm}); }
 
 /* Password-gated confirmation, used for unlocking a finalized/locked day.
@@ -1665,16 +1817,28 @@ function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToChec
 function render(){
   const scrollY = window.scrollY;
   renderApp();
-  /* app.innerHTML='' briefly collapses page height, which makes the
-     browser clamp/reset scroll position; restore it right after the
-     new content is back in so edits/deletes don't jump to the top. */
-  if(window.scrollY !== scrollY) window.scrollTo(0, scrollY);
+  /* Restore scroll position after the rebuild, instantly - the page has
+     html{scroll-behavior:smooth}, which would otherwise animate this
+     restore into a visible slide. behavior:'instant' overrides that for
+     just this call. Done now (in case the browser already clamped it
+     synchronously) and again on the next frame (in case the clamp/
+     re-layout happens after paint) - without fighting any deliberate
+     scrollIntoView a caller does right after render(). */
+  if(window.scrollY !== scrollY) window.scrollTo({top:scrollY, left:0, behavior:'instant'});
+  requestAnimationFrame(()=>{ if(window.scrollY !== scrollY) window.scrollTo({top:scrollY, left:0, behavior:'instant'}); });
 }
 function renderApp(){
-  const app = document.getElementById('app');
-  app.innerHTML = '';
+  /* Build into a detached fragment and swap it in with ONE DOM mutation
+     (replaceChildren) instead of clearing #app (innerHTML='') and then
+     re-appending piece by piece. The old clear-then-rebuild approach
+     made the page's height collapse to ~0 for a moment, which made the
+     browser (or the outer page, if this is running in an auto-sizing
+     iframe/artifact preview) clamp scroll to the top; swapping the
+     whole subtree in one step avoids that empty in-between state. */
+  const app = document.createDocumentFragment();
   if(state.lockPasswordHash && locked){
     app.appendChild(renderLockScreen());
+    document.getElementById('app').replaceChildren(app);
     return;
   }
   if(!state.setupDone){
@@ -1682,6 +1846,7 @@ function renderApp(){
     if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
     if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
     app.appendChild(renderSetup());
+    document.getElementById('app').replaceChildren(app);
     return;
   }
   app.appendChild(renderHeader());
@@ -1696,7 +1861,10 @@ function renderApp(){
   if(state.days.length===0){
     app.appendChild(el(`<div class="card"><p class="empty">No days added yet. Click "+ Add day" above to start entering the first day of ${state.month} ${state.year}.</p></div>`));
   } else {
-    if(!selectedDayId || !findDay(selectedDayId)) selectedDayId = state.days[state.days.length-1].id;
+    if(!selectedDayId || !findDay(selectedDayId)){
+      const todayDay = state.days.find(d=>d.date===todayDateStr());
+      selectedDayId = todayDay ? todayDay.id : state.days[state.days.length-1].id;
+    }
     app.appendChild(renderDayPanel(selectedDayId, computed));
     app.appendChild(renderNotesheetCard());
     app.appendChild(renderDepositNotesheetCard());
@@ -1715,6 +1883,7 @@ function renderApp(){
   if(mlSettingsOpen) app.appendChild(renderMlSettingsModal());
   if(lastUndo) app.appendChild(renderUndoToast());
   if(duplicateWarning) app.appendChild(renderDuplicateWarningToast());
+  document.getElementById('app').replaceChildren(app);
 }
 
 function renderHeader(){
@@ -2025,6 +2194,8 @@ function renderDayPanel(dayId, computed){
         <span style="font-size:13px;color:var(--ink-soft);">${day.locked ? ('This day is locked - entries can\'t be edited until it\'s unlocked'+((state.dayLockPasswordHash||state.lockPasswordHash)?' with the password':'')+'.') : 'Once a day is finalized, lock it to prevent accidental edits.'}</span>
       </div>
       <button class="${day.locked?'danger':'secondary'} small" type="button" data-action="${day.locked?'unlock-day':'lock-day'}" data-day="${day.id}">${day.locked?'Unlock this day':'Lock this day'}</button>
+      <button class="secondary small" type="button" data-action="print-day-sheet" data-day="${day.id}">&#128424; Print day sheet</button>
+      <button class="secondary small" type="button" data-action="print-all-vouchers" data-day="${day.id}">&#128424; Print all vouchers</button>
     </div>
   `);
   wrap.appendChild(lockBar);
@@ -2209,7 +2380,7 @@ function renderDayPanel(dayId, computed){
         <div class="computed total"><span class="lbl">Closing balance &mdash; ${escapeHtml(b.name)}</span><span id="bc-closing-${b.id}">${money(bc.closing)}</span></div>
         <div class="divider"></div>
         <label>Bank Reconciliation ${/tbl/i.test(b.name) ? '<span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory</span>' : '<span class="tag">optional</span>'}</label>
-        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.${/tbl/i.test(b.name) ? ' TBL must be reconciled before you can consider the day fully closed.' : ''}</p>
+        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.${/tbl/i.test(b.name) ? ' TBL must be reconciled before you can consider the day fully closed.' : ''} Uploading the statement in Monthly Ledger fills this in automatically for every matching date.</p>
         <div class="row">
           <div class="field">
             <label>Bank statement balance</label>
@@ -2916,6 +3087,42 @@ function renderMonthlyLedgerCard(){
       <div id="ml-bank-breakdown-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Balance</span><span id="ml-bank-breakdown-sum">${money(bankBreakdownSum)}</span></div>
       <p id="ml-warn-bank-breakdown" class="subnote" style="color:#B3261E;${bankBreakdownMismatch?'':'display:none;'}">&#9888; Bank breakdown total doesn't match Balance in Bank Account above.</p>
+
+      <div class="divider"></div>
+      <label>Bank Statement Cross-Check <span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory &mdash; both banks</span></label>
+      <p class="subnote" style="margin-top:-4px;">Upload each bank's real statement (Excel export: Date, Deposit, Withdrawal, Balance columns) for this month. It's checked date-by-date and as totals &mdash; deposits, withdrawals and closing balance &mdash; against everything recorded in the Daily Ledger, including online-payment (SSL Commerz) deposits.</p>
+      ${state.banks.length===0 ? `<p class="empty">No bank accounts set up yet.</p>` : state.banks.map(b=>{
+        const stmt = state.bankStatements[b.id];
+        const cc = (isLiveMonth && stmt) ? bankStatementCrossCheck(b.id, state.days, computeAll()) : null;
+        return `
+          <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <strong style="font-size:13px;">${escapeHtml(b.name)}</strong>
+              <div>
+                <button type="button" class="secondary small" data-action="upload-bank-statement" data-bank="${b.id}">&#11014; ${stmt?'Replace':'Upload'} statement (.xlsx)</button>
+                <input type="file" id="bank-statement-input-${b.id}" accept=".xlsx" style="display:none;" data-bank="${b.id}">
+              </div>
+            </div>
+            ${!stmt ? `<p class="subnote" style="color:var(--danger);margin:6px 0 0;">&#9888; No statement uploaded yet for ${escapeHtml(b.name)} &mdash; required before this month can be considered checked.</p>` : !isLiveMonth ? `
+              <p class="subnote" style="margin:6px 0 0;">Statement on file: ${escapeHtml(stmt.fileName)} (${stmt.rows.length} rows). Switch the Daily Ledger to ${escapeHtml(monthKeyLabel(key))} to see the day-by-day cross-check here.</p>
+            ` : cc ? `
+              <div class="computed" style="margin-top:6px;"><span class="lbl">Statement on file</span><span style="font-size:12px;">${escapeHtml(cc.fileName)} &mdash; ${cc.rowCount} rows</span></div>
+              <div class="computed"><span class="lbl">Days matched / mismatched</span><span>${cc.matched} / ${cc.mismatched}</span></div>
+              <div class="computed"><span class="lbl">Total deposit &mdash; ledger vs statement</span><span>${money(cc.appDepositTotal)} vs ${money(cc.stmtDepositTotal)}${Math.abs(cc.appDepositTotal-cc.stmtDepositTotal)>1?' &#9888;':' &#9989;'}</span></div>
+              <div class="computed"><span class="lbl">Total withdrawal &mdash; ledger vs statement</span><span>${money(cc.appWithdrawTotal)} vs ${money(cc.stmtWithdrawTotal)}${Math.abs(cc.appWithdrawTotal-cc.stmtWithdrawTotal)>1?' &#9888;':' &#9989;'}</span></div>
+              ${cc.mismatched>0 ? `
+                <table style="width:100%; font-size:12.5px; border-collapse:collapse; margin-top:6px;">
+                  <thead><tr style="border-bottom:2px solid var(--line);"><td style="padding:4px 6px;font-weight:700;">Date</td><td style="padding:4px 6px;font-weight:700;text-align:right;">Ledger closing</td><td style="padding:4px 6px;font-weight:700;text-align:right;">Statement balance</td><td style="padding:4px 6px;font-weight:700;text-align:right;">Difference</td></tr></thead>
+                  <tbody>
+                    ${cc.diffs.map(d=>`<tr style="border-bottom:1px solid var(--line-soft);"><td style="padding:4px 6px;">${dayLabel(d.date)}</td><td style="padding:4px 6px;text-align:right;" class="mono">${money(d.appClosing)}</td><td style="padding:4px 6px;text-align:right;" class="mono">${money(d.stmtBalance)}</td><td style="padding:4px 6px;text-align:right;color:var(--danger);font-weight:700;" class="mono">${money(d.diff)}</td></tr>`).join('')}
+                  </tbody>
+                </table>
+                <p class="subnote" style="margin-top:4px;">Each mismatched date's own Bank Reconciliation box (in the Daily Ledger, under that bank) breaks the difference down line by line (SSL deposit, fees, salary, transfers) to help find it.</p>
+              ` : `<p class="subnote" style="color:var(--primary-dark);margin-top:2px;">&#9989; Every matched date this month agrees with the statement, and totals match.</p>`}
+            ` : ''}
+          </div>
+        `;
+      }).join('')}
 
       <div class="divider"></div>
       <label>Note: Head wise distribution of Balance in Account</label>
@@ -4201,7 +4408,10 @@ function miscCollectionDescText(day){
   const sections = ensureMiscCollectionSections(day);
   if(sections.length===0) return '';
   if(sections.length===1) return sections[0].desc||'';
-  return sections.map((s,i)=>`${i+1}. ${s.desc||''}`).join('\n');
+  /* Multiple sections all fold into ONE export line: descriptions
+     comma-separated, amount is the combined total (not one row per
+     section) - e.g. "Tailor fees, Transport fees" with total 560. */
+  return sections.map(s=>s.desc||'').filter(Boolean).join(', ');
 }
 
 function drawMiscCollectionList(container, day){
@@ -4220,9 +4430,12 @@ function drawMiscCollectionList(container, day){
     const descInp = row.querySelector('.desc-input');
     descInp.oninput = ()=>{ sec.desc = descInp.value; saveState(); };
     wireLockableTextInput(descInp);
-    wireAmountInput(row.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncMiscCollectionFromSections(day); refreshComputedOnly(); });
+    wireAmountInput(row.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncMiscCollectionFromSections(day); refreshComputedOnly(); setText('misc-collection-total', money(day.miscCollection)); });
     container.appendChild(row);
   });
+  if(sections.length>1){
+    container.appendChild(el(`<div class="computed" id="misc-collection-total-row" style="margin:4px 0 4px 0;"><span class="lbl">Total (this voucher)</span><span id="misc-collection-total">${money(day.miscCollection)}</span></div>`));
+  }
 }
 
 function drawCoaList(container, day, catKey, arr){
@@ -4241,6 +4454,7 @@ function drawCoaList(container, day, catKey, arr){
         <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(sec0.desc)}" placeholder="What was this voucher for?" required></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec0.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-move-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Move to a different category" ${day.locked?'disabled':''}>&#8646; Move</button>
+        <button class="secondary small" type="button" data-action="print-coa-voucher" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Print this voucher">&#128424; Print</button>
         <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
       </div>
     `);
@@ -4255,10 +4469,11 @@ function drawCoaList(container, day, catKey, arr){
         </div>
       `);
       secRow.querySelector('.desc-input').oninput = (e)=>{ sec.desc = e.target.value; syncCoaItemFromSections(item); saveState(); };
-      wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); });
+      wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); });
       extraWrap.appendChild(secRow);
     });
     const addSecBtn = el(`<button class="secondary small" type="button" style="margin-left:22px;" data-action="add-coa-section" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}">+ Add section (another item, same voucher)</button>`);
+    const sectionsTotal = el(`<div class="computed" id="coa-sections-total-${item.id}" style="margin:4px 0 4px 22px;${item.sections.length>1?'':'display:none;'}"><span class="lbl">Total (this voucher)</span><span>${money(item.amount)}</span></div>`);
     const noteRow = el(`
       <div class="coa-note-row" style="margin:-4px 0 10px 0;">
         <input type="text" class="note-input" style="width:100%;font-size:12.5px;padding:5px 8px;border:1px dashed var(--line-soft);border-radius:6px;background:#FBFBF7;" value="${escapeHtml(item.note||'')}" placeholder="ঐচ্ছিক অভ্যন্তরীণ নোট (বাংলা) — প্রিন্টে আসবে না, শুধু সার্চে পাওয়া যাবে">
@@ -4268,7 +4483,7 @@ function drawCoaList(container, day, catKey, arr){
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ sec0.desc = descInp.value; syncCoaItemFromSections(item); saveState(); };
     wireLockableTextInput(descInp);
-    wireAmountInput(amtInp, (num)=>{ sec0.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); }, ()=>{
+    wireAmountInput(amtInp, (num)=>{ sec0.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); }, ()=>{
       /* Fires only once the amount box already held a plain resolved
          number when Enter was pressed - i.e. the user is really done
          with this line, not just finishing a calculation. */
@@ -4296,6 +4511,9 @@ function drawCoaList(container, day, catKey, arr){
     descInp.addEventListener('blur', syncDescRequired);
     descInp.addEventListener('input', syncDescRequired);
     container.appendChild(row);
+    container.appendChild(extraWrap);
+    container.appendChild(addSecBtn);
+    container.appendChild(sectionsTotal);
     const noteInp = noteRow.querySelector('.note-input');
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
     wireLockableTextInput(noteInp);
@@ -4714,6 +4932,25 @@ function wireDelegation(){
       render();
       return;
     }
+    if(action==='print-day-sheet'){
+      printDaySheet(day, computeAll()[day.id]);
+      return;
+    }
+    if(action==='print-all-vouchers'){
+      printAllVouchersForDay(day);
+      return;
+    }
+    if(action==='print-coa-voucher'){
+      const cat = COA.find(c=>c.key===t.dataset.cat);
+      const item = (day.coa[t.dataset.cat]||[]).find(x=>x.id===t.dataset.item);
+      if(cat && item) printDebitVoucher(day, cat, item);
+      return;
+    }
+    if(action==='upload-bank-statement'){
+      const inp = document.getElementById('bank-statement-input-'+t.dataset.bank);
+      if(inp) inp.click();
+      return;
+    }
     if(action==='add-misc-collection-section'){
       if(day.locked) return;
       ensureMiscCollectionSections(day).push({id:uid(), desc:'', amount:0});
@@ -4788,6 +5025,145 @@ const EXCELJS_URLS = [
   'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js'
 ];
 let excelJsLoadPromise = null;
+/* --- Bank Statement upload & cross-check -------------------------------
+   Reads an uploaded Excel export of the real bank statement (Date,
+   Deposit/Credit, Withdrawal/Debit, Balance columns - header names vary
+   by bank, so we match by keyword) and stores the parsed rows. On
+   upload, every day already recorded in the app whose date appears in
+   the statement gets its Bank Reconciliation "statement balance" field
+   auto-filled, which drives the existing per-day mismatch breakdown
+   further down. A summary (matched/mismatched day counts + a table of
+   exactly which dates and amounts differ) is shown separately so a
+   mismatch doesn't require opening every day one at a time. */
+function excelSerialToDateStr(n){
+  // Excel's day-0 is 1899-12-30 in the (incorrect, but universal) 1900 date system.
+  const ms = Math.round((Number(n)-25569)*86400*1000);
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+}
+function parseStatementDateCell(v){
+  if(v==null || v==='') return null;
+  if(v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
+  if(typeof v==='number') return excelSerialToDateStr(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if(m){
+    let [,, a, b, y] = [null, ...m]; // a=day-or-month, b=month-or-day, y=year
+    let day = m[1], mon = m[2], yr = m[3];
+    if(yr.length===2) yr = (Number(yr)<70?'20':'19')+yr;
+    if(Number(mon)>12){ const t=day; day=mon; mon=t; } // swap if the "month" is >12, it must be the day
+    return `${yr}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  m = s.match(/^(\d{1,2})[\s\-]([A-Za-z]{3,})[\s\-](\d{2,4})/);
+  if(m){
+    const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const mi = months.indexOf(m[2].slice(0,3).toLowerCase());
+    if(mi>=0){ let yr=m[3]; if(yr.length===2) yr=(Number(yr)<70?'20':'19')+yr; return `${yr}-${String(mi+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
+  }
+  return null;
+}
+function parseStatementAmountCell(v){
+  if(v==null || v==='') return 0;
+  if(typeof v==='number') return v;
+  const s = String(v).replace(/[,\s৳]/g,'').replace(/^Tk\.?/i,'');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+async function parseBankStatementFile(bankId, file){
+  await loadExcelJS();
+  const buf = await file.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  const ws = wb.worksheets[0];
+  if(!ws) throw new Error('No sheet found in that file.');
+  let headerRow = null, cols = {};
+  for(let r=1; r<=Math.min(15, ws.rowCount); r++){
+    const row = ws.getRow(r);
+    const found = {};
+    row.eachCell({includeEmpty:false}, (cell, c)=>{
+      const t = String(cell.value||'').trim().toLowerCase();
+      if(!t) return;
+      if(/date/.test(t) && found.date===undefined) found.date = c;
+      else if(/(deposit|credit)/.test(t) && found.deposit===undefined) found.deposit = c;
+      else if(/(withdraw|debit)/.test(t) && found.withdrawal===undefined) found.withdrawal = c;
+      else if(/balance/.test(t) && found.balance===undefined) found.balance = c;
+    });
+    if(found.date!==undefined && found.balance!==undefined){ headerRow = r; cols = found; break; }
+  }
+  if(headerRow===null) throw new Error('Could not find Date/Balance column headers in the first 15 rows - check the file has a header row like "Date, Deposit, Withdrawal, Balance".');
+  const rows = [];
+  for(let r=headerRow+1; r<=ws.rowCount; r++){
+    const row = ws.getRow(r);
+    const dateCell = row.getCell(cols.date).value;
+    const date = parseStatementDateCell(dateCell);
+    if(!date) continue;
+    rows.push({
+      date,
+      deposit: cols.deposit!==undefined ? parseStatementAmountCell(row.getCell(cols.deposit).value) : 0,
+      withdrawal: cols.withdrawal!==undefined ? parseStatementAmountCell(row.getCell(cols.withdrawal).value) : 0,
+      balance: parseStatementAmountCell(row.getCell(cols.balance).value)
+    });
+  }
+  if(rows.length===0) throw new Error('Found the header row but no data rows under it.');
+  return rows;
+}
+/* Fills bd.reconciledBalance for every day (current + archived) whose
+   date matches a row in the uploaded statement, so the existing mismatch
+   breakdown (further down the bank card) reflects the real statement
+   without retyping each closing balance by hand. Only overwrites values
+   that were previously auto-filled or empty - a manually typed note
+   survives, and a manually typed balance the person clearly entered on
+   purpose is left alone unless it now conflicts with the statement (in
+   which case the statement wins, since that's the source of truth). */
+function applyBankStatementToDays(bankId){
+  const stmt = state.bankStatements[bankId];
+  if(!stmt) return;
+  const byDate = {};
+  stmt.rows.forEach(r=>{ byDate[r.date] = r; });
+  const applyToDayList = (days)=>{
+    days.forEach(day=>{
+      const row = byDate[day.date];
+      if(!row) return;
+      const bd = ensureBankDaily(day, bankId);
+      bd.reconciledBalance = row.balance;
+      bd.reconcileNote = `Auto from statement: ${stmt.fileName}`;
+    });
+  };
+  applyToDayList(state.days||[]);
+  (state.archive||[]).forEach(m=>applyToDayList(m.days||[]));
+}
+/* Cross-check summary for a bank + date range (typically the days
+   currently loaded for the live month): matched/mismatched counts,
+   totals, and the list of mismatched dates with both figures. */
+function bankStatementCrossCheck(bankId, days, computed){
+  const stmt = state.bankStatements[bankId];
+  if(!stmt) return null;
+  const byDate = {};
+  stmt.rows.forEach(r=>{ byDate[r.date] = r; });
+  let matched=0, mismatched=0, stmtDepositTotal=0, stmtWithdrawTotal=0, appDepositTotal=0, appWithdrawTotal=0;
+  const diffs = [];
+  days.forEach(day=>{
+    const row = byDate[day.date];
+    const bc = computed[day.id] && computed[day.id].banks[bankId];
+    if(row){
+      stmtDepositTotal += row.deposit; stmtWithdrawTotal += row.withdrawal;
+    }
+    if(bc){
+      appDepositTotal += bc.sslDeposit + bc.transferIn + bc.bankXferIn;
+      appWithdrawTotal += bc.fees + bc.salaryAccount + bc.salaryCash + bc.transferOut + bc.bankXferOut;
+    }
+    if(row && bc){
+      const diff = Math.round((bc.closing - row.balance)*100)/100;
+      if(diff===0) matched++;
+      else { mismatched++; diffs.push({date:day.date, appClosing:bc.closing, stmtBalance:row.balance, diff}); }
+    }
+  });
+  return {fileName:stmt.fileName, uploadedAt:stmt.uploadedAt, rowCount:stmt.rows.length, matched, mismatched,
+          stmtDepositTotal, stmtWithdrawTotal, appDepositTotal, appWithdrawTotal, diffs};
+}
+
 function loadExcelJS(){
   if(typeof ExcelJS !== 'undefined') return Promise.resolve();
   if(excelJsLoadPromise) return excelJsLoadPromise;
@@ -5132,6 +5508,18 @@ function formatMultiItemDescription(text){
   return text.replace(/\s+(\d{1,3}[.\)]\s)/g, '\n$1').trim();
 }
 
+/* Mirrors the description box line-for-line: with one section it's just
+   the plain Taka box; with 2+ sections each section's own amount goes on
+   its own line, in the same order as the numbered description lines, so
+   in the exported voucher "1. Purchasing of Dictionary" lines up with
+   "1950/-" and "2. Conveyance" lines up with "160/-" beside it. The
+   combined total still goes in the separate Total Amount / In Words box
+   below (G28), unchanged. */
+function formatMultiItemAmounts(item){
+  if(!item.sections || item.sections.length<=1) return formatTakaBox(item.amount);
+  return item.sections.map(s=>formatTakaBox(Number(s.amount)||0)).join('\n');
+}
+
 /* Adds one Debit Voucher sheet per Cash Disbursed (CoA) entry for the day,
    skipping blank-amount vouchers. `used` is the sheet-name set shared with
    the day's summary sheet so names never collide. */
@@ -5154,7 +5542,7 @@ async function appendDebitVoucherSheets(wb, day, used){
     ws.getCell('C9').value = item.voucher;
     ws.getCell('H9').value = `${dayLabelFull(day.date)} ${state.year}`;
     ws.getCell('B14').value = formatMultiItemDescription(label);
-    ws.getCell('G14').value = formatTakaBox(amt);
+    ws.getCell('G14').value = formatMultiItemAmounts(item);
     ws.getCell('B28').value = `In Words: ${takaInWords(amt)}`;
     ws.getCell('G28').value = formatTakaBox(amt);
 
@@ -5163,8 +5551,9 @@ async function appendDebitVoucherSheets(wb, day, used){
     ws.getCell('B14').alignment = {horizontal:'left', vertical:'top', wrapText:true};
     /* In Words box: wrap so longer amounts (e.g. lakhs/crores) don't get cut off */
     ws.getCell('B28').alignment = {horizontal:'left', vertical:'top', wrapText:true};
-    /* Taka (amount) box: top-center aligned */
-    ws.getCell('G14').alignment = {horizontal:'center', vertical:'top'};
+    /* Taka (amount) box: top-center aligned; wrapText so each section's
+       amount lands on its own line, matching the description box. */
+    ws.getCell('G14').alignment = {horizontal:'center', vertical:'top', wrapText:true};
     /* Bottom border under the Total Amount / In Words line */
     ['B29','C29','D29','E29','F29','G29','H29'].forEach(addr=>{
       const cell = ws.getCell(addr);
