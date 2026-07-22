@@ -1538,14 +1538,26 @@ function printAllVouchersForDay(day){
 /* Shared voucher markup, used by both the single-voucher print and the
    print-all-vouchers-for-the-day print. Mirrors the institute's actual
    Debit Voucher Excel template (header block, No/Date/Paid To/Through
-   boxes, Description|Taka table, In Words + total, 4-way signature row)
-   so a direct browser print looks the same as the Excel export. */
+   boxes, Description|Taka table, In Words + total, 4-way signature row,
+   full-page border frame) so a direct browser print looks the same as
+   the Excel export. When a voucher has multiple sections, the Excel
+   template colors each description/amount line differently (and the
+   In Words line and signature labels) rather than leaving everything
+   black - reproduced here with the same rotating palette. A single-
+   section voucher stays plain black, exactly like the Excel export. */
+const VOUCHER_LINE_COLORS = ['#B8860B', '#2E7D32', '#1352B0', '#8E24AA'];
+const VOUCHER_SIG_COLORS = ['#B8860B', '#00838F', '#1352B0', '#8E24AA'];
 function debitVoucherHtml(day, cat, item){
   const label = (item.desc && item.desc.trim()) ? item.desc.trim() : cat.label;
   const descLines = formatMultiItemDescription(label).split('\n');
   const amtLines = formatMultiItemAmounts(item).split('\n');
-  const rows = descLines.map((d,i)=>`<tr><td class="desc">${escapeHtml(d)}</td><td class="amt">${escapeHtml(amtLines[i]||'')}</td></tr>`).join('');
-  return `
+  const multi = descLines.length>1;
+  const rows = descLines.map((d,i)=>{
+    const color = multi ? `color:${VOUCHER_LINE_COLORS[i % VOUCHER_LINE_COLORS.length]};` : '';
+    return `<tr><td class="desc" style="${color}">${escapeHtml(d)}</td><td class="amt" style="${color}">${escapeHtml(amtLines[i]||'')}</td></tr>`;
+  }).join('');
+  const inWordsColor = multi ? `color:${VOUCHER_LINE_COLORS[1]};` : '';
+  const inner = `
     <div class="voucher-header">
       <div class="inst-name">International Islamic Institute</div>
       <div class="inst-line">273/4/2, West Manikdi, Dhaka Cantonment, Dhaka-1206 (Kalshi Bridge-North side, Mirpur DOHS Road)</div>
@@ -1564,15 +1576,16 @@ function debitVoucherHtml(day, cat, item){
       <tr><th>Description</th><th style="width:100px;">Taka</th></tr>
       ${rows}
       ${Array(Math.max(0,6-descLines.length)).fill('<tr><td>&nbsp;</td><td></td></tr>').join('')}
-      <tr><td>In Words: ${escapeHtml(takaInWords(item.amount))}</td><td class="amt bold">${escapeHtml(formatTakaBox(item.amount))}</td></tr>
+      <tr><td style="${inWordsColor}">In Words: ${escapeHtml(takaInWords(item.amount))}</td><td class="amt bold" style="${inWordsColor}">${escapeHtml(formatTakaBox(item.amount))}</td></tr>
     </table>
     <div class="sig-row four">
-      <div class="sig-box"><div class="sig-line"></div>Paid to</div>
-      <div class="sig-box"><div class="sig-line"></div>Accountant</div>
-      <div class="sig-box"><div class="sig-line"></div>Admin</div>
-      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+      <div class="sig-box" style="${multi?'color:'+VOUCHER_SIG_COLORS[0]+';':''}"><div class="sig-line"></div>Paid to</div>
+      <div class="sig-box" style="${multi?'color:'+VOUCHER_SIG_COLORS[1]+';':''}"><div class="sig-line"></div>Accountant</div>
+      <div class="sig-box" style="${multi?'color:'+VOUCHER_SIG_COLORS[2]+';':''}"><div class="sig-line"></div>Admin</div>
+      <div class="sig-box" style="${multi?'color:'+VOUCHER_SIG_COLORS[3]+';':''}"><div class="sig-line"></div>Principal</div>
     </div>
   `;
+  return `<div class="page-frame">${inner}</div>`;
 }
 /* Prints a single Cash Disbursed voucher directly, replicating the
    Debit Voucher template's layout (No/Date, Description|Taka box with
@@ -1616,6 +1629,7 @@ function printHtmlDoc(title, bodyHtml, pageSize, orientation){
     .inst-line{ font-size:9px; color:#222; }
     .voucher-title-box{ border:1px solid #000; text-align:center; color:#1352B0; font-weight:700; font-size:12.5px; width:150px; margin:4px auto; padding:2px; }
     .boxed{ border:1px solid #000; display:inline-block; padding:1px 8px; min-width:110px; }
+    .page-frame{ border:2px solid #000; padding:14px; box-sizing:border-box; min-height:calc(100vh - ${pageSize==='A5'?'12mm':'20mm'}); }
     .sig-row{ display:flex; justify-content:space-between; margin-top:${pageSize==='A5'?'30px':'60px'}; }
     .sig-row.four .sig-box{ flex:1; }
     .sig-box{ text-align:center; font-size:10.5px; }
