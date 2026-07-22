@@ -394,6 +394,7 @@ function getMonthlyLedgerMonth(key){
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       beginningRevenue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       beginningExpenditure:Object.fromEntries(COA.map(c=>[c.key,0])),
+      beginningBankBreakdown:{},
       beginningBankBalance:0,
       expenditureColumns:defaultExpenditureColumns(),
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
@@ -507,6 +508,7 @@ let mlSettingsOpen = false;
 let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
 let mlBeginningOpen = false;
+let mlBankBeginningOpen = false;
 let locked = false;            // true = show the lock screen instead of the app
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
@@ -1177,6 +1179,7 @@ function migrateState(){
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
     if(!rec.beginningRevenue) rec.beginningRevenue = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
     if(!rec.beginningExpenditure) rec.beginningExpenditure = Object.fromEntries(COA.map(c=>[c.key,0]));
+    if(!rec.beginningBankBreakdown) rec.beginningBankBreakdown = {};
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -2798,7 +2801,9 @@ function computeMonthlyLedgerFigures(key){
   const bankBreakdownShown = {};
   state.banks.forEach(b=>{
     const ov = rec.balanceSheet.bankBreakdown[b.id];
-    bankBreakdownShown[b.id] = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
+    const base = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
+    const beginningAdd = Number((rec.beginningBankBreakdown||{})[b.id])||0;
+    bankBreakdownShown[b.id] = (base===null && beginningAdd===0) ? null : (Number(base)||0) + beginningAdd;
   });
   const bankBreakdownSum = state.banks.reduce((s,b)=>s+(Number(bankBreakdownShown[b.id])||0),0);
   const bankBreakdownMismatch = bankBalanceShown!==null && Math.abs(bankBreakdownSum - (Number(bankBalanceShown)||0)) > 1;
@@ -3066,9 +3071,7 @@ function renderMonthlyLedgerCard(){
       <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;">
         <p class="subnote" style="margin-top:0;">One-time opening balance per category, added on top of everything else. Fill these in once (e.g. when switching to this tool mid-year), then collapse this box - deposits/withdrawals keep adding to these totals as normal going forward.</p>
         <label style="font-size:12px;">Revenue categories</label>
-        <div id="ml-beginning-revenue-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px;"></div>
-        <label style="font-size:12px;">Expenditure categories</label>
-        <div id="ml-beginning-expenditure-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;"></div>
+        <div id="ml-beginning-revenue-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;"></div>
       </div>` : ''}
 
       <div class="divider"></div>
@@ -3148,6 +3151,12 @@ function renderMonthlyLedgerCard(){
       <div id="ml-bank-breakdown-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Balance</span><span id="ml-bank-breakdown-sum">${money(bankBreakdownSum)}</span></div>
       <p id="ml-warn-bank-breakdown" class="subnote" style="color:#B3261E;${bankBreakdownMismatch?'':'display:none;'}">&#9888; Bank breakdown total doesn't match Balance in Bank Account above.</p>
+      <button class="secondary small" type="button" data-action="ml-toggle-bank-beginning" style="margin-top:4px;">${mlBankBeginningOpen?'&#9660;':'&#9654;'} Beginning entry per bank (temporary)</button>
+      ${mlBankBeginningOpen ? `
+      <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;">
+        <p class="subnote" style="margin-top:0;">One-time opening amount per bank, added on top of the breakdown figure above (e.g. when switching to this tool mid-year). Fill in once, then collapse this box.</p>
+        <div id="ml-beginning-bank-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;"></div>
+      </div>` : ''}
 
       <div class="divider"></div>
       <label>Bank Statement Cross-Check <span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory &mdash; both banks</span></label>
@@ -3226,7 +3235,10 @@ function renderMonthlyLedgerCard(){
   drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
   if(mlBeginningOpen){
     drawMlBeginningGrid(card.querySelector('#ml-beginning-revenue-grid'), REVENUE_CATS, rec.beginningRevenue);
-    drawMlBeginningGrid(card.querySelector('#ml-beginning-expenditure-grid'), COA, rec.beginningExpenditure);
+  }
+  if(mlBankBeginningOpen){
+    if(!rec.beginningBankBreakdown) rec.beginningBankBreakdown = {};
+    drawMlBeginningGrid(card.querySelector('#ml-beginning-bank-grid'), state.banks.map(b=>({key:b.id, label:b.name})), rec.beginningBankBreakdown);
   }
 
   return card;
@@ -4701,6 +4713,11 @@ function wireDelegation(){
     }
     if(action==='ml-toggle-beginning'){
       mlBeginningOpen = !mlBeginningOpen;
+      renderMonthlyLedgerWindowInPlace();
+      return;
+    }
+    if(action==='ml-toggle-bank-beginning'){
+      mlBankBeginningOpen = !mlBankBeginningOpen;
       renderMonthlyLedgerWindowInPlace();
       return;
     }
