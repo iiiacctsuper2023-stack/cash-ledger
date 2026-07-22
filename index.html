@@ -1606,15 +1606,32 @@ function printHtmlDoc(title, bodyHtml, pageSize, orientation){
   const w = window.open('', '_blank');
   if(!w){ showAlert('The browser blocked the print window - please allow pop-ups for this page and try again.'); return; }
   const landscape = orientation==='landscape';
+  /* Printable-area height in mm, used for .page-frame instead of the
+     vh unit. 100vh is unreliable inside a print stylesheet - Chrome
+     computes it against a default page size before @page is fully
+     applied, so it doesn't match the real A5/A4 page. That inflated a
+     single short voucher to look "full page" only by accident; the
+     moment real content grew even slightly (a 2nd/3rd section whose
+     description wraps to two lines), the inflated frame height plus
+     that extra content together exceeded the true one-page height and
+     spilled onto a second, mostly-blank page. Sizing the frame to the
+     exact printable area (page size minus margin) fixes both: the
+     frame still visually fills the page, but never adds phantom height
+     on top of whatever the content actually needs. */
+  const pageDims = {A5:{w:148,h:210}, A4:{w:210,h:297}}[pageSize] || {w:210,h:297};
+  const marginMm = pageSize==='A5' ? 6 : 10;
+  const pageW = landscape ? pageDims.h : pageDims.w;
+  const pageH = landscape ? pageDims.w : pageDims.h;
+  const frameH = pageH - marginMm*2;
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
   <style>
-    @page{ size:${pageSize} ${orientation}; margin:${pageSize==='A5'?'6mm':'10mm'}; }
+    @page{ size:${pageSize} ${orientation}; margin:${marginMm}mm; }
     body{ font-family:'Times New Roman', Georgia, serif; color:#111; margin:0; }
     h1,h2,h3{ text-align:center; margin:2px 0; }
     h1{ font-size:16px; } h2{ font-size:13px;font-weight:600; } h3{ font-size:12px;font-weight:400;color:#333; }
-    table{ width:100%; border-collapse:collapse; margin-top:6px; }
+    table{ width:100%; border-collapse:collapse; margin-top:6px; table-layout:fixed; }
     table.no-outer td{ border:none !important; }
-    td, th{ border:1px solid #000; padding:${pageSize==='A5'?'2px 5px':'4px 7px'}; font-size:${pageSize==='A5'?'10.5':(landscape?'11':'12.5')}px; vertical-align:top; }
+    td, th{ border:1px solid #000; padding:${pageSize==='A5'?'1px 5px':'4px 7px'}; font-size:${pageSize==='A5'?'10':(landscape?'11':'12.5')}px; line-height:1.15; vertical-align:top; word-wrap:break-word; }
     th{ background:#f0f0ea; font-weight:700; text-align:center; }
     .amt{ text-align:right; white-space:pre-line; font-variant-numeric:tabular-nums; }
     .desc{ white-space:pre-line; }
@@ -1629,8 +1646,8 @@ function printHtmlDoc(title, bodyHtml, pageSize, orientation){
     .inst-line{ font-size:9px; color:#222; }
     .voucher-title-box{ border:1px solid #000; text-align:center; color:#1352B0; font-weight:700; font-size:12.5px; width:150px; margin:4px auto; padding:2px; }
     .boxed{ border:1px solid #000; display:inline-block; padding:1px 8px; min-width:110px; }
-    .page-frame{ border:2px solid #000; padding:14px; box-sizing:border-box; min-height:calc(100vh - ${pageSize==='A5'?'12mm':'20mm'}); }
-    .sig-row{ display:flex; justify-content:space-between; margin-top:${pageSize==='A5'?'30px':'60px'}; }
+    .page-frame{ border:2px solid #000; padding:${pageSize==='A5'?'8px':'14px'}; box-sizing:border-box; height:${frameH}mm; overflow:hidden; page-break-inside:avoid; }
+    .sig-row{ display:flex; justify-content:space-between; margin-top:${pageSize==='A5'?'14px':'40px'}; }
     .sig-row.four .sig-box{ flex:1; }
     .sig-box{ text-align:center; font-size:10.5px; }
     .sig-line{ border-top:1px solid #000; width:80%; margin:0 auto 4px; }
