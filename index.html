@@ -1470,54 +1470,57 @@ function showAlert(message){ showModal({message, confirmText:'OK'}); }
    Disbursed (by category), Bank summary, and closing figures - on one
    landscape A4 page, laid out to match the numbers shown on screen. */
 function printDaySheet(day, c){
-  const coaRows = COA.map(cat=>{
-    const items = (day.coa[cat.key]||[]).filter(it=>Number(it.amount)>0);
-    if(items.length===0) return '';
-    const lines = items.map(it=>{
-      const label = (it.desc && it.desc.trim()) ? it.desc.trim() : cat.label;
-      return `${it.voucher}: ${label}`;
-    }).join('; ');
-    return `<tr><td>${escapeHtml(cat.label)}</td><td class="desc">${escapeHtml(lines)}</td><td class="amt">${money(c.coaTotals[cat.key])}</td></tr>`;
-  }).join('');
-  const bankRows = state.banks.map(b=>{
+  const rows = [];
+  rows.push(`<tr><td colspan="2">Beginning Balance Cash</td><td class="amt">${money(c.openingCash)}</td></tr>`);
+  rows.push(`<tr><td colspan="2">Service revenue collected</td><td class="amt">${money(day.serviceRevenue)}</td></tr>`);
+  if(Number(day.miscCollection)>0){
+    const desc = miscCollectionDescText(day);
+    rows.push(`<tr><td colspan="2">Miscellaneous collection${desc?' - '+escapeHtml(desc):''}</td><td class="amt">${money(day.miscCollection)}</td></tr>`);
+  }
+  day.withdrawals.forEach(w=>{
+    const bank = state.banks.find(bk=>bk.id===w.bankId);
+    rows.push(`<tr><td colspan="2">Cash withdrawn from ${escapeHtml(bank?bank.name:'bank')}${w.note?' - '+escapeHtml(w.note):''}</td><td class="amt">${money(w.amount)}</td></tr>`);
+  });
+  rows.push(`<tr><td colspan="2" class="bold">Total cash collected</td><td class="amt bold">${money(c.cashCollected)}</td></tr>`);
+  rows.push(`<tr><td colspan="2" class="bold">Total Amount Cash</td><td class="amt bold">${money(c.totalAmountCash)}</td></tr>`);
+  rows.push(`<tr><td colspan="3" class="bold center">Cash Disbursed Summary</td></tr>`);
+  let anyVoucher = false;
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(item=>{
+      const amt = Number(item.amount)||0;
+      if(amt<=0) return;
+      anyVoucher = true;
+      const label = (item.desc && item.desc.trim()) ? item.desc.trim() : cat.label;
+      const descHtml = escapeHtml(formatMultiItemDescription(label)).replace(/\n/g,'<br>');
+      rows.push(`<tr><td class="mono" style="white-space:nowrap;">${escapeHtml(item.voucher||'')}</td><td>${descHtml}</td><td class="amt">${money(amt)}</td></tr>`);
+    });
+  });
+  if(!anyVoucher) rows.push(`<tr><td colspan="3" class="center">No Cash Disbursed vouchers today.</td></tr>`);
+  rows.push(`<tr><td colspan="2" class="bold">Total Cash Disbursed</td><td class="amt bold">${money(c.coaTotal)}</td></tr>`);
+  rows.push(`<tr><td colspan="2" class="bold">Closing amount</td><td class="amt bold">${money(c.closingAmount)}</td></tr>`);
+  activeIousForDay(day.date).forEach(i=>{
+    rows.push(`<tr><td colspan="2">${escapeHtml(i.desc||'')}</td><td class="amt">${money(i.amount)}</td></tr>`);
+  });
+  rows.push(`<tr><td colspan="2" class="bold">Total IOU</td><td class="amt bold">${money(c.iouTotal)}</td></tr>`);
+  rows.push(`<tr><td colspan="2" class="bold">Cash In Hand</td><td class="amt bold">${money(c.cashInHand)}</td></tr>`);
+  state.banks.forEach(b=>{
     const bc = c.banks[b.id];
-    return `<tr><td>${escapeHtml(b.name)}</td><td class="amt">${money(bc.opening)}</td><td class="amt">${money(bc.totalIn-bc.opening)}</td><td class="amt">${money(bc.totalOut)}</td><td class="amt bold">${money(bc.closing)}</td></tr>`;
-  }).join('');
+    rows.push(`<tr><td colspan="2">Beginning Balance - ${escapeHtml(b.name)}</td><td class="amt">${money(bc.opening)}</td></tr>`);
+    rows.push(`<tr><td colspan="2">Total Amount - ${escapeHtml(b.name)}</td><td class="amt">${money(bc.totalIn)}</td></tr>`);
+    rows.push(`<tr><td colspan="2">Bank fees</td><td class="amt">${money(bc.fees)}</td></tr>`);
+    rows.push(`<tr><td colspan="2">Total Cash Disbursed</td><td class="amt">${money(bc.totalOut)}</td></tr>`);
+    rows.push(`<tr><td colspan="2" class="bold">Closing Balance - ${escapeHtml(b.name)}</td><td class="amt bold">${money(bc.closing)}</td></tr>`);
+  });
+  rows.push(`<tr><td colspan="2" class="bold">Grand Total (Closing amount + all Bank Closing Balances)</td><td class="amt bold">${money(c.grandTotal)}</td></tr>`);
+
   const body = `
-    <h1>${escapeHtml(state.settings.instituteName || 'International Islamic Institute')}</h1>
-    <h2>Daily Cash &amp; Bank Ledger</h2>
-    <h3>${dayLabelFull(day.date)} ${state.year}</h3>
-    <div style="display:flex;gap:16px;margin-top:10px;">
-      <table style="flex:1;">
-        <tr><th colspan="2">Cash Received</th></tr>
-        <tr><td>Opening cash</td><td class="amt">${money(c.openingCash)}</td></tr>
-        <tr><td>Service revenue collected</td><td class="amt">${money(day.serviceRevenue)}</td></tr>
-        ${Number(day.miscCollection)>0 ? `<tr><td>Miscellaneous collection${miscCollectionDescText(day)?' ('+escapeHtml(miscCollectionDescText(day).replace(/\n/g,', '))+')':''}</td><td class="amt">${money(day.miscCollection)}</td></tr>` : ''}
-        ${day.withdrawals.map(w=>{ const bank=state.banks.find(bk=>bk.id===w.bankId); return `<tr><td>Cash withdrawn from ${escapeHtml(bank?bank.name:'bank')}${w.note?' - '+escapeHtml(w.note):''}</td><td class="amt">${money(w.amount)}</td></tr>`; }).join('')}
-        <tr><td class="bold">Total cash available</td><td class="amt bold">${money(c.totalAmountCash)}</td></tr>
-      </table>
-      <table style="flex:1;">
-        <tr><th colspan="2">Closing Summary</th></tr>
-        <tr><td>Total cash disbursed</td><td class="amt">${money(c.totalCashDisbursed)}</td></tr>
-        <tr><td>Bank deposit (from cash)</td><td class="amt">${money(c.depositTotal)}</td></tr>
-        <tr><td>Closing cash</td><td class="amt">${money(c.closingAmount)}</td></tr>
-        <tr><td>Outstanding IOU</td><td class="amt">${money(c.iouTotal)}</td></tr>
-        <tr><td class="bold">Cash in hand</td><td class="amt bold">${money(c.cashInHand)}</td></tr>
-        <tr><td class="bold">Grand total (cash + bank)</td><td class="amt bold">${money(c.grandTotal)}</td></tr>
-      </table>
-    </div>
-    <table style="margin-top:10px;">
-      <tr><th>Category</th><th>Vouchers</th><th style="width:110px;">Amount</th></tr>
-      ${coaRows || '<tr><td colspan="3" class="center">No Cash Disbursed vouchers today.</td></tr>'}
-      <tr><td class="bold" colspan="2">Total Cash Disbursed</td><td class="amt bold">${money(c.coaTotal)}</td></tr>
+    <h1 style="font-size:14px;">Daily Cash &amp; Bank Account Summary &mdash; ${dayLabelFull(day.date)} ${state.year}</h1>
+    <table>
+      <colgroup><col style="width:90px;"><col><col style="width:130px;"></colgroup>
+      ${rows.join('')}
     </table>
-    ${state.banks.length ? `
-    <table style="margin-top:10px;">
-      <tr><th>Bank</th><th style="width:100px;">Opening</th><th style="width:100px;">Deposit</th><th style="width:100px;">Withdrawal</th><th style="width:100px;">Closing</th></tr>
-      ${bankRows}
-    </table>` : ''}
   `;
-  printHtmlDoc(`Daily Ledger - ${dayLabelFull(day.date)}`, body, true);
+  printHtmlDoc(`Daily Cash & Bank Account Summary - ${dayLabelFull(day.date)}`, body, 'A4', 'landscape');
 }
 
 /* Prints every Cash Disbursed voucher for the day, one after another,
@@ -1529,33 +1532,45 @@ function printAllVouchersForDay(day){
   });
   if(entries.length===0){ showAlert('No Cash Disbursed vouchers with an amount recorded for this day yet.'); return; }
   const pages = entries.map(({cat,item})=>debitVoucherHtml(day, cat, item));
-  printHtmlDoc(`All Vouchers - ${dayLabelFull(day.date)}`, pages.join('<div style="page-break-after:always;"></div>'));
+  printHtmlDoc(`All Vouchers - ${dayLabelFull(day.date)}`, pages.join('<div style="page-break-after:always;"></div>'), 'A5', 'portrait');
 }
 
 /* Shared voucher markup, used by both the single-voucher print and the
-   print-all-vouchers-for-the-day print. */
+   print-all-vouchers-for-the-day print. Mirrors the institute's actual
+   Debit Voucher Excel template (header block, No/Date/Paid To/Through
+   boxes, Description|Taka table, In Words + total, 4-way signature row)
+   so a direct browser print looks the same as the Excel export. */
 function debitVoucherHtml(day, cat, item){
   const label = (item.desc && item.desc.trim()) ? item.desc.trim() : cat.label;
   const descLines = formatMultiItemDescription(label).split('\n');
   const amtLines = formatMultiItemAmounts(item).split('\n');
   const rows = descLines.map((d,i)=>`<tr><td class="desc">${escapeHtml(d)}</td><td class="amt">${escapeHtml(amtLines[i]||'')}</td></tr>`).join('');
   return `
-    <h1>${escapeHtml(state.settings.instituteName || 'International Islamic Institute')}</h1>
-    <h2>Debit Voucher</h2>
-    <div class="meta" style="display:flex;justify-content:space-between;margin-top:10px;">
-      <span><strong>No:</strong> ${escapeHtml(item.voucher||'')}</span>
-      <span><strong>Date:</strong> ${dayLabelFull(day.date)} ${state.year}</span>
+    <div class="voucher-header">
+      <div class="inst-name">International Islamic Institute</div>
+      <div class="inst-line">273/4/2, West Manikdi, Dhaka Cantonment, Dhaka-1206 (Kalshi Bridge-North side, Mirpur DOHS Road)</div>
+      <div class="inst-line">Website: http://iii-madrasah.com, Email: islamicinstitute2023@gmail.com</div>
+      <div class="inst-line">Phone: +8801901646220, &nbsp;+8801901646222</div>
     </div>
+    <div class="voucher-title-box">Debit Voucher</div>
+    <table class="no-outer"><tr>
+      <td class="no-border" style="width:50%;">No: <span class="boxed">${escapeHtml(item.voucher||'')}</span></td>
+      <td class="no-border" style="width:50%;">Date: <span class="boxed">${dayLabelFull(day.date)} ${state.year}</span></td>
+    </tr><tr>
+      <td class="no-border">Paid To <span class="boxed">&nbsp;</span></td>
+      <td class="no-border">Through: <span class="boxed">&nbsp;</span></td>
+    </tr></table>
     <table>
-      <tr><th>Description</th><th style="width:120px;">Taka</th></tr>
+      <tr><th>Description</th><th style="width:100px;">Taka</th></tr>
       ${rows}
       ${Array(Math.max(0,6-descLines.length)).fill('<tr><td>&nbsp;</td><td></td></tr>').join('')}
       <tr><td>In Words: ${escapeHtml(takaInWords(item.amount))}</td><td class="amt bold">${escapeHtml(formatTakaBox(item.amount))}</td></tr>
     </table>
-    <div class="sig-row">
-      <div class="sig-box"><div class="sig-line"></div>Prepared by</div>
-      <div class="sig-box"><div class="sig-line"></div>Checked by</div>
-      <div class="sig-box"><div class="sig-line"></div>Approved by</div>
+    <div class="sig-row four">
+      <div class="sig-box"><div class="sig-line"></div>Paid to</div>
+      <div class="sig-box"><div class="sig-line"></div>Accountant</div>
+      <div class="sig-box"><div class="sig-line"></div>Admin</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
     </div>
   `;
 }
@@ -1563,31 +1578,48 @@ function debitVoucherHtml(day, cat, item){
    Debit Voucher template's layout (No/Date, Description|Taka box with
    one line per section, In Words + total) without going through Excel. */
 function printDebitVoucher(day, cat, item){
-  printHtmlDoc(`Debit Voucher ${item.voucher}`, debitVoucherHtml(day, cat, item));
+  printHtmlDoc(`Debit Voucher ${item.voucher}`, debitVoucherHtml(day, cat, item), 'A5', 'portrait');
 }
 
-function printHtmlDoc(title, bodyHtml, landscape){
+/* Opens a print-ready tab. No automatic window.print() call - triggering
+   the native print dialog immediately made the main app tab unresponsive
+   until the dialog was dismissed (some browsers treat the print dialog
+   as blocking the whole browser, not just the new tab). The person now
+   clicks "Print" inside the new tab whenever they're ready, so the app
+   tab stays fully usable in the meantime. */
+function printHtmlDoc(title, bodyHtml, pageSize, orientation){
+  pageSize = pageSize || 'A4';
+  orientation = orientation || 'portrait';
   const w = window.open('', '_blank');
   if(!w){ showAlert('The browser blocked the print window - please allow pop-ups for this page and try again.'); return; }
+  const landscape = orientation==='landscape';
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
   <style>
-    @page{ size:A4 ${landscape?'landscape':'portrait'}; margin:10mm; }
+    @page{ size:${pageSize} ${orientation}; margin:${pageSize==='A5'?'6mm':'10mm'}; }
     body{ font-family:'Times New Roman', Georgia, serif; color:#111; margin:0; }
     h1,h2,h3{ text-align:center; margin:2px 0; }
     h1{ font-size:16px; } h2{ font-size:13px;font-weight:600; } h3{ font-size:12px;font-weight:400;color:#333; }
-    table{ width:100%; border-collapse:collapse; margin-top:10px; }
-    td, th{ border:1px solid #000; padding:4px 7px; font-size:${landscape?'11.5':'12.5'}px; vertical-align:top; }
+    table{ width:100%; border-collapse:collapse; margin-top:6px; }
+    table.no-outer td{ border:none !important; }
+    td, th{ border:1px solid #000; padding:${pageSize==='A5'?'2px 5px':'4px 7px'}; font-size:${pageSize==='A5'?'10.5':(landscape?'11':'12.5')}px; vertical-align:top; }
     th{ background:#f0f0ea; font-weight:700; text-align:center; }
     .amt{ text-align:right; white-space:pre-line; font-variant-numeric:tabular-nums; }
     .desc{ white-space:pre-line; }
+    .mono{ font-variant-numeric:tabular-nums; }
     .no-border{ border:none; }
     .right{ text-align:right; }
     .center{ text-align:center; }
     .bold{ font-weight:700; }
     .meta{ font-size:12.5px; margin:2px 0; }
-    .sig-row{ display:flex; justify-content:space-between; margin-top:60px; }
-    .sig-box{ text-align:center; font-size:12px; }
-    .sig-line{ border-top:1px solid #000; width:170px; margin-bottom:4px; }
+    .voucher-header{ text-align:center; margin-bottom:4px; }
+    .inst-name{ color:#0B6E2A; font-weight:700; font-size:14px; }
+    .inst-line{ font-size:9px; color:#222; }
+    .voucher-title-box{ border:1px solid #000; text-align:center; color:#1352B0; font-weight:700; font-size:12.5px; width:150px; margin:4px auto; padding:2px; }
+    .boxed{ border:1px solid #000; display:inline-block; padding:1px 8px; min-width:110px; }
+    .sig-row{ display:flex; justify-content:space-between; margin-top:${pageSize==='A5'?'30px':'60px'}; }
+    .sig-row.four .sig-box{ flex:1; }
+    .sig-box{ text-align:center; font-size:10.5px; }
+    .sig-line{ border-top:1px solid #000; width:80%; margin:0 auto 4px; }
     .print-bar{ text-align:center; margin:10px 0; }
     @media print{ .print-bar{ display:none; } }
   </style></head><body>
@@ -1595,8 +1627,6 @@ function printHtmlDoc(title, bodyHtml, landscape){
   ${bodyHtml}
   </body></html>`);
   w.document.close();
-  w.focus();
-  setTimeout(()=>{ try{ w.print(); }catch(e){} }, 300);
 }
 function showConfirm(message, onConfirm, confirmText='Delete'){ showModal({message, confirmText, cancelText:'Cancel', danger:true, onConfirm}); }
 
