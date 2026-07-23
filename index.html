@@ -1360,6 +1360,17 @@ function wireLockableTextInput(inputEl){
       inputEl.title = '';
     }
   });
+  // Pasting into an already-filled (locked) box needs the same unlock -
+  // a paste doesn't fire a double-click event, so without this a filled
+  // description box would silently reject anything pasted into it until
+  // the person happened to double-click it first.
+  inputEl.addEventListener('paste', ()=>{
+    if(inputEl.readOnly){
+      inputEl.readOnly = false;
+      inputEl.classList.remove('locked-text');
+      inputEl.title = '';
+    }
+  });
   inputEl.addEventListener('blur', syncLock);
 }
 function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
@@ -2756,12 +2767,12 @@ function computeMonthlyLedgerFigures(key){
   const isLiveMonth = key === monthKeyFor(state.month, state.year);
 
   const revTotals = monthRevenueTotals(rec);
-  // Gratuity and Education Assistance Fund are no longer entered by hand:
-  // each month, 1/6 of that month's Admission Fee & Form income goes to
-  // Gratuity and 1/30 goes to the Education Assistance Fund.
-  const admissionRevenueThisMonth = revTotals.admissionFee||0;
-  revTotals.gratuity = admissionRevenueThisMonth/6;
-  revTotals.eduAssist = admissionRevenueThisMonth/30;
+  // Gratuity and Education Assistance Fund come from their own entered
+  // amounts (rec.revenueEntries), same as every other category - NOT
+  // derived from Admission Fee & Form income. Admission Fee bundles the
+  // admission fee itself with the separate form fee, and the form fee
+  // is not the source of Gratuity/Education Assistance money, so no
+  // fraction of it is carried over automatically here.
   // One-time starting-point figures (entered once via "Set Starting
   // Point", covering Revenue, Expenditure and Bank amounts together) -
   // applied only to the earliest month ever tracked in this tool, so
@@ -3316,17 +3327,20 @@ function drawMlRevenueList(container, rec, monthKey){
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
           ${REVENUE_CATS.map(c=>{
-            const isAuto = c.key==='gratuity' || c.key==='eduAssist';
-            return `<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}${isAuto?' <span class="tag">auto, see below</span>':''}</label><input type="text" inputmode="decimal" class="ml-rev-amt" data-cat="${c.key}" value="${formatAsianAmount(entry[c.key]||0)}" ${isAuto?'disabled':''}></div>`;
+            return `<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-rev-amt" data-cat="${c.key}" value="${formatAsianAmount(entry[c.key]||0)}"></div>`;
           }).join('')}
         </div>
+        <div class="computed total" style="margin-top:6px;"><span class="lbl">Total (this entry)</span><span id="ml-rev-entry-total-${entry.id}">${money(REVENUE_CATS.reduce((s,c)=>s+(Number(entry[c.key])||0),0))}</span></div>
       </div>
     `);
     row.querySelector('.ml-rev-date').oninput = (e)=>{ entry.date = e.target.value; saveState(); };
     wireLockableTextInput(row.querySelector('.ml-rev-desc'));
     row.querySelector('.ml-rev-desc').oninput = (e)=>{ entry.desc = e.target.value; saveState(); };
     row.querySelectorAll('.ml-rev-amt').forEach(inp=>{
-      wireAmountInput(inp, (num)=>{ entry[inp.dataset.cat] = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+      wireAmountInput(inp, (num)=>{
+        entry[inp.dataset.cat] = num; saveState(); refreshMonthlyLedgerComputedOnly();
+        setText('ml-rev-entry-total-'+entry.id, money(REVENUE_CATS.reduce((s,c)=>s+(Number(entry[c.key])||0),0)));
+      });
     });
     container.appendChild(row);
   });
@@ -3394,13 +3408,17 @@ function drawMlExpenditureEntryList(container, rec){
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
           ${entryCols.map(c=>`<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-expentry-amt" data-col="${c.id}" value="${formatAsianAmount(entry.amounts[c.id]||0)}"></div>`).join('')}
         </div>
+        <div class="computed total" style="margin-top:6px;"><span class="lbl">Total (this entry)</span><span id="ml-exp-entry-total-${entry.id}">${money(Object.values(entry.amounts).reduce((s,v)=>s+(Number(v)||0),0))}</span></div>
       </div>
     `);
     row.querySelector('.ml-expentry-date').oninput = (e)=>{ entry.date = e.target.value; saveState(); };
     wireLockableTextInput(row.querySelector('.ml-expentry-desc'));
     row.querySelector('.ml-expentry-desc').oninput = (e)=>{ entry.desc = e.target.value; saveState(); };
     row.querySelectorAll('.ml-expentry-amt').forEach(inp=>{
-      wireAmountInput(inp, (num)=>{ entry.amounts[inp.dataset.col] = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+      wireAmountInput(inp, (num)=>{
+        entry.amounts[inp.dataset.col] = num; saveState(); refreshMonthlyLedgerComputedOnly();
+        setText('ml-exp-entry-total-'+entry.id, money(Object.values(entry.amounts).reduce((s,v)=>s+(Number(v)||0),0)));
+      });
     });
     container.appendChild(row);
   });
