@@ -2803,9 +2803,11 @@ function computeMonthlyLedgerFigures(key){
   const isEarliestTrackedMonth = key === earliestTrackedMonthKey();
   const seed = state.monthlyLedger.seed;
   const seedActive = isEarliestTrackedMonth && seed && seed.active!==false;
-  if(seedActive){
-    REVENUE_CATS.forEach(c=>{ revTotals[c.key] += Number((seed.revenue||{})[c.key])||0; });
-  }
+  // NOTE: seed.revenue is intentionally NOT added into revTotals here.
+  // It already flows into yrtBefore via yearlyRunningTotalBefore() below
+  // (that function adds it for the earliest month's year). Adding it a
+  // second time here used to double it in yrtNew/gratuityPayable/
+  // eduAssistPayable and everywhere the Balance Sheet reads those.
   const revTotalIncome = REVENUE_CATS.reduce((s,c)=>s+revTotals[c.key],0);
   const yrtBefore = yearlyRunningTotalBefore(key);
   const yrtNew = {};
@@ -2826,7 +2828,7 @@ function computeMonthlyLedgerFigures(key){
     expTotal += amt;
     return amt;
   });
-  const totalBalance = revTotalIncome - expTotal; // matches template's Total Income - Total Expenditure
+  const totalBalance = totalAmount - expTotal; // Total Amount (Beginning Balance + Total Income) minus Expenditure, per the Revenue sheet
 
   const expAssistCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
   const expAssistIdx = expAssistCol ? rec.expenditureColumns.indexOf(expAssistCol) : -1;
@@ -3462,12 +3464,20 @@ const ML_CUSTOM_ROW_METRICS = [
 ];
 function drawMlCustomRowsList(container, rec, f){
   container.innerHTML = '';
-  (rec.customRows||[]).forEach(row=>{
+  const rows = rec.customRows||[];
+  rows.forEach((row,i)=>{
     const bg = row.color==='green' ? '#E6F4EA' : '#FFF9DB';
     const border = row.color==='green' ? '#8BC48A' : '#E8D66B';
     const val = f.customRowValues[row.id]||0;
     const wrap = el(`
       <div class="line-item" style="background:${bg};border:1px solid ${border};border-radius:6px;padding:6px 8px;margin-bottom:6px;">
+        <div class="field" style="margin-bottom:0;min-width:0;display:flex;flex-direction:column;gap:2px;">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:2px;">
+            <button class="secondary small" type="button" data-action="ml-move-custom-row" data-item="${row.id}" data-dir="up" ${i===0?'disabled':''} title="Move up" style="padding:2px 8px;">&uarr;</button>
+            <button class="secondary small" type="button" data-action="ml-move-custom-row" data-item="${row.id}" data-dir="down" ${i===rows.length-1?'disabled':''} title="Move down" style="padding:2px 8px;">&darr;</button>
+          </div>
+        </div>
         <div class="field desc" style="margin-bottom:0;"><label>Label</label><input type="text" class="ml-cr-label" value="${escapeHtml(row.label||'')}"></div>
         <div class="field" style="margin-bottom:0;min-width:170px;">
           <label>Maps to</label>
@@ -5346,6 +5356,19 @@ function wireDelegation(){
       rec.customRows = rec.customRows.filter(x=>x.id!==t.dataset.item);
       pushUndo('Custom row removed.', ()=>{ rec.customRows.splice(idx,0,removed); });
       saveState(); render();
+      return;
+    }
+    if(action==='ml-move-custom-row'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const idx = rec.customRows.findIndex(x=>x.id===t.dataset.item);
+      if(idx<0) return;
+      const dir = t.dataset.dir==='up' ? -1 : 1;
+      const swapIdx = idx+dir;
+      if(swapIdx<0 || swapIdx>=rec.customRows.length) return;
+      const tmp = rec.customRows[idx];
+      rec.customRows[idx] = rec.customRows[swapIdx];
+      rec.customRows[swapIdx] = tmp;
+      saveState(); renderMonthlyLedgerWindowInPlace();
       return;
     }
     if(action==='ml-import'){
