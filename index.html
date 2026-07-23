@@ -3499,8 +3499,8 @@ function drawMlCustomRowsList(container, rec, f){
         <div class="field" style="margin-bottom:0;min-width:0;display:flex;flex-direction:column;gap:2px;">
           <label>&nbsp;</label>
           <div style="display:flex;gap:2px;">
-            <button class="secondary small" type="button" data-action="ml-move-custom-row" data-item="${row.id}" data-dir="up" ${i===0?'disabled':''} title="Move up" style="padding:2px 8px;">&uarr;</button>
-            <button class="secondary small" type="button" data-action="ml-move-custom-row" data-item="${row.id}" data-dir="down" ${i===rows.length-1?'disabled':''} title="Move down" style="padding:2px 8px;">&darr;</button>
+            <button class="secondary small ml-cr-up" type="button" ${i===0?'disabled':''} title="Move up" style="padding:2px 8px;">&uarr;</button>
+            <button class="secondary small ml-cr-down" type="button" ${i===rows.length-1?'disabled':''} title="Move down" style="padding:2px 8px;">&darr;</button>
           </div>
         </div>
         <div class="field desc" style="margin-bottom:0;"><label>Label</label><input type="text" class="ml-cr-label" value="${escapeHtml(row.label||'')}"></div>
@@ -3533,6 +3533,22 @@ function drawMlCustomRowsList(container, rec, f){
     if(keySel){ keySel.onchange = (e)=>{ row.key = e.target.value; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); }; if(!row.key){ row.key = keySel.value; saveState(); } }
     const amtInp = wrap.querySelector('.ml-cr-amt');
     if(amtInp) wireAmountInput(amtInp, (num)=>{ row.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    const upBtn = wrap.querySelector('.ml-cr-up');
+    const downBtn = wrap.querySelector('.ml-cr-down');
+    if(upBtn) upBtn.onclick = ()=>{
+      const idx = rec.customRows.indexOf(row);
+      if(idx<=0) return;
+      rec.customRows[idx] = rec.customRows[idx-1];
+      rec.customRows[idx-1] = row;
+      saveState(); renderMonthlyLedgerWindowInPlace();
+    };
+    if(downBtn) downBtn.onclick = ()=>{
+      const idx = rec.customRows.indexOf(row);
+      if(idx<0 || idx>=rec.customRows.length-1) return;
+      rec.customRows[idx] = rec.customRows[idx+1];
+      rec.customRows[idx+1] = row;
+      saveState(); renderMonthlyLedgerWindowInPlace();
+    };
     container.appendChild(wrap);
   });
 }
@@ -4150,6 +4166,8 @@ async function exportMonthlyLedger(key, previewOnly){
   rev.getCell(r,3).value = 'Transfer between categories';
   rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = effectiveRevenueTransfer(rec, c.key); });
+  r++;
+  const yrtNewRow = r;
   rev.getCell(r,3).value = 'Yearly Running Total'; rev.getCell(r,3).font = BOLD;
   REVENUE_CATS.forEach((c,i)=>{
     const colLetter = rev.getColumn(5+i).letter;
