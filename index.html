@@ -693,7 +693,16 @@ function evalAmountExpression(expr){
 function resolveAmountField(inputEl, onChange, fallbackValue){
   const raw = inputEl.value.replace(/,/g,'').trim();
   if(raw===''){ inputEl.value=''; onChange(0); return; }
-  if(looksLikePlainNumber(raw)) return; // already a plain number - nothing to resolve
+  if(looksLikePlainNumber(raw)){
+    // Already a plain number - still (re)sync it. Pasted values can land
+    // here already-plain (e.g. a hidden newline/tab from a spreadsheet
+    // copy got stripped during typing) without onChange having fired yet,
+    // so skipping this would silently leave the total out of date.
+    const num = parseFloat(raw);
+    inputEl.value = formatAsianAmount(raw);
+    onChange(isNaN(num)?0:num);
+    return;
+  }
   const result = evalAmountExpression(raw);
   if(result===null){
     const m = raw.match(/^-?\d+(\.\d+)?/);
@@ -733,6 +742,19 @@ function wireAmountInput(inputEl, onChange, onPlainEnter){
     } else {
       const pos = inputEl.selectionStart;
       const sanitized = inputEl.value.replace(/[^0-9+\-*/(). ]/g,'');
+      const sanitizedPlain = sanitized.replace(/,/g,'');
+      if(looksLikePlainNumber(sanitizedPlain) && sanitizedPlain!==''){
+        // Whatever made this look like an expression (e.g. a hidden
+        // newline/tab pasted in from a spreadsheet cell) just got
+        // stripped away, leaving a plain number - resolve it right now
+        // rather than stranding it in the "wait for blur" branch, which
+        // would otherwise show the number but never save it.
+        const num = parseFloat(sanitizedPlain);
+        inputEl.value = formatAsianAmount(sanitizedPlain);
+        inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+        onChange(isNaN(num)?0:num);
+        return;
+      }
       if(sanitized !== inputEl.value){
         inputEl.value = sanitized;
         inputEl.setSelectionRange(pos, pos);
