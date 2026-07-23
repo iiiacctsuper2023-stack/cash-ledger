@@ -430,6 +430,20 @@ function monthRevenueTotals(monthRec){
    whatever predates this tool) plus every tracked month of the same
    calendar year strictly before this one, summed live - no separate
    running counter to keep in sync by hand. */
+/* Effective "transfer" value for one revenue category in one month.
+   Admission Fee's transfer is NOT stored/manual - it auto-derives as the
+   negative of whatever was entered for Gratuity + Education Assistance
+   Fund transfer that month, so money moving out of Admission Fee into
+   those two funds is automatically subtracted from Admission Fee's own
+   Yearly Running Total (and, via yearlyRunningTotalBefore, carries into
+   every later month too - no manual entry needed on the Admission Fee side). */
+function effectiveRevenueTransfer(rec, key){
+  if(key==='admissionFee'){
+    const t = rec.revenueTransfer||{};
+    return -((Number(t.gratuity)||0) + (Number(t.eduAssist)||0));
+  }
+  return Number((rec.revenueTransfer||{})[key])||0;
+}
 function yearlyRunningTotalBefore(key){
   const [yearStr, monStr] = key.split('-');
   const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
@@ -441,7 +455,7 @@ function yearlyRunningTotalBefore(key){
       const rec = state.monthlyLedger.months[k];
       const monthTotals = monthRevenueTotals(rec);
       REVENUE_CATS.forEach(c=>{
-        totals[c.key] += monthTotals[c.key] + (Number(rec.revenueTransfer[c.key])||0);
+        totals[c.key] += monthTotals[c.key] + effectiveRevenueTransfer(rec, c.key);
       });
     }
   });
@@ -2811,7 +2825,7 @@ function computeMonthlyLedgerFigures(key){
   const revTotalIncome = REVENUE_CATS.reduce((s,c)=>s+revTotals[c.key],0);
   const yrtBefore = yearlyRunningTotalBefore(key);
   const yrtNew = {};
-  REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + (Number(rec.revenueTransfer[c.key])||0); });
+  REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + effectiveRevenueTransfer(rec, c.key); });
   const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
   const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome;
 
@@ -2850,7 +2864,7 @@ function computeMonthlyLedgerFigures(key){
   // the default for every month; the live month additionally cross-checks
   // it against the actual bank total pulled from the Daily Ledger's last
   // day, and either can be overridden by hand if it doesn't match.
-  const formulaBankTotal = (Number(rec.beginningBankBalance)||0) + totalBalance;
+  const formulaBankTotal = totalBalance; // totalBalance already = (Beginning Balance + Income) - Expenditure
   const bankBalanceShown = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : (isLiveMonth && autoBankTotal!==null ? autoBankTotal : formulaBankTotal);
   const bankFormulaMismatch = bankBalanceShown!==null && Math.abs((Number(bankBalanceShown)||0) - formulaBankTotal) > 1;
 
@@ -3031,6 +3045,8 @@ function refreshMonthlyLedgerComputedOnly(){
   setText('ml-bs-due-payment', money(f.totalDueSum));
   setText('ml-bs-gratuity', money(f.gratuityPayable));
   setText('ml-bs-eduassist', money(f.eduAssistPayable));
+  setText('ml-note-gratuity', money(f.gratuityPayable));
+  setText('ml-note-eduassist', money(f.eduAssistPayable));
   setText('ml-total-assets', money(f.totalAssets));
   setText('ml-equity', money(f.equity));
   setText('ml-bank-breakdown-sum', money(f.bankBreakdownSum));
@@ -3211,7 +3227,7 @@ function renderMonthlyLedgerCard(){
         <button class="secondary small" type="button" data-action="ml-add-expcol-entries">+ Add column (day-by-day entries, for imported months)</button>
       </div>
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Expenditure</span><span id="ml-total-expenditure">${money(expTotal)}</span></div>
-      <div class="computed"><span class="lbl">Total Balance (Income &minus; Expenditure)</span><span id="ml-total-balance">${money(totalBalance)}</span></div>
+      <div class="computed"><span class="lbl">Total Balance (Total Amount &minus; Expenditure)</span><span id="ml-total-balance">${money(totalBalance)}</span></div>
 
       <label style="font-size:12px;margin-top:8px;">Expenditure entries (day-by-day, for columns above marked "auto, from entries below")</label>
       <div id="ml-expenditure-entry-list"></div>
@@ -3302,8 +3318,8 @@ function renderMonthlyLedgerCard(){
 
       <div class="divider"></div>
       <label>Note: Head wise distribution of Balance in Account</label>
-      <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span>${money(gratuityPayable)}</span></div>
-      <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span>${money(eduAssistPayable)}</span></div>
+      <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span id="ml-note-gratuity">${money(gratuityPayable)}</span></div>
+      <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span id="ml-note-eduassist">${money(eduAssistPayable)}</span></div>
       <div class="computed"><span class="lbl">Remaining Balance</span><span id="ml-note-remaining">${money(remainingBalance)}</span></div>
       <div class="computed total"><span class="lbl">Total</span><span id="ml-note-total">${money(noteTotal)}</span></div>
       <p id="ml-warn-note-total" class="subnote" style="color:#B3261E;${noteTotalMismatch?'':'display:none;'}">&#9888; This total doesn't match Balance in Bank Account above.</p>
@@ -3362,9 +3378,18 @@ function renderMonthlyLedgerCard(){
 function drawMlGrid(container, dataObj, kind){
   container.innerHTML = '';
   REVENUE_CATS.forEach(c=>{
+    if(kind==='transfer' && c.key==='admissionFee'){
+      const autoVal = -((Number(dataObj.gratuity)||0) + (Number(dataObj.eduAssist)||0));
+      const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)} <span class="tag">auto: &minus;(Gratuity+EduAssist)</span></label><input type="text" disabled value="${formatAsianAmount(autoVal)}"></div>`);
+      container.appendChild(wrap);
+      return;
+    }
     const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(dataObj[c.key])}"></div>`);
     const inp = wrap.querySelector('input');
-    wireAmountInput(inp, (num)=>{ dataObj[c.key] = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    wireAmountInput(inp, (num)=>{
+      dataObj[c.key] = num; saveState(); refreshMonthlyLedgerComputedOnly();
+      if(kind==='transfer' && (c.key==='gratuity' || c.key==='eduAssist')) renderMonthlyLedgerWindowInPlace();
+    });
     container.appendChild(wrap);
   });
 }
@@ -3453,7 +3478,7 @@ const ML_CUSTOM_ROW_METRICS = [
   {key:'totalDue', label:'Total Due'},
   {key:'totalAmount', label:'Total Amount'},
   {key:'totalExpenditure', label:'Total Expenditure'},
-  {key:'totalBalance', label:'Total Balance (Income − Expenditure)'},
+  {key:'totalBalance', label:'Total Balance (Total Amount − Expenditure)'},
   {key:'cashInHand', label:'Cash in Hand'},
   {key:'bankBalance', label:'Balance in Bank Account'},
   {key:'gratuityPayable', label:'Gratuity Payable'},
@@ -4124,9 +4149,7 @@ async function exportMonthlyLedger(key, previewOnly){
   const transferRow = r;
   rev.getCell(r,3).value = 'Transfer between categories';
   rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
-  REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(rec.revenueTransfer[c.key])||0; });
-  r++;
-  const yrtNewRow = r;
+  REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = effectiveRevenueTransfer(rec, c.key); });
   rev.getCell(r,3).value = 'Yearly Running Total'; rev.getCell(r,3).font = BOLD;
   REVENUE_CATS.forEach((c,i)=>{
     const colLetter = rev.getColumn(5+i).letter;
@@ -4189,7 +4212,7 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(balanceRow,2).value = 'Total Balance:';
   exp.getCell(balanceRow,3).value = {formula:`C${balanceRow+1}-C${expTotalRow}`};
   const incomeRefRow = balanceRow+1;
-  exp.getCell(incomeRefRow,2).value = 'Total Income:';
+  exp.getCell(incomeRefRow,2).value = 'Total Amount (Beginning + Income):';
   exp.getCell(incomeRefRow,3).value = {formula:`'Monthly Revenue'!D${totalAmountRow}`};
 
   // Balance Sheet block
@@ -4230,8 +4253,18 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
   exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${assetStartRow+3})`};
   exp.getCell(totalRow,10).value = 'Total'; exp.getCell(totalRow,10).font = BOLD;
-  exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow+1}:N${eduAssistRow})`};
+  exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow}:N${eduAssistRow})`};
   exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`};
+
+  // Head-wise distribution of Balance in Account note - mirrors the app's
+  // "Note: Head wise distribution" block, wasn't in the export before.
+  let hw = totalRow+2;
+  exp.getCell(hw,5).value = 'Note: Head wise distribution of Balance in Account'; exp.getCell(hw,5).font = BOLD; hw++;
+  exp.getCell(hw,5).value = 'Account Balance for Gratuity'; exp.getCell(hw,9).value = {formula:`N${assetStartRow+2}`}; hw++;
+  exp.getCell(hw,5).value = 'Account Balance for Education Assistant Fund'; exp.getCell(hw,9).value = {formula:`N${eduAssistRow}`}; hw++;
+  exp.getCell(hw,5).value = 'Remaining Balance'; exp.getCell(hw,9).value = {formula:`I${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`}; const hwRemainRow = hw; hw++;
+  exp.getCell(hw,5).value = 'Total'; exp.getCell(hw,5).font = BOLD;
+  exp.getCell(hw,9).value = {formula:`SUM(I${hwRemainRow-2}:I${hwRemainRow})`}; exp.getCell(hw,9).font = BOLD;
 
   // User-added extra rows (green/yellow), each mapped to a figure already
   // computed for this month - written directly below the Balance Sheet
