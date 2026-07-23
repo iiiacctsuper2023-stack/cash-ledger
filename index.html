@@ -412,6 +412,7 @@ function getMonthlyLedgerMonth(key){
       beginningBankBalance:0,
       expenditureColumns:defaultExpenditureColumns(),
       expenditureEntries:[],
+      customRows:[],
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
         bankBalanceOverride:null, bankBreakdown:{},
         otherAsset:{label:'Debt to III Assets Ltd', amount:250000} },
@@ -1192,6 +1193,7 @@ function migrateState(){
     if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
     if(!rec.expenditureEntries) rec.expenditureEntries = [];
+    if(!rec.customRows) rec.customRows = [];
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -2752,10 +2754,9 @@ function buildSparklineSvg(values, labels){
    month's last recorded day's closing cash (not the selected month's own
    days) - runs the same day-to-day chain as the Daily Ledger, across
    every day ever entered, so it works for any selected month. */
-function lastDayCashInHandBeforeMonth(monthKey){
+function lastDayCashInHandInMonth(monthKey){
   const [y, m] = monthKey.split('-');
-  const monthStart = `${y}-${m}-01`;
-  const days = state.days.filter(d=>d.date < monthStart).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const days = state.days.filter(d=>d.date.startsWith(`${y}-${m}`)).slice().sort((a,b)=>a.date.localeCompare(b.date));
   if(days.length===0) return null;
   const computed = computeAll();
   const last = days[days.length-1];
@@ -2812,7 +2813,7 @@ function computeMonthlyLedgerFigures(key){
   const latestDay = state.days.length ? state.days[state.days.length-1] : null;
   const computed = isLiveMonth ? computeAll() : null;
   const latestComputed = latestDay && computed ? computed[latestDay.id] : null;
-  const autoCashInHand = lastDayCashInHandBeforeMonth(key);
+  const autoCashInHand = lastDayCashInHandInMonth(key);
   const autoBankTotal = latestComputed ? state.banks.reduce((s,b)=>s+latestComputed.banks[b.id].closing,0) : null;
   const cashInHandShown = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCashInHand;
 
@@ -2820,12 +2821,13 @@ function computeMonthlyLedgerFigures(key){
   const gratuityPayable = yrtNew.gratuity;
   const eduAssistPayable = yrtNew.eduAssist - expAssistAmt;
 
-  // "Balance in Bank Account" = the actual bank total on the last day of the
-  // selected month (auto-pulled for the live month; typed in for other
-  // months, same pattern as Cash in Hand), cross-checked against the
-  // Beginning Balance + Income - Expenditure formula so a mismatch can be flagged.
-  const bankBalanceShown = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : (isLiveMonth ? autoBankTotal : null);
+  // "Balance in Bank Account" = Beginning Balance + this month's Income -
+  // this month's Expenditure (the formula the person specified), used as
+  // the default for every month; the live month additionally cross-checks
+  // it against the actual bank total pulled from the Daily Ledger's last
+  // day, and either can be overridden by hand if it doesn't match.
   const formulaBankTotal = (Number(rec.beginningBankBalance)||0) + totalBalance;
+  const bankBalanceShown = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : (isLiveMonth && autoBankTotal!==null ? autoBankTotal : formulaBankTotal);
   const bankFormulaMismatch = bankBalanceShown!==null && Math.abs((Number(bankBalanceShown)||0) - formulaBankTotal) > 1;
 
   const bankBreakdownShown = {};
@@ -2853,11 +2855,30 @@ function computeMonthlyLedgerFigures(key){
   const totalLiabilities = equity + (Number(rec.balanceSheet.advancePayment)||0) + gratuityPayable + eduAssistPayable;
   const assetLiabilityMismatch = Math.abs(totalAssets - totalLiabilities) > 1;
 
+  // User-added custom rows (the "green/yellow boxes" the person can add
+  // freely and map to any figure already tracked elsewhere in the month,
+  // instead of typing a number that then goes stale). 'manual' rows just
+  // hold whatever was typed into them.
+  const metricValues = {
+    totalIncome:revTotalIncome, totalDue:totalDueSum, totalAmount, totalExpenditure:expTotal,
+    totalBalance, cashInHand:cashInHandShown, bankBalance:bankBalanceShown, gratuityPayable, eduAssistPayable,
+    totalAssets, equity, grandTotal:(Number(cashInHandShown)||0)+(Number(bankBalanceShown)||0)
+  };
+  const customRowValues = {};
+  (rec.customRows||[]).forEach(row=>{
+    let v = 0;
+    if(row.source==='manual') v = Number(row.amount)||0;
+    else if(row.source==='revenue') v = revTotals[row.key]||0;
+    else if(row.source==='expenditure'){ const i = rec.expenditureColumns.findIndex(c=>c.id===row.key); v = i>=0 ? (expColAmounts[i]||0) : 0; }
+    else if(row.source==='metric') v = metricValues[row.key]||0;
+    customRowValues[row.id] = v;
+  });
+
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
-    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity};
+    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues};
 }
 
 /* Self-service editing modal: lets the user fix small "data link" and
@@ -3176,11 +3197,11 @@ function renderMonthlyLedgerCard(){
       <h3 style="font-size:14px;">Balance Sheet</h3>
       <div class="row">
         <div class="field">
-          <label>Cash in Hand ${autoCashInHand!==null?'<span class="tag">auto: previous month\'s last day</span>':''}</label>
+          <label>Cash in Hand ${autoCashInHand!==null?'<span class="tag">auto: this month\'s last day</span>':''}</label>
           <input type="text" inputmode="decimal" id="ml-cash-override" value="${formatAsianAmount(cashInHandShown||0)}" ${isLiveMonth && rec.balanceSheet.cashInHandOverride===null ? 'placeholder="auto"' : ''}>
         </div>
         <div class="field">
-          <label>Balance in Bank Account ${isLiveMonth?'<span class="tag">auto from Daily Ledger</span>':''}</label>
+          <label>Balance in Bank Account ${isLiveMonth&&autoBankTotal!==null?'<span class="tag">auto from Daily Ledger</span>':'<span class="tag">auto: Beginning + Income − Expenditure</span>'}</label>
           <input type="text" inputmode="decimal" id="ml-bank-balance-override" value="${formatAsianAmount(bankBalanceShown||0)}" ${isLiveMonth && rec.balanceSheet.bankBalanceOverride===null ? 'placeholder="auto"' : ''}>
         </div>
       </div>
@@ -3266,6 +3287,15 @@ function renderMonthlyLedgerCard(){
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Assets</span><span id="ml-total-assets">${money(totalAssets)}</span></div>
       <div class="computed total"><span class="lbl">Equity (balancing figure)</span><span id="ml-equity">${money(equity)}</span></div>
       <p id="ml-warn-asset-liability" class="subnote" style="color:#B3261E;${assetLiabilityMismatch?'':'display:none;'}">&#9888; Asset total and Liability total don't match. Check the figures above.</p>
+
+      <div class="divider"></div>
+      <label>Extra rows <span class="tag">optional</span></label>
+      <p class="subnote" style="margin-top:-4px;">Add any row your Excel sheet has that isn't already covered above (colour it green or yellow to match) - map it to a figure already tracked in this month (so it updates itself), or leave it as a manual number.</p>
+      <div id="ml-custom-rows-list"></div>
+      <div class="row">
+        <button class="secondary small" type="button" data-action="ml-add-custom-row" data-color="green">+ Add green row</button>
+        <button class="secondary small" type="button" data-action="ml-add-custom-row" data-color="yellow">+ Add yellow row</button>
+      </div>
     </div>
   `);
 
@@ -3299,6 +3329,7 @@ function renderMonthlyLedgerCard(){
   drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
   drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
   drawMlExpenditureEntryList(card.querySelector('#ml-expenditure-entry-list'), rec);
+  drawMlCustomRowsList(card.querySelector('#ml-custom-rows-list'), rec, f);
   drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
 
   return card;
@@ -3391,6 +3422,64 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
    relying on the Daily Ledger's Withdraw Notesheet totals. Only
    expenditure columns with source:'entries' get an amount box here;
    'coa' and 'manual' columns are unaffected and keep working as before. */
+/* Labels shown in the "map to" dropdown for a custom row, and the keys
+   computeMonthlyLedgerFigures's metricValues object uses for each. */
+const ML_CUSTOM_ROW_METRICS = [
+  {key:'totalIncome', label:'Total Income'},
+  {key:'totalDue', label:'Total Due'},
+  {key:'totalAmount', label:'Total Amount'},
+  {key:'totalExpenditure', label:'Total Expenditure'},
+  {key:'totalBalance', label:'Total Balance (Income − Expenditure)'},
+  {key:'cashInHand', label:'Cash in Hand'},
+  {key:'bankBalance', label:'Balance in Bank Account'},
+  {key:'gratuityPayable', label:'Gratuity Payable'},
+  {key:'eduAssistPayable', label:'Education Assistance Payable'},
+  {key:'totalAssets', label:'Total Assets'},
+  {key:'equity', label:'Equity'},
+  {key:'grandTotal', label:'Grand Total (Cash + Bank)'},
+];
+function drawMlCustomRowsList(container, rec, f){
+  container.innerHTML = '';
+  (rec.customRows||[]).forEach(row=>{
+    const bg = row.color==='green' ? '#E6F4EA' : '#FFF9DB';
+    const border = row.color==='green' ? '#8BC48A' : '#E8D66B';
+    const val = f.customRowValues[row.id]||0;
+    const wrap = el(`
+      <div class="line-item" style="background:${bg};border:1px solid ${border};border-radius:6px;padding:6px 8px;margin-bottom:6px;">
+        <div class="field desc" style="margin-bottom:0;"><label>Label</label><input type="text" class="ml-cr-label" value="${escapeHtml(row.label||'')}"></div>
+        <div class="field" style="margin-bottom:0;min-width:170px;">
+          <label>Maps to</label>
+          <select class="ml-cr-source">
+            <option value="manual" ${row.source==='manual'?'selected':''}>Manual number</option>
+            <option value="revenue" ${row.source==='revenue'?'selected':''}>Revenue category…</option>
+            <option value="expenditure" ${row.source==='expenditure'?'selected':''}>Expenditure column…</option>
+            <option value="metric" ${row.source==='metric'?'selected':''}>Existing total…</option>
+          </select>
+        </div>
+        <div class="ml-cr-key-wrap" style="min-width:170px;">
+          ${row.source==='revenue' ? `<div class="field" style="margin-bottom:0;"><label>Category</label><select class="ml-cr-key">${REVENUE_CATS.map(c=>`<option value="${c.key}" ${row.key===c.key?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select></div>`
+          : row.source==='expenditure' ? `<div class="field" style="margin-bottom:0;"><label>Column</label><select class="ml-cr-key">${rec.expenditureColumns.map(c=>`<option value="${c.id}" ${row.key===c.id?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select></div>`
+          : row.source==='metric' ? `<div class="field" style="margin-bottom:0;"><label>Total</label><select class="ml-cr-key">${ML_CUSTOM_ROW_METRICS.map(m=>`<option value="${m.key}" ${row.key===m.key?'selected':''}>${escapeHtml(m.label)}</option>`).join('')}</select></div>`
+          : ''}
+        </div>
+        <div class="field amt" style="margin-bottom:0;">
+          <label>Amount</label>
+          ${row.source==='manual' ? `<input type="text" inputmode="decimal" class="ml-cr-amt" value="${formatAsianAmount(row.amount||0)}">` : `<input type="text" disabled value="${formatAsianAmount(val)}">`}
+        </div>
+        <button class="danger small" type="button" data-action="ml-remove-custom-row" data-item="${row.id}" title="Remove">&times;</button>
+      </div>
+    `);
+    wireLockableTextInput(wrap.querySelector('.ml-cr-label'));
+    wrap.querySelector('.ml-cr-label').oninput = (e)=>{ row.label = e.target.value; saveState(); };
+    wrap.querySelector('.ml-cr-source').onchange = (e)=>{ row.source = e.target.value; row.key = null; saveState(); renderMonthlyLedgerWindowInPlace(); };
+    const keySel = wrap.querySelector('.ml-cr-key');
+    if(keySel){ keySel.onchange = (e)=>{ row.key = e.target.value; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); }; if(!row.key){ row.key = keySel.value; saveState(); } }
+    const amtInp = wrap.querySelector('.ml-cr-amt');
+    if(amtInp) wireAmountInput(amtInp, (num)=>{ row.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    container.appendChild(wrap);
+  });
+}
+
 function drawMlExpenditureEntryList(container, rec){
   container.innerHTML = '';
   const entryCols = rec.expenditureColumns.filter(c=>c.source==='entries');
@@ -3720,7 +3809,8 @@ function parseFullRevenueSheet(ws){
       continue;
     }
     if(desc==='description') continue;
-    if(label.startsWith('total due') || desc.startsWith('total due')){
+    if(label.startsWith('total income') || desc.startsWith('total income')) continue;
+    if(label.includes('total due') || desc.startsWith('total due')){
       Object.keys(catCol).forEach(k=>{ result.totalDue[k] = Number(mlCellVal(ws,r,catCol[k]))||0; });
       continue;
     }
@@ -3728,8 +3818,11 @@ function parseFullRevenueSheet(ws){
       Object.keys(catCol).forEach(k=>{ result.transfer[k] = Number(mlCellVal(ws,r,catCol[k]))||0; });
       continue;
     }
-    if(label.startsWith('total') || desc.startsWith('total') || /yearly running total/.test(label) || /yearly running total/.test(desc)){
+    if(/yearly running total/.test(label) || /yearly running total/.test(desc)){
       stopped = true; continue;
+    }
+    if(label.startsWith('total') || desc.startsWith('total') || /^deposit to /.test(label) || /^deposit to /.test(desc)){
+      continue; // an unrecognized summary/trailer row (varies by month) - skip it, keep looking for Total Due etc below
     }
     const date = mlParseDateCell(mlCellVal(ws,r,dateCol));
     const hasAmt = Object.keys(catCol).some(k=>(Number(mlCellVal(ws,r,catCol[k]))||0)!==0);
@@ -3928,6 +4021,7 @@ async function importMonthlyLedgerFile(file){
    results), so it recalculates correctly if opened and tweaked. --- */
 async function exportMonthlyLedger(key, previewOnly){
   const rec = getMonthlyLedgerMonth(key);
+  const mlFig = computeMonthlyLedgerFigures(key);
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
 
@@ -4106,6 +4200,22 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(totalRow,10).value = 'Total'; exp.getCell(totalRow,10).font = BOLD;
   exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow+1}:N${eduAssistRow})`};
   exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`};
+
+  // User-added extra rows (green/yellow), each mapped to a figure already
+  // computed for this month - written directly below the Balance Sheet
+  // block, filled with the same colour chosen for it in the app.
+  if(rec.customRows && rec.customRows.length){
+    let cr = totalRow+2;
+    exp.getCell(cr,6).value = 'Extra rows'; exp.getCell(cr,6).font = BOLD; cr++;
+    rec.customRows.forEach(row=>{
+      const val = mlFig.customRowValues[row.id]||0;
+      const fillColor = row.color==='green' ? 'FFC6E9C6' : 'FFFCF3A1';
+      exp.getCell(cr,6).value = row.label||'';
+      exp.getCell(cr,9).value = val;
+      [6,7,8,9].forEach(col=>{ exp.getCell(cr,col).fill = {type:'pattern', pattern:'solid', fgColor:{argb:fillColor}}; });
+      cr++;
+    });
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
@@ -5198,6 +5308,22 @@ function wireDelegation(){
     if(action==='ml-toggle-total-view'){
       mlTotalViewOpen = !mlTotalViewOpen;
       renderMonthlyLedgerWindowInPlace();
+      return;
+    }
+    if(action==='ml-add-custom-row'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      if(!rec.customRows) rec.customRows = [];
+      rec.customRows.push({id:uid(), label:'', color:t.dataset.color, source:'manual', key:null, amount:0});
+      saveState(); renderMonthlyLedgerWindowInPlace();
+      return;
+    }
+    if(action==='ml-remove-custom-row'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const idx = rec.customRows.findIndex(x=>x.id===t.dataset.item);
+      const removed = rec.customRows[idx];
+      rec.customRows = rec.customRows.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Custom row removed.', ()=>{ rec.customRows.splice(idx,0,removed); });
+      saveState(); render();
       return;
     }
     if(action==='ml-import'){
