@@ -363,6 +363,14 @@ const RECURRING_EXAM_COLUMN = {label:'MT (Monthly Test)', aliases:['mt','monthly
    point any column at a different CoA category (e.g. add a Honourarium
    or Loan column only for a month that actually had one, or add a
    one-off manual column like "Eng Arif Construction"). */
+/* Sums one expenditure column's amounts across every day-by-day
+   Expenditure entry for the month - used for columns imported from an
+   older, pre-app Excel workbook (source:'entries'), which have no
+   Daily Ledger / Withdraw Notesheet data behind them to auto-total from
+   the way source:'coa' columns do. */
+function expenditureEntryColTotal(rec, colId){
+  return (rec.expenditureEntries||[]).reduce((s,e)=>s+(Number((e.amounts||{})[colId])||0), 0);
+}
 function defaultExpenditureColumns(){
   return [
     {id:uid(), label:'Pay & Allce',            source:'coa', coaKey:'PayAllce'},
@@ -403,6 +411,7 @@ function getMonthlyLedgerMonth(key){
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       beginningBankBalance:0,
       expenditureColumns:defaultExpenditureColumns(),
+      expenditureEntries:[],
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
         bankBalanceOverride:null, bankBreakdown:{},
         otherAsset:{label:'Debt to III Assets Ltd', amount:250000} },
@@ -513,6 +522,7 @@ let monthlyLedgerOpen = false;
 let mlSettingsOpen = false;
 let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
+let mlTotalViewOpen = false; // shows a combined all-months summary above the per-month Balance Sheet when true
 let locked = false;            // true = show the lock screen instead of the app
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
@@ -1181,6 +1191,7 @@ function migrateState(){
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
     if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
+    if(!rec.expenditureEntries) rec.expenditureEntries = [];
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -2776,6 +2787,7 @@ function computeMonthlyLedgerFigures(key){
   const expColAmounts = rec.expenditureColumns.map(col=>{
     let amt = 0;
     if(col.source==='coa'){ amt = liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0; }
+    else if(col.source==='entries'){ amt = expenditureEntryColTotal(rec, col.id); }
     else { amt = Number(col.amount)||0; }
     expTotal += amt;
     return amt;
@@ -3025,6 +3037,36 @@ function renderMonthlyLedgerWindow(){
   return win;
 }
 
+/* Combined view across every month ever tracked in the Monthly Ledger -
+   shown only when the person explicitly asks for it (default view stays
+   the single selected month, per computeMonthlyLedgerFigures above).
+   Revenue and Expenditure are additive across months, so those are
+   summed; Bank Balance and Cash in Hand are point-in-time figures (not
+   additive), so this shows the latest tracked month's figures for those
+   instead of a meaningless sum. */
+function renderMlTotalBox(){
+  const keys = Object.keys(state.monthlyLedger.months||{}).sort();
+  if(keys.length===0) return '<div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;"><p class="empty">No months tracked yet.</p></div>';
+  let totalRevenue = 0, totalExpenditure = 0;
+  keys.forEach(k=>{
+    const f = computeMonthlyLedgerFigures(k);
+    totalRevenue += f.revTotalIncome;
+    totalExpenditure += f.expTotal;
+  });
+  const latestKey = keys[keys.length-1];
+  const latestF = computeMonthlyLedgerFigures(latestKey);
+  return `
+    <div class="card" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-top:8px;">
+      <p class="subnote" style="margin-top:0;">Revenue and Expenditure summed across all ${keys.length} tracked month(s) (${monthKeyLabel(keys[0])} &ndash; ${monthKeyLabel(latestKey)}). Cash/Bank figures are a point-in-time balance, not a sum, so these show ${monthKeyLabel(latestKey)}'s (the latest tracked month's) figures.</p>
+      <div class="computed"><span class="lbl">Total Revenue (all months)</span><span>${money(totalRevenue)}</span></div>
+      <div class="computed"><span class="lbl">Total Expenditure (all months)</span><span>${money(totalExpenditure)}</span></div>
+      <div class="computed total"><span class="lbl">Net (Revenue &minus; Expenditure, all months)</span><span>${money(totalRevenue-totalExpenditure)}</span></div>
+      <div class="computed"><span class="lbl">Cash in Hand (as of ${monthKeyLabel(latestKey)})</span><span>${money(latestF.cashInHandShown||0)}</span></div>
+      <div class="computed"><span class="lbl">Bank Balance (as of ${monthKeyLabel(latestKey)})</span><span>${money(latestF.bankBalanceShown||0)}</span></div>
+    </div>
+  `;
+}
+
 function renderMonthlyLedgerCard(){
   const key = monthlyLedgerViewKey || monthKeyFor(state.month, state.year) || monthKeyFor(MONTHS[new Date().getMonth()], String(new Date().getFullYear()));
   monthlyLedgerViewKey = key;
@@ -3055,9 +3097,13 @@ function renderMonthlyLedgerCard(){
         <button class="danger small" type="button" data-action="ml-delete-month">&#128465; Delete this month</button>
         <button class="secondary small" type="button" data-action="ml-import">&#11014; Import previous ledger (.xlsx)</button>
         <input type="file" id="ml-import-input" accept=".xlsx" style="display:none;">
+        <button class="secondary small" type="button" data-action="ml-import-full">&#11014; Import full month, day-by-day (.xlsx)</button>
+        <input type="file" id="ml-import-full-input" accept=".xlsx" style="display:none;">
         <button type="button" data-action="ml-export">&#11015; Export this month (.xlsx)</button>
         <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
+        <button type="button" class="${mlTotalViewOpen?'danger':'secondary'} small" data-action="ml-toggle-total-view" style="margin-left:auto;">${mlTotalViewOpen?'&#9660; Showing Total (all months)':'&#9654; Show Total (all months)'}</button>
       </div>
+      ${mlTotalViewOpen ? renderMlTotalBox() : ''}
       ${!isLiveMonth ? `<p class="subnote" style="color:var(--danger);">This isn't the month currently open in the Daily Ledger (${state.month} ${state.year}) - Cash in Hand can't be pulled live for it here, so it shows as 0/blank until you switch the Daily Ledger to that month, or enter it manually below. ("Auto" expenditure columns are unaffected - they're pulled from saved Withdraw Notesheet history, not the live Daily Ledger.)</p>` : ''}
 
       <div class="divider"></div>
@@ -3106,9 +3152,14 @@ function renderMonthlyLedgerCard(){
       <div class="row" style="flex-wrap:wrap;">
         <button class="secondary small" type="button" data-action="ml-add-expcol">+ Add column (auto from a CoA category)</button>
         <button class="secondary small" type="button" data-action="ml-add-expcol-manual">+ Add column (manual / one-off)</button>
+        <button class="secondary small" type="button" data-action="ml-add-expcol-entries">+ Add column (day-by-day entries, for imported months)</button>
       </div>
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Expenditure</span><span id="ml-total-expenditure">${money(expTotal)}</span></div>
       <div class="computed"><span class="lbl">Total Balance (Income &minus; Expenditure)</span><span id="ml-total-balance">${money(totalBalance)}</span></div>
+
+      <label style="font-size:12px;margin-top:8px;">Expenditure entries (day-by-day, for columns above marked "auto, from entries below")</label>
+      <div id="ml-expenditure-entry-list"></div>
+      <button class="secondary small" type="button" data-action="ml-add-expentry">+ Add expenditure entry</button>
 
       <div class="divider"></div>
       <h3 style="font-size:14px;">Balance Sheet</h3>
@@ -3213,6 +3264,11 @@ function renderMonthlyLedgerCard(){
     if(file) importMonthlyLedgerFile(file);
     e.target.value = '';
   };
+  card.querySelector('#ml-import-full-input').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(file) importFullMonthFile(file);
+    e.target.value = '';
+  };
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const bankInp = card.querySelector('#ml-bank-balance-override');
@@ -3231,6 +3287,7 @@ function renderMonthlyLedgerCard(){
   drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
   drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
   drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
+  drawMlExpenditureEntryList(card.querySelector('#ml-expenditure-entry-list'), rec);
   drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
 
   return card;
@@ -3279,15 +3336,18 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
   container.innerHTML = '';
   rec.expenditureColumns.forEach(col=>{
     const isCoa = col.source==='coa';
+    const isEntries = col.source==='entries';
     const autoAmt = isCoa ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : null;
     const overridden = isCoa && col.override!==undefined && col.override!==null;
-    const amt = isCoa ? (overridden ? col.override : autoAmt) : (Number(col.amount)||0);
+    const amt = isCoa ? (overridden ? col.override : autoAmt) : isEntries ? expenditureEntryColTotal(rec, col.id) : (Number(col.amount)||0);
     const row = el(`
       <div class="line-item">
         <div class="field desc" style="margin-bottom:0;"><label>Column</label><input type="text" class="ml-exp-label" value="${escapeHtml(col.label)}"></div>
         ${isCoa
           ? `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">${overridden?'manually overridden':'auto from Withdraw Notesheet: '+escapeHtml(COA.find(c=>c.key===col.coaKey)?.label||col.coaKey)}</span></label><input type="text" inputmode="decimal" class="ml-exp-amt-coa" value="${formatAsianAmount(amt)}"></div>
              <button type="button" class="secondary small ml-exp-reset" title="Clear override, go back to auto" ${overridden?'':'style="visibility:hidden;"'}>&#8635;</button>`
+          : isEntries
+          ? `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">auto, from entries below</span></label><input type="text" disabled value="${formatAsianAmount(amt)}"></div>`
           : `<div class="field amt" style="margin-bottom:0;"><label>Amount <span class="tag">manual</span></label><input type="text" inputmode="decimal" class="ml-exp-amt" value="${formatAsianAmount(amt)}"></div>`
         }
         <button class="danger small" type="button" data-action="ml-remove-expcol" data-item="${col.id}" title="Remove">&times;</button>
@@ -3307,6 +3367,41 @@ function drawMlExpenditureList(container, rec, liveCoaTotals){
     }
     const resetBtn = row.querySelector('.ml-exp-reset');
     if(resetBtn) resetBtn.onclick = ()=>{ col.override = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
+    container.appendChild(row);
+  });
+}
+
+/* Day-by-day Expenditure entries - mirrors drawMlRevenueList, for months
+   imported from an older Excel workbook that recorded actual dated
+   expenditure rows (date, description, per-category amount) rather than
+   relying on the Daily Ledger's Withdraw Notesheet totals. Only
+   expenditure columns with source:'entries' get an amount box here;
+   'coa' and 'manual' columns are unaffected and keep working as before. */
+function drawMlExpenditureEntryList(container, rec){
+  container.innerHTML = '';
+  const entryCols = rec.expenditureColumns.filter(c=>c.source==='entries');
+  if(entryCols.length===0){ container.appendChild(el(`<p class="empty">No day-by-day expenditure entries this month (this month's columns are either auto from Withdraw Notesheets, or a single manual total).</p>`)); return; }
+  if(rec.expenditureEntries.length===0){ container.appendChild(el(`<p class="empty">No expenditure entries yet this month.</p>`)); }
+  rec.expenditureEntries.forEach(entry=>{
+    if(!entry.amounts) entry.amounts = {};
+    const row = el(`
+      <div class="card" id="ml-exp-entry-${entry.id}" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
+        <div class="row">
+          <div class="field" style="max-width:150px;"><label>Date</label><input type="date" class="ml-expentry-date" value="${entry.date||''}"></div>
+          <div class="field"><label>Description</label><input type="text" class="ml-expentry-desc" value="${escapeHtml(entry.desc||'')}"></div>
+          <button class="danger small" type="button" data-action="ml-remove-expentry" data-item="${entry.id}" title="Remove">&times;</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
+          ${entryCols.map(c=>`<div class="field" style="margin-bottom:0;"><label style="font-size:11px;">${escapeHtml(c.label)}</label><input type="text" inputmode="decimal" class="ml-expentry-amt" data-col="${c.id}" value="${formatAsianAmount(entry.amounts[c.id]||0)}"></div>`).join('')}
+        </div>
+      </div>
+    `);
+    row.querySelector('.ml-expentry-date').oninput = (e)=>{ entry.date = e.target.value; saveState(); };
+    wireLockableTextInput(row.querySelector('.ml-expentry-desc'));
+    row.querySelector('.ml-expentry-desc').oninput = (e)=>{ entry.desc = e.target.value; saveState(); };
+    row.querySelectorAll('.ml-expentry-amt').forEach(inp=>{
+      wireAmountInput(inp, (num)=>{ entry.amounts[inp.dataset.col] = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+    });
     container.appendChild(row);
   });
 }
@@ -3531,6 +3626,215 @@ function showMlSeedModal(){
   wireBackdropClose(overlay);
 }
 
+/* --- Monthly Ledger: full day-by-day import of a previous month's real
+   workbook (Monthly Revenue + Monthly Expenditure sheets) - reads every
+   dated row on both sheets into rec.revenueEntries / rec.expenditureEntries
+   exactly as recorded, plus the trailer figures each sheet happens to
+   have that month (Beginning Balance Bank, Total Due, Transfer between
+   categories, Cash in Hand, Advance Payment, Balance in Bank Account).
+   Only writes into the ONE month record being imported - every other
+   month, and everything outside the Monthly Ledger, is left untouched. */
+function mlNorm(s){ return String(s||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+function mlParseDateCell(v){
+  if(v==null || v==='') return null;
+  if(v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
+  if(typeof v==='number') return excelSerialToDateStr(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if(m){
+    let day=m[1], mon=m[2], yr=m[3];
+    if(yr.length===2) yr = (Number(yr)<70?'20':'19')+yr;
+    if(Number(mon)>12){ const t=day; day=mon; mon=t; }
+    return `${yr}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  return null;
+}
+function mlCellVal(ws, r, c){
+  if(!c) return null;
+  const cell = ws.getCell(r,c);
+  let v = cell.value;
+  if(v && typeof v==='object'){ if('result' in v) return v.result; if(v instanceof Date) return v; return null; }
+  return v;
+}
+function mlRowLabel(ws, r, cols){ return cols.map(c=>mlNorm(mlCellVal(ws,r,c))).filter(Boolean).join(' ').trim(); }
+
+function parseFullRevenueSheet(ws){
+  let headerRow=null;
+  for(let r=1;r<=ws.rowCount;r++){
+    const rowText=[]; for(let c=1;c<=ws.columnCount;c++) rowText.push(mlNorm(mlCellVal(ws,r,c)));
+    if(rowText.join('|').includes('date') && rowText.join('|').includes('description')){ headerRow=r; break; }
+  }
+  if(!headerRow) throw new Error('No Date/Description header row found in the Revenue sheet.');
+  let dateCol=null, descCol=null, totalCol=null;
+  for(let c=1;c<=ws.columnCount;c++){
+    const v = mlNorm(mlCellVal(ws,headerRow,c));
+    if(v==='date') dateCol=c; else if(v==='description') descCol=c; else if(v==='total') totalCol=c;
+  }
+  const catCol = {};
+  for(let c=(totalCol||descCol)+1;c<=ws.columnCount;c++){
+    const label = mlNorm(mlCellVal(ws,headerRow,c));
+    if(!label || label==='sign' || /ibbplc|tbl/.test(label)) continue;
+    const cat = REVENUE_CATS.find(rc=>{
+      const names=[rc.label,...(rc.aliases||[])].map(mlNorm);
+      return names.some(n=>n===label || label.includes(n) || n.includes(label));
+    });
+    if(cat) catCol[cat.key]=c;
+  }
+  const catRowSum = (r)=>Object.values(catCol).reduce((s,c)=>s+(Number(mlCellVal(ws,r,c))||0),0);
+  const firstNumericAfter = (r,fromCol)=>{
+    for(let c=fromCol+1;c<=ws.columnCount;c++){ const v=mlCellVal(ws,r,c); if(typeof v==='number') return v; }
+    return 0;
+  };
+  const result = {beginningBankBalance:0, seedRevenue:{}, entries:[], totalDue:{}, transfer:{}};
+  let stopped=false;
+  for(let r=headerRow+1;r<=ws.rowCount && !stopped;r++){
+    const label = mlRowLabel(ws,r,[1,2,3]);
+    const descRaw = mlCellVal(ws,r,descCol);
+    const desc = mlNorm(descRaw);
+    if(/beginning balance bank/.test(label) || /beginning balance bank/.test(desc)){
+      result.beginningBankBalance = totalCol ? (Number(mlCellVal(ws,r,totalCol))||0) : (catRowSum(r) || firstNumericAfter(r, descCol));
+      continue;
+    }
+    if((/yearly running total/.test(label)||/yearly running total/.test(desc)) && (/previous month/.test(label)||/previous month/.test(desc))){
+      Object.keys(catCol).forEach(k=>{ const v=Number(mlCellVal(ws,r,catCol[k]))||0; if(v) result.seedRevenue[k]=v; });
+      continue;
+    }
+    if(desc==='description') continue;
+    if(label.startsWith('total due') || desc.startsWith('total due')){
+      Object.keys(catCol).forEach(k=>{ result.totalDue[k] = Number(mlCellVal(ws,r,catCol[k]))||0; });
+      continue;
+    }
+    if(/transfer.*(admis|categor)/.test(label) || /transfer.*(admis|categor)/.test(desc)){
+      Object.keys(catCol).forEach(k=>{ result.transfer[k] = Number(mlCellVal(ws,r,catCol[k]))||0; });
+      continue;
+    }
+    if(label.startsWith('total') || desc.startsWith('total') || /yearly running total/.test(label) || /yearly running total/.test(desc)){
+      stopped = true; continue;
+    }
+    const date = mlParseDateCell(mlCellVal(ws,r,dateCol));
+    const hasAmt = Object.keys(catCol).some(k=>(Number(mlCellVal(ws,r,catCol[k]))||0)!==0);
+    if(!date && !hasAmt) continue;
+    const entry = {id:uid(), date, desc: descRaw||''};
+    Object.keys(catCol).forEach(k=>{ entry[k] = Number(mlCellVal(ws,r,catCol[k]))||0; });
+    result.entries.push(entry);
+  }
+  return result;
+}
+
+function parseFullExpenditureSheet(ws){
+  let headerRow=null;
+  for(let r=1;r<=ws.rowCount;r++){
+    const rowText=[]; for(let c=1;c<=ws.columnCount;c++) rowText.push(mlNorm(mlCellVal(ws,r,c)));
+    if(rowText.join('|').includes('date') && rowText.join('|').includes('description')){ headerRow=r; break; }
+  }
+  if(!headerRow) throw new Error('No Date/Description header row found in the Expenditure sheet.');
+  let dateCol=null, descCol=null, totalCol=null;
+  for(let c=1;c<=ws.columnCount;c++){
+    const v = mlNorm(mlCellVal(ws,headerRow,c));
+    if(v==='date') dateCol=c; else if(v.startsWith('description')) descCol=c; else if(v.startsWith('total')) totalCol=c;
+  }
+  const cats = [];
+  for(let c=(totalCol||descCol)+1;c<=ws.columnCount;c++){
+    let label = mlCellVal(ws,headerRow,c);
+    if(!mlNorm(label)) label = mlCellVal(ws,headerRow-1,c) || mlCellVal(ws,headerRow+1,c);
+    if(!mlNorm(label)) continue;
+    if(/^(ibbplc|tbl)\s*total/i.test(String(label).trim())) continue;
+    cats.push({label:String(label).trim(), col:c});
+  }
+  const result = {entries:[], cats, balanceSheet:{}};
+  let stopped=false;
+  for(let r=headerRow+1;r<=ws.rowCount && !stopped;r++){
+    const label = mlRowLabel(ws,r,[1,2,3]);
+    const descRaw = mlCellVal(ws,r,descCol);
+    const desc = mlNorm(descRaw);
+    if(label.startsWith('total') || desc.startsWith('total') || label==='expenditure:' || desc==='expenditure:'){ stopped=true; continue; }
+    if(desc==='description') continue;
+    const date = mlParseDateCell(mlCellVal(ws,r,dateCol));
+    const hasAmt = cats.some(c=>(Number(mlCellVal(ws,r,c.col))||0)!==0);
+    if(!date && !hasAmt) continue;
+    const entry = {id:uid(), date, desc:descRaw||'', amounts:{}};
+    cats.forEach(c=>{ entry.amounts[c.label] = Number(mlCellVal(ws,r,c.col))||0; });
+    result.entries.push(entry);
+  }
+  for(let r=1;r<=ws.rowCount;r++){
+    for(let c=1;c<=ws.columnCount;c++){
+      const label = mlNorm(mlCellVal(ws,r,c));
+      if(label==='cash in hand'){ for(let cc=c+1;cc<=ws.columnCount;cc++){ const v=mlCellVal(ws,r,cc); if(typeof v==='number'){ result.balanceSheet.cashInHand=v; break; } } }
+      if(label==='advance payment'){ for(let cc=c+1;cc<=ws.columnCount;cc++){ const v=mlCellVal(ws,r,cc); if(typeof v==='number'){ result.balanceSheet.advancePayment=v; break; } } }
+      if(label==='balance in bank account'){ for(let cc=c+1;cc<=ws.columnCount;cc++){ const v=mlCellVal(ws,r,cc); if(typeof v==='number'){ result.balanceSheet.bankBalance=v; break; } } }
+    }
+  }
+  return result;
+}
+
+async function importFullMonthFile(file){
+  try{
+    await loadExcelJS();
+    const buf = await file.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const revWs = wb.worksheets.find(w=>/revenue/i.test(w.name));
+    const expWs = wb.worksheets.find(w=>/expenditure/i.test(w.name));
+    if(!revWs || !expWs){ showAlert('Could not find both a "Monthly Revenue" and a "Monthly Expenditure" sheet in that file.'); return; }
+
+    let year = state.year||'', throughMonth = state.month||MONTHS[0];
+    for(let r=1;r<=Math.min(6,revWs.rowCount);r++){
+      const v = String(mlCellVal(revWs,r,1)||'');
+      const m = v.match(/month of\s+([a-zA-Z]+)\s+(\d{4})/i);
+      if(m){ throughMonth = MONTHS.find(mm=>mm.toLowerCase()===m[1].toLowerCase())||throughMonth; year = m[2]; break; }
+    }
+    const key = monthKeyFor(throughMonth, year);
+    if(!key){ showAlert('Could not work out which month this file is for - check the title cell says something like "Month of March 2026".'); return; }
+
+    const rev = parseFullRevenueSheet(revWs);
+    const exp = parseFullExpenditureSheet(expWs);
+    const revSum = rev.entries.reduce((s,e)=>s+REVENUE_CATS.reduce((s2,c)=>s2+(e[c.key]||0),0),0);
+    const expSum = exp.entries.reduce((s,e)=>s+Object.values(e.amounts).reduce((a,b)=>a+b,0),0);
+    const existingRec = state.monthlyLedger.months[key];
+    const overwriteWarning = existingRec && (existingRec.revenueEntries.length || existingRec.expenditureEntries.length)
+      ? ` This month already has ${existingRec.revenueEntries.length} revenue and ${existingRec.expenditureEntries.length} expenditure entries saved - importing will REPLACE them.`
+      : '';
+
+    showConfirm(
+      `Read ${monthKeyLabel(key)}: ${rev.entries.length} revenue entries (total ${money(revSum)}), ${exp.entries.length} expenditure entries across ${exp.cats.length} categories (total ${money(expSum)}).${overwriteWarning} Import into the Monthly Ledger?`,
+      ()=>{
+        const rec = getMonthlyLedgerMonth(key);
+        rec.revenueEntries = rev.entries;
+        REVENUE_CATS.forEach(c=>{ rec.revenueTotalDue[c.key] = rev.totalDue[c.key]||0; rec.revenueTransfer[c.key] = rev.transfer[c.key]||0; });
+        rec.beginningBankBalance = rev.beginningBankBalance;
+        // Only the chronologically-earliest tracked month should carry a
+        // "Yearly Running Total from Previous Month" forward as the
+        // Starting Point seed - for every later month that figure is
+        // just each month's own running total, which the app already
+        // computes itself once all the months in between are entered.
+        if(key===earliestTrackedMonthKey() && Object.keys(rev.seedRevenue).length){
+          const prevSeed = state.monthlyLedger.seed || {year, throughMonth, revenue:{}, expenditure:{}, bankBreakdown:{}, active:true};
+          state.monthlyLedger.seed = {...prevSeed, revenue:{...prevSeed.revenue, ...rev.seedRevenue}};
+        }
+        // Expenditure columns: replace with exactly this month's real
+        // categories, each backed by the day-by-day entries just parsed
+        // (source:'entries') - matches "যে মাসে যে খাত আছে সেভাবে".
+        rec.expenditureColumns = exp.cats.map(c=>({id:uid(), label:c.label, source:'entries'}));
+        rec.expenditureEntries = exp.entries.map(e=>{
+          const amounts = {};
+          exp.cats.forEach((c,i)=>{ amounts[rec.expenditureColumns[i].id] = e.amounts[c.label]||0; });
+          return {id:e.id, date:e.date, desc:e.desc, amounts};
+        });
+        if(exp.balanceSheet.cashInHand!==undefined) rec.balanceSheet.cashInHandOverride = exp.balanceSheet.cashInHand;
+        if(exp.balanceSheet.advancePayment!==undefined) rec.balanceSheet.advancePayment = exp.balanceSheet.advancePayment;
+        if(exp.balanceSheet.bankBalance!==undefined) rec.balanceSheet.bankBalanceOverride = exp.balanceSheet.bankBalance;
+        saveState(); render();
+        showAlert(`${monthKeyLabel(key)} imported. Open Monthly Ledger and select this month to review it against the original file.`);
+      },
+      'Import this month'
+    );
+  }catch(err){
+    showAlert('Could not read that file: ' + err.message);
+  }
+}
+
 /* --- Monthly Ledger: import a previous month's workbook to read off its
    Yearly Running Total row, so the seed above doesn't need retyping by
    hand. Only reads - never writes back to the uploaded file. --- */
@@ -3710,19 +4014,31 @@ async function exportMonthlyLedger(key, previewOnly){
   });
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
-  const expDataRow = expHeaderRow+2;
+  let er = expHeaderRow+2;
+  const expDataStartRow = er;
+  rec.expenditureEntries.forEach(entry=>{
+    exp.getCell(er,1).value = entry.date ? new Date(entry.date) : '';
+    if(entry.date) exp.getCell(er,1).numFmt = 'd/m/yyyy';
+    exp.getCell(er,2).value = entry.desc||'';
+    rec.expenditureColumns.forEach((col,i)=>{
+      if(col.source==='entries') exp.getCell(er, 4+i).value = Number((entry.amounts||{})[col.id])||0;
+    });
+    exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+    er++;
+  });
+  const expDataRow = er; // aggregate row for coa/manual columns (entries columns already itemized above)
   exp.getCell(expDataRow,1).value = 'Recorded in Withdraw Notesheets';
   exp.getCell(expDataRow,2).value = 'Category totals for the month';
-  exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
   rec.expenditureColumns.forEach((col,i)=>{
-    const amt = col.source==='coa' ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : (Number(col.amount)||0);
+    const amt = col.source==='coa' ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : col.source==='entries' ? 0 : (Number(col.amount)||0);
     exp.getCell(expDataRow, 4+i).value = amt;
   });
+  exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
   const expTotalRow = expDataRow+1;
   exp.getCell(expTotalRow,2).value = 'Total Expenditure:'; exp.getCell(expTotalRow,2).font = BOLD;
   for(let i=0;i<=rec.expenditureColumns.length;i++){
     const colLetter = exp.getColumn(3+i).letter;
-    exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataRow}:${colLetter}${expDataRow})`};
+    exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataStartRow}:${colLetter}${expDataRow})`};
     exp.getCell(expTotalRow, 3+i).font = BOLD;
   }
   const balanceRow = expTotalRow+1;
@@ -4803,6 +5119,29 @@ function wireDelegation(){
       showMlAddColumnModal(false);
       return;
     }
+    if(action==='ml-add-expcol-entries'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const label = prompt('Column name (e.g. "Books and Sty", "Tailor"):');
+      if(!label || !label.trim()) return;
+      rec.expenditureColumns.push({id:uid(), label:label.trim(), source:'entries'});
+      saveState(); render();
+      return;
+    }
+    if(action==='ml-add-expentry'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      rec.expenditureEntries.push({id:uid(), date:'', desc:'', amounts:{}});
+      saveState(); renderMonthlyLedgerWindowInPlace();
+      return;
+    }
+    if(action==='ml-remove-expentry'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const idx = rec.expenditureEntries.findIndex(x=>x.id===t.dataset.item);
+      const removed = rec.expenditureEntries[idx];
+      rec.expenditureEntries = rec.expenditureEntries.filter(x=>x.id!==t.dataset.item);
+      pushUndo('Expenditure entry removed.', ()=>{ rec.expenditureEntries.splice(idx,0,removed); });
+      saveState(); render();
+      return;
+    }
     if(action==='ml-remove-expcol'){
       const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
       const idx = rec.expenditureColumns.findIndex(x=>x.id===t.dataset.item);
@@ -4838,8 +5177,17 @@ function wireDelegation(){
       }
       return;
     }
+    if(action==='ml-toggle-total-view'){
+      mlTotalViewOpen = !mlTotalViewOpen;
+      renderMonthlyLedgerWindowInPlace();
+      return;
+    }
     if(action==='ml-import'){
       document.getElementById('ml-import-input').click();
+      return;
+    }
+    if(action==='ml-import-full'){
+      document.getElementById('ml-import-full-input').click();
       return;
     }
     if(action==='ml-export'){
