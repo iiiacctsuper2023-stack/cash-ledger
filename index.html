@@ -444,15 +444,32 @@ function effectiveRevenueTransfer(rec, key){
   }
   return Number((rec.revenueTransfer||{})[key])||0;
 }
+function monthExpenditureColTotalForCoa(monthKey, coaKey){
+  const rec = state.monthlyLedger.months[monthKey];
+  if(!rec) return 0;
+  const col = rec.expenditureColumns.find(c=>c.coaKey===coaKey);
+  if(!col) return 0;
+  if(col.source==='coa'){
+    if(col.override!==undefined && col.override!==null) return Number(col.override)||0;
+    const coaTotals = monthWithdrawCoaTotals(monthKey);
+    let amt = coaTotals[coaKey]||0;
+    const seed = state.monthlyLedger.seed;
+    if(monthKey===earliestTrackedMonthKey() && seed && seed.active!==false){
+      amt += Number((seed.expenditure||{})[coaKey])||0;
+    }
+    return amt;
+  } else if(col.source==='entries'){
+    return expenditureEntryColTotal(rec, col.id);
+  }
+  return Number(col.amount)||0;
+}
 function yearlyCoaExpenditureBefore(coaKey, key){
   const [yearStr, monStr] = key.split('-');
   let total = 0;
-  const seed = state.monthlyLedger.seed;
-  if(seed && seed.year===yearStr && seed.active!==false) total += Number((seed.expenditure||{})[coaKey])||0;
   Object.keys(state.monthlyLedger.months).forEach(k=>{
     const [ky,km] = k.split('-');
     if(ky===yearStr && Number(km) < Number(monStr)){
-      total += monthWithdrawCoaTotals(k)[coaKey]||0;
+      total += monthExpenditureColTotalForCoa(k, coaKey);
     }
   });
   return total;
@@ -2852,7 +2869,7 @@ function computeMonthlyLedgerFigures(key){
   let expTotal = 0;
   const expColAmounts = rec.expenditureColumns.map(col=>{
     let amt = 0;
-    if(col.source==='coa'){ amt = liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0; }
+    if(col.source==='coa'){ amt = (col.override!==undefined && col.override!==null) ? Number(col.override)||0 : (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0); }
     else if(col.source==='entries'){ amt = expenditureEntryColTotal(rec, col.id); }
     else { amt = Number(col.amount)||0; }
     expTotal += amt;
@@ -4234,7 +4251,7 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(expDataRow,1).value = 'Recorded in Withdraw Notesheets';
   exp.getCell(expDataRow,2).value = 'Category totals for the month';
   rec.expenditureColumns.forEach((col,i)=>{
-    const amt = col.source==='coa' ? (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0) : col.source==='entries' ? 0 : (Number(col.amount)||0);
+    const amt = col.source==='coa' ? ((col.override!==undefined && col.override!==null) ? Number(col.override)||0 : (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0)) : col.source==='entries' ? 0 : (Number(col.amount)||0);
     exp.getCell(expDataRow, 4+i).value = amt;
   });
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
