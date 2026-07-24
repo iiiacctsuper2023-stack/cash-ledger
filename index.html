@@ -4311,7 +4311,7 @@ async function exportMonthlyLedger(key, previewOnly){
   const eduExpLetter = eduColIdx>=0 ? exp.getColumn(4+eduColIdx).letter : null;
   const eduAssistExpBeforeVal = yearlyCoaExpenditureBefore('EduAssist', key); // prior months this year, embedded as a literal since it isn't practical to SUM across every earlier month's own sheet
   exp.getCell(eduAssistRow,14).value = eduExpLetter
-    ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-(${eduAssistExpBeforeVal}+${eduExpLetter}${expDataRow})`}
+    ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-(${eduAssistExpBeforeVal}+${eduExpLetter}${expTotalRow})`}
     : {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-${eduAssistExpBeforeVal}`};
 
   const totalRow = assetStartRow+4;
