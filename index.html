@@ -444,6 +444,19 @@ function effectiveRevenueTransfer(rec, key){
   }
   return Number((rec.revenueTransfer||{})[key])||0;
 }
+function yearlyCoaExpenditureBefore(coaKey, key){
+  const [yearStr, monStr] = key.split('-');
+  let total = 0;
+  const seed = state.monthlyLedger.seed;
+  if(seed && seed.year===yearStr && seed.active!==false) total += Number((seed.expenditure||{})[coaKey])||0;
+  Object.keys(state.monthlyLedger.months).forEach(k=>{
+    const [ky,km] = k.split('-');
+    if(ky===yearStr && Number(km) < Number(monStr)){
+      total += monthWithdrawCoaTotals(k)[coaKey]||0;
+    }
+  });
+  return total;
+}
 function yearlyRunningTotalBefore(key){
   const [yearStr, monStr] = key.split('-');
   const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
@@ -504,8 +517,9 @@ function monthWithdrawCoaTotals(key){
   const totals = {};
   COA.forEach(c=>{ totals[c.key] = 0; });
   (state.withdrawNotesheetLog||[]).forEach(log=>{
-    if(!log.endDate) return;
-    const [y, m] = log.endDate.split('-');
+    const attribDate = log.generatedDate || log.endDate; // generation date, not End Date, is now the rule; older logs fall back to endDate
+    if(!attribDate) return;
+    const [y, m] = attribDate.split('-');
     const monthName = MONTHS[parseInt(m,10)-1];
     if(monthKeyFor(monthName, y) !== key) return;
     (log.categories||[]).forEach(cat=>{
@@ -1993,6 +2007,7 @@ function renderApp(){
     app.appendChild(renderDayPanel(selectedDayId, computed));
     app.appendChild(renderNotesheetCard());
     app.appendChild(renderDepositNotesheetCard());
+    app.appendChild(renderOnlinePaymentCard());
     app.appendChild(el(`
       <div class="card" id="section-monthly-ledger-launch">
         <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
@@ -2611,6 +2626,7 @@ function renderSectionNav(day){
     {id:'section-notesheets', num:String(4+state.banks.length), label:'Notesheets', flyout:[
       {id:'section-notesheets', num:'', label:'Withdraw Notesheets & Summary'},
       {id:'section-deposit-notesheet', num:'', label:'Deposit Notesheet'},
+      {id:'section-online-payment', num:'', label:'Online Payment (SSL Commerz)'},
       {id:'__open-monthly-ledger__', num:'', label:'Monthly Ledger'},
     ]},
   ];
@@ -2856,8 +2872,9 @@ function computeMonthlyLedgerFigures(key){
   const cashInHandShown = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCashInHand;
 
   const debtTotal = rec.balanceSheet.debtItems.reduce((s,d)=>s+(Number(d.amount)||0),0); // legacy, unused going forward
+  const eduAssistExpBefore = yearlyCoaExpenditureBefore('EduAssist', key);
   const gratuityPayable = yrtNew.gratuity;
-  const eduAssistPayable = yrtNew.eduAssist - expAssistAmt;
+  const eduAssistPayable = yrtNew.eduAssist - (eduAssistExpBefore + expAssistAmt);
 
   // "Balance in Bank Account" = Beginning Balance + this month's Income -
   // this month's Expenditure (the formula the person specified), used as
@@ -4105,6 +4122,7 @@ async function exportMonthlyLedger(key, previewOnly){
 
   /* ---- Monthly Revenue sheet ---- */
   const rev = wb.addWorksheet('Monthly Revenue');
+  rev.pageSetup = { paperSize: 5, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }; // paperSize 5 = Legal
   rev.getColumn(1).width = 4; rev.getColumn(2).width = 12; rev.getColumn(3).width = 34;
   for(let c=4;c<=15;c++) rev.getColumn(c).width = 15;
 
@@ -4182,6 +4200,7 @@ async function exportMonthlyLedger(key, previewOnly){
 
   /* ---- Monthly Expenditure sheet ---- */
   const exp = wb.addWorksheet('Monthly Expenditure');
+  exp.pageSetup = { paperSize: 5, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }; // paperSize 5 = Legal
   exp.getColumn(1).width = 12; exp.getColumn(2).width = 34;
   for(let c=3;c<=3+rec.expenditureColumns.length;c++) exp.getColumn(c).width = 14;
 
@@ -4263,9 +4282,10 @@ async function exportMonthlyLedger(key, previewOnly){
   const eduCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
   const eduColIdx = eduCol ? rec.expenditureColumns.indexOf(eduCol) : -1;
   const eduExpLetter = eduColIdx>=0 ? exp.getColumn(4+eduColIdx).letter : null;
+  const eduAssistExpBeforeVal = yearlyCoaExpenditureBefore('EduAssist', key); // prior months this year, embedded as a literal since it isn't practical to SUM across every earlier month's own sheet
   exp.getCell(eduAssistRow,14).value = eduExpLetter
-    ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-${eduExpLetter}${expDataRow}`}
-    : {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}`};
+    ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-(${eduAssistExpBeforeVal}+${eduExpLetter}${expDataRow})`}
+    : {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-${eduAssistExpBeforeVal}`};
 
   const totalRow = assetStartRow+4;
   exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
@@ -4878,7 +4898,187 @@ function renderDepositNotesheetCard(){
   return card;
 }
 
+/* Online Payment (SSL Commerz): unlike a cash collection, this money lands
+   straight in the TBL bank account automatically - there's no cash in
+   hand to physically carry to the bank, so no Deposit Notesheet document
+   is generated for it. The accountant enters the date money actually
+   landed in the account (bank-credit date; payments made Thu/Fri/Sat all
+   land the following Sunday) and uploads the same "Collection Register
+   Account Wise Summary" export used for Deposit Notesheets, purely to
+   split the total across revenue categories. The export's own date
+   (payment date, one or more days earlier) is ignored on purpose - the
+   Monthly Ledger entry always uses the bank-credit date the user typed. */
+/* Online Payment (SSL Commerz): the raw export is a whole month's worth of
+   individual student transactions (one row per payment, dated the day the
+   student paid). SSL Commerz doesn't settle same-day - money lands in the
+   TBL account the next day, except payments made Thu/Fri/Sat which all
+   land together the following Sunday. So one uploaded file typically needs
+   to be split into SEVERAL Monthly Ledger entries, one per computed
+   bank-credit date, each with its own category breakdown. The computed
+   date is a best-effort default from that rule; the real source of truth
+   is the bank statement, so every bucket's date stays editable before
+   saving in case a holiday or bank delay shifted it. */
+function sslBankCreditDateISO(tranDateISO){
+  const d = new Date(tranDateISO+'T00:00:00Z');
+  const wd = d.getUTCDay(); // 0=Sun..6=Sat
+  const addDays = wd===4 ? 3 : wd===5 ? 2 : wd===6 ? 1 : 1; // Thu/Fri/Sat -> following Sunday, else next day
+  d.setUTCDate(d.getUTCDate()+addDays);
+  return d.toISOString().slice(0,10);
+}
+async function parseSSLCommerzTransactionFile(arrayBuffer){
+  await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
+  const ws = wb.worksheets[0];
+  let headerRow = null, headers = {};
+  for(let r=1;r<=15;r++){
+    const found = {};
+    ws.getRow(r).eachCell((cell,colNum)=>{ found[String(cell.value||'').trim()] = colNum; });
+    if(found['TranDate']){ headerRow=r; headers=found; break; }
+  }
+  if(!headerRow) throw new Error("Couldn't find the TranDate column header in this file.");
+  let eventFeeCol = headers['Event Fee -I'];
+  if(!eventFeeCol) Object.keys(headers).forEach(k=>{ if(/event\s*fee/i.test(k)) eventFeeCol = headers[k]; });
+  const get = (row,name)=>{ const c = headers[name]; return c ? (Number(row.getCell(c).value)||0) : 0; };
+  const buckets = {}; // creditDateISO -> {admissionFee, sessionFee, tuitionFee, mqmFee, booksSty, transportFee, uniform, eventFee, misc, total}
+  const zeroCats = ()=>({admissionFee:0,sessionFee:0,tuitionFee:0,mqmFee:0,booksSty:0,transportFee:0,uniform:0,eventFee:0,misc:0,total:0});
+  for(let r=headerRow+1; r<=ws.rowCount; r++){
+    const row = ws.getRow(r);
+    const raw = row.getCell(headers['TranDate']).value;
+    if(!raw) continue;
+    let tranISO = null;
+    if(raw instanceof Date) tranISO = raw.toISOString().slice(0,10);
+    else{
+      const m = String(raw).trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+      if(m) tranISO = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    }
+    if(!tranISO) continue;
+    const creditISO = sslBankCreditDateISO(tranISO);
+    if(!buckets[creditISO]) buckets[creditISO] = zeroCats();
+    const b = buckets[creditISO];
+    b.admissionFee += get(row,'Admission Fee -I') + get(row,'Admission Form-I');
+    b.sessionFee   += get(row,'Session Fees -I');
+    b.tuitionFee   += get(row,'Tuition Fee -I');
+    b.mqmFee       += get(row,'Muqaddam Fees -I');
+    b.booksSty     += get(row,'Books & Stationeries -I');
+    b.transportFee += get(row,'Transport -I');
+    b.uniform      += get(row,'Uniform Fees -I');
+    b.eventFee     += eventFeeCol ? (Number(row.getCell(eventFeeCol).value)||0) : 0;
+    b.misc         += get(row,'Exam Fee -I') + get(row,'Late Fine-I');
+    b.total        += Number(row.getCell(headers['TotalAmount']).value)||0;
+  }
+  return Object.keys(buckets).sort().map(date=>({date, ...buckets[date]}));
+}
+
+function renderOnlinePaymentCard(){
+  const card = el(`
+    <div class="card" id="section-online-payment">
+      <h3><span class="num">&#127760;</span> Online Payment (SSL Commerz)</h3>
+      <p class="subnote">No Deposit Notesheet is needed for this - the money already lands directly in the TBL account. Upload the SSL Commerz transaction export; it's split automatically into one Monthly Ledger entry per bank-credit date (next day, or the following Sunday for Thu/Fri/Sat payments). Check each date against your bank statement before saving - edit any that don't match.</p>
+      <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
+        <div class="field" style="flex:1 1 260px;">
+          <label>SSL Commerz transaction file (.xlsx)</label>
+          <input type="file" id="op-file-input" accept=".xlsx">
+        </div>
+        <button class="secondary" type="button" id="op-parse-btn">&#128269; Split into dated entries</button>
+      </div>
+      <div id="op-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
+      <div id="op-preview-wrap"></div>
+      ${(state.onlinePaymentLog||[]).length ? `
+      <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+          <tbody>
+            ${state.onlinePaymentLog.slice(-10).reverse().map(l=>`
+              <tr style="border-bottom:1px solid var(--line-soft);">
+                <td style="padding:4px 6px;">${l.bankDate}</td>
+                <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
+                <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" data-action="delete-online-payment-log" data-id="${l.id}" title="Delete this saved record">&times;</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+    </div>
+  `);
+  const fileInp = card.querySelector('#op-file-input');
+  const statusEl = card.querySelector('#op-status');
+  const previewWrap = card.querySelector('#op-preview-wrap');
+  let currentBuckets = null;
+
+  function drawPreview(){
+    previewWrap.innerHTML = '';
+    if(!currentBuckets || !currentBuckets.length) return;
+    const table = el(`<div style="margin-top:10px;">
+      <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--line-soft); text-align:left;">
+          <th style="padding:4px 6px;">Bank-credit date</th>
+          <th style="padding:4px 6px; text-align:right;">Total</th>
+          <th style="padding:4px 6px;"></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="secondary" type="button" id="op-save-all-btn" style="margin-top:10px;">&#128190; Record all ${currentBuckets.length} entries to Monthly Ledger</button>
+    </div>`);
+    const tbody = table.querySelector('tbody');
+    currentBuckets.forEach((b,i)=>{
+      const tr = el(`<tr style="border-bottom:1px solid var(--line-soft);">
+        <td style="padding:4px 6px;"><input type="date" value="${b.date}" style="font-size:12.5px; padding:2px 4px;"></td>
+        <td style="padding:4px 6px; text-align:right;" class="mono">${money(b.total)}</td>
+        <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" title="Remove this entry">&times;</button></td>
+      </tr>`);
+      const dateInp = tr.querySelector('input');
+      dateInp.onchange = ()=>{ b.date = dateInp.value; };
+      tr.querySelector('button').onclick = ()=>{ currentBuckets.splice(i,1); drawPreview(); };
+      tbody.appendChild(tr);
+    });
+    previewWrap.appendChild(table);
+    table.querySelector('#op-save-all-btn').onclick = ()=>{
+      if(currentBuckets.some(b=>!b.date)){ showAlert('Every row needs a date before saving.'); return; }
+      currentBuckets.forEach(b=> saveOnlinePaymentBucket(b));
+      saveState(); render();
+    };
+  }
+
+  card.querySelector('#op-parse-btn').onclick = async ()=>{
+    const file = fileInp.files && fileInp.files[0];
+    if(!file){ showAlert('Choose the SSL Commerz transaction .xlsx file first.'); return; }
+    statusEl.textContent = 'Reading & splitting by bank-credit date\u2026';
+    try{
+      currentBuckets = await parseSSLCommerzTransactionFile(await file.arrayBuffer());
+      if(!currentBuckets.length){ showAlert('No transaction rows with a readable TranDate were found in that file.'); statusEl.textContent=''; return; }
+      statusEl.textContent = `Found ${currentBuckets.length} bank-credit date(s). Check the dates below against your bank statement, then save.`;
+      drawPreview();
+    }catch(e){
+      statusEl.textContent = '';
+      showAlert('Could not read that file: ' + e.message);
+    }
+  };
+  return card;
+}
+
+function saveOnlinePaymentBucket(b){
+  const logId = uid();
+  const revEntry = {id:logId, date:b.date, desc:`Online Payment (SSL Commerz) - entered ${b.date}`};
+  REVENUE_CATS.forEach(c=>{ revEntry[c.key] = 0; });
+  revEntry.admissionFee = b.admissionFee;
+  revEntry.sessionFee = b.sessionFee;
+  revEntry.tuitionFee = b.tuitionFee;
+  revEntry.mqmFee = b.mqmFee;
+  revEntry.booksSty = b.booksSty;
+  revEntry.transportFee = b.transportFee;
+  revEntry.uniform = b.uniform;
+  revEntry.eventFee = b.eventFee;
+  revEntry.misc = (revEntry.misc||0) + b.misc;
+  const [y,m] = b.date.split('-');
+  const mlKey = monthKeyFor(MONTHS[parseInt(m,10)-1], y);
+  getMonthlyLedgerMonth(mlKey).revenueEntries.push(revEntry);
+  if(!Array.isArray(state.onlinePaymentLog)) state.onlinePaymentLog = [];
+  state.onlinePaymentLog.push({id:logId, generatedAt:new Date().toISOString(), bankDate:b.date, grandTotal:b.total});
+}
+
 function drawTransferList(container, day, field, emptyText){
+
   const arr = day[field];
   container.innerHTML = '';
   if(arr.length===0){ container.appendChild(el(`<p class="empty">${emptyText}</p>`)); return; }
@@ -5283,6 +5483,14 @@ function wireDelegation(){
     if(action==='delete-deposit-log'){
       const id = t.dataset.id;
       state.depositNotesheetLog = (state.depositNotesheetLog||[]).filter(l=>l.id!==id);
+      Object.values(state.monthlyLedger.months).forEach(rec=>{
+        rec.revenueEntries = rec.revenueEntries.filter(e=>e.id!==id);
+      });
+      saveState(); render(); return;
+    }
+    if(action==='delete-online-payment-log'){
+      const id = t.dataset.id;
+      state.onlinePaymentLog = (state.onlinePaymentLog||[]).filter(l=>l.id!==id);
       Object.values(state.monthlyLedger.months).forEach(rec=>{
         rec.revenueEntries = rec.revenueEntries.filter(e=>e.id!==id);
       });
@@ -6048,6 +6256,20 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   const dateText = depositFormatISODateRangeText(startISO, endISO);
   const lines = buildDepositLines(parsed.totals);
+  // Miscellaneous Collection: cash income logged in the Daily Ledger under
+  // a head other than Service Revenue. Only days inside [startISO, endISO]
+  // with a non-zero day.miscCollection contribute a line here, appended
+  // after all the Cloud Campus fee categories above, named by whatever
+  // description was entered for that day's collection (falling back to a
+  // plain "Miscellaneous collection" label if none was given). A day with
+  // no Miscellaneous Collection simply contributes nothing.
+  (state.days||[]).forEach(day=>{
+    if(!day.date || day.date < startISO || day.date > endISO) return;
+    const amt = Number(day.miscCollection)||0;
+    if(amt<=0) return;
+    const descText = miscCollectionDescText(day);
+    lines.push([descText ? `Miscellaneous collection - ${descText}` : 'Miscellaneous collection', amt]);
+  });
   if(!lines.length){ showAlert('No non-zero fee categories were found in that file.'); return; }
 
   const noteNum = state.nextDepositNotesheetNo || 117;
@@ -6092,7 +6314,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   const lastRow = firstRow + lines.length - 1;
   ws.getCell(totalRow, 3).value = 'Total collected amount';
   ws.getCell(totalRow, 10).value = {formula: `SUM(J${firstRow}:J${lastRow})`};
-  const words = depositNumberToWordsIndian(Math.round(parsed.grand));
+  const words = depositNumberToWordsIndian(Math.round(lines.reduce((s,[,amt])=>s+amt,0)));
   ws.getCell(wordsRow, 3).value = `${words.charAt(0).toUpperCase()+words.slice(1)} taka only.`;
 
   if(previewOnly){
@@ -6123,17 +6345,18 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   state.nextDepositNotesheetNo = noteNum + 1;
 
+  const genISO = new Date().toISOString().slice(0,10); // date the notesheet is generated - the app now attributes the Monthly Ledger entry to this date, not the range's End Date
   const DEPOSIT_TO_REVENUE_KEY = state.settings.depositRevenueMap;
   const depositLogId = uid();
-  const revEntry = {id:depositLogId, date:endISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
+  const revEntry = {id:depositLogId, date:genISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
   REVENUE_CATS.forEach(c=>{ revEntry[c.key] = 0; });
   lines.forEach(([desc, amt])=>{
-    const key = DEPOSIT_TO_REVENUE_KEY[desc];
+    const key = desc.startsWith('Miscellaneous collection') ? 'misc' : DEPOSIT_TO_REVENUE_KEY[desc];
     if(key) revEntry[key] = (revEntry[key]||0) + amt;
   });
-  const [endYear, endMonthNum] = endISO.split('-');
-  const monthName = MONTHS[parseInt(endMonthNum,10)-1];
-  const mlKey = monthKeyFor(monthName, endYear);
+  const [genYear, genMonthNum] = genISO.split('-');
+  const monthName = MONTHS[parseInt(genMonthNum,10)-1];
+  const mlKey = monthKeyFor(monthName, genYear);
   const mlRec = getMonthlyLedgerMonth(mlKey);
   mlRec.revenueEntries.push(revEntry);
 
@@ -6141,7 +6364,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   state.depositNotesheetLog.push({
     id:depositLogId, generatedAt:new Date().toISOString(), noteNum, startDate:startISO, endDate:endISO,
     lines: lines.map(([desc,amt])=>({desc,amt})),
-    grandTotal: parsed.grand
+    grandTotal: lines.reduce((s,[,amt])=>s+amt,0)
   });
 
   saveState();
@@ -6706,7 +6929,7 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   if(shouldSave && incrementNumbering){
     if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
     state.withdrawNotesheetLog.push({
-      id:uid(), generatedAt:new Date().toISOString(), startDate, endDate,
+      id:uid(), generatedAt:new Date().toISOString(), generatedDate:new Date().toISOString().slice(0,10), startDate, endDate,
       summaryLabel:`${state.summaryCounterYear}-${summaryNum}`,
       categories: summaryRows.map(r=>({label:r.label, total:r.total})),
       grandTotal
