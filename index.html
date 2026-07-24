@@ -444,10 +444,20 @@ function effectiveRevenueTransfer(rec, key){
   }
   return Number((rec.revenueTransfer||{})[key])||0;
 }
+function resolveColCoaKey(col){
+  if(col.coaKey) return col.coaKey;
+  const norm = (col.label||'').trim().toLowerCase();
+  if(!norm) return null;
+  for(const key in EXPENDITURE_LABEL_ALIASES){
+    if(EXPENDITURE_LABEL_ALIASES[key].includes(norm)) return key;
+  }
+  const coa = COA.find(c=>c.label.toLowerCase()===norm || c.notesheetLabel.toLowerCase()===norm || c.short.toLowerCase()===norm);
+  return coa ? coa.key : null;
+}
 function monthExpenditureColTotalForCoa(monthKey, coaKey){
   const rec = state.monthlyLedger.months[monthKey];
   if(!rec) return 0;
-  const col = rec.expenditureColumns.find(c=>c.coaKey===coaKey);
+  const col = rec.expenditureColumns.find(c=>resolveColCoaKey(c)===coaKey);
   if(!col) return 0;
   if(col.source==='coa'){
     if(col.override!==undefined && col.override!==null) return Number(col.override)||0;
@@ -2877,7 +2887,7 @@ function computeMonthlyLedgerFigures(key){
   });
   const totalBalance = totalAmount - expTotal; // Total Amount (Beginning Balance + Total Income) minus Expenditure, per the Revenue sheet
 
-  const expAssistCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
+  const expAssistCol = rec.expenditureColumns.find(c=>resolveColCoaKey(c)==='EduAssist');
   const expAssistIdx = expAssistCol ? rec.expenditureColumns.indexOf(expAssistCol) : -1;
   const expAssistAmt = expAssistIdx>=0 ? expColAmounts[expAssistIdx] : 0;
 
@@ -4296,7 +4306,7 @@ async function exportMonthlyLedger(key, previewOnly){
 
   const eduAssistRow = assetStartRow+3;
   exp.getCell(eduAssistRow,10).value = 4; exp.getCell(eduAssistRow,11).value = 'Education Assistance Payable';
-  const eduCol = rec.expenditureColumns.find(c=>c.coaKey==='EduAssist');
+  const eduCol = rec.expenditureColumns.find(c=>resolveColCoaKey(c)==='EduAssist');
   const eduColIdx = eduCol ? rec.expenditureColumns.indexOf(eduCol) : -1;
   const eduExpLetter = eduColIdx>=0 ? exp.getColumn(4+eduColIdx).letter : null;
   const eduAssistExpBeforeVal = yearlyCoaExpenditureBefore('EduAssist', key); // prior months this year, embedded as a literal since it isn't practical to SUM across every earlier month's own sheet
