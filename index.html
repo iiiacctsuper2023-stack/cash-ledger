@@ -4142,8 +4142,9 @@ async function exportMonthlyLedger(key, previewOnly){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
 
-  const FONT = {name:'Calibri', size:11};
-  const BOLD = {name:'Calibri', size:11, bold:true};
+  const FONT = {name:'Times New Roman', size:11};
+  const BOLD = {name:'Times New Roman', size:11, bold:true};
+  const FONT_SMALL = {name:'Times New Roman', size:10};
   const thin = {top:{style:'thin'},left:{style:'thin'},bottom:{style:'thin'},right:{style:'thin'}};
   const numFmt = '#,##0.00';
 
@@ -4152,19 +4153,24 @@ async function exportMonthlyLedger(key, previewOnly){
   rev.pageSetup = { paperSize: 5, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }; // paperSize 5 = Legal
   rev.getColumn(1).width = 4; rev.getColumn(2).width = 12; rev.getColumn(3).width = 34;
   for(let c=4;c<=15;c++) rev.getColumn(c).width = 15;
+  const REV_LAST_COL = 15; // column O
 
-  rev.getCell('A1').value = 'INTERNATIONAL ISLAMIC INSTITUTE (MADRASHA ACCT)';
-  rev.getCell('A1').font = BOLD;
-  rev.getCell('A2').value = `Monthly Income: Month of ${monthKeyLabel(key)}`;
+  rev.getCell('A2').value = 'INTERNATIONAL ISLAMIC INSTITUTE (MADRASHA ACCT)';
   rev.getCell('A2').font = BOLD;
-  rev.getCell('A3').value = 'Madrasah Acct';
+  rev.mergeCells(2,1,2,REV_LAST_COL); rev.getCell(2,1).alignment = {horizontal:'center'};
+  rev.getCell('A3').value = `Monthly Income: Month of ${monthKeyLabel(key)}`;
+  rev.getCell('A3').font = BOLD;
+  rev.mergeCells(3,1,3,REV_LAST_COL); rev.getCell(3,1).alignment = {horizontal:'center'};
+  rev.getCell('A4').value = 'Madrasah Acct';
+  rev.getCell('A4').font = BOLD;
+  rev.mergeCells(4,1,4,REV_LAST_COL); rev.getCell(4,1).alignment = {horizontal:'center'};
 
-  const headerRowNum = 5;
+  const headerRowNum = 6;
   const headers = ['Date','Description','Total', ...REVENUE_CATS.map(c=>c.label)];
   headers.forEach((h,i)=>{
     const cell = rev.getCell(headerRowNum, i+2); // starts col B
     cell.value = h; cell.font = BOLD; cell.border = thin;
-    cell.alignment = {wrapText:true, vertical:'bottom'};
+    cell.alignment = {wrapText:true, vertical:'bottom', horizontal:'center'};
   });
 
   let r = headerRowNum+1;
@@ -4186,7 +4192,7 @@ async function exportMonthlyLedger(key, previewOnly){
     rev.getCell(r,3).value = entry.desc||'';
     rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
     REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(entry[c.key])||0; });
-    for(let c=2;c<=15;c++) rev.getCell(r,c).border = thin;
+    for(let c=2;c<=15;c++){ rev.getCell(r,c).border = thin; rev.getCell(r,c).font = c>=4 ? FONT_SMALL : FONT; }
     r++;
   });
   const dataEndRow = r-1;
@@ -4194,8 +4200,15 @@ async function exportMonthlyLedger(key, previewOnly){
     rev.getCell(dataStartRow,4).value = 0;
   }
 
+  // Rows after day-by-day data start at column A (merged A:C), left-aligned label
+  function revSummaryLabel(row, text){
+    rev.mergeCells(row,1,row,3);
+    rev.getCell(row,1).value = text;
+    rev.getCell(row,1).alignment = {horizontal:'left'};
+  }
+
   const totalIncomeRow = r;
-  rev.getCell(r,3).value = 'Total Income:'; rev.getCell(r,3).font = BOLD;
+  revSummaryLabel(r, 'Total Income:'); rev.getCell(r,1).font = BOLD;
   for(let c=4;c<=15;c++){
     const colLetter = rev.getColumn(c).letter;
     rev.getCell(r,c).value = dataEndRow>=dataStartRow ? {formula:`SUM(${colLetter}${dataStartRow}:${colLetter}${dataEndRow})`} : 0;
@@ -4203,17 +4216,17 @@ async function exportMonthlyLedger(key, previewOnly){
   }
   r++;
   const totalDueRow = r;
-  rev.getCell(r,3).value = 'Total Due';
+  revSummaryLabel(r, 'Total Due'); rev.getCell(r,1).font = FONT;
   rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(rec.revenueTotalDue[c.key])||0; });
   r++;
   const transferRow = r;
-  rev.getCell(r,3).value = 'Transfer between categories';
+  revSummaryLabel(r, 'Transfer between categories'); rev.getCell(r,1).font = FONT;
   rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = effectiveRevenueTransfer(rec, c.key); });
   r++;
   const yrtNewRow = r;
-  rev.getCell(r,3).value = 'Yearly Running Total'; rev.getCell(r,3).font = BOLD;
+  revSummaryLabel(r, 'Yearly Running Total'); rev.getCell(r,1).font = BOLD;
   REVENUE_CATS.forEach((c,i)=>{
     const colLetter = rev.getColumn(5+i).letter;
     rev.getCell(r,5+i).value = {formula:`${colLetter}${totalIncomeRow}+${colLetter}${transferRow}+${colLetter}${yrtBeforeRow}`};
@@ -4221,27 +4234,39 @@ async function exportMonthlyLedger(key, previewOnly){
   });
   r++;
   const totalAmountRow = r;
-  rev.getCell(r,3).value = 'Total Amount'; rev.getCell(r,3).font = BOLD;
+  revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
   rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${dataStartRow-2}`};
   rev.getCell(r,4).font = BOLD;
+
+  // All-border across the whole used block, first line through last line
+  for(let rr=2; rr<=totalAmountRow; rr++){
+    for(let cc=1; cc<=REV_LAST_COL; cc++){
+      rev.getCell(rr,cc).border = thin;
+      if(!rev.getCell(rr,cc).font || !rev.getCell(rr,cc).font.name) rev.getCell(rr,cc).font = FONT;
+    }
+  }
 
   /* ---- Monthly Expenditure sheet ---- */
   const exp = wb.addWorksheet('Monthly Expenditure');
   exp.pageSetup = { paperSize: 5, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }; // paperSize 5 = Legal
   exp.getColumn(1).width = 12; exp.getColumn(2).width = 34;
   for(let c=3;c<=3+rec.expenditureColumns.length;c++) exp.getColumn(c).width = 14;
+  const EXP_LAST_COL = 3+rec.expenditureColumns.length; // last expense category column ("N" or wherever it actually ends)
 
-  exp.getCell('A1').value = 'INTERNATIONAL ISLAMIC INSTITUTE (MADRASHA ACCT)'; exp.getCell('A1').font = BOLD;
-  exp.getCell('A2').value = `Monthly Expenditure: Month of ${monthKeyLabel(key)}`; exp.getCell('A2').font = BOLD;
-  exp.getCell('A3').value = 'Madrash Acct';
+  exp.getCell('A2').value = 'INTERNATIONAL ISLAMIC INSTITUTE (MADRASHA ACCT)'; exp.getCell('A2').font = BOLD;
+  exp.mergeCells(2,1,2,EXP_LAST_COL); exp.getCell(2,1).alignment = {horizontal:'center'};
+  exp.getCell('A3').value = `Monthly Expenditure: Month of ${monthKeyLabel(key)}`; exp.getCell('A3').font = BOLD;
+  exp.mergeCells(3,1,3,EXP_LAST_COL); exp.getCell(3,1).alignment = {horizontal:'center'};
+  exp.getCell('A4').value = 'Madrash Acct'; exp.getCell('A4').font = BOLD;
+  exp.mergeCells(4,1,4,EXP_LAST_COL); exp.getCell(4,1).alignment = {horizontal:'center'};
 
-  const expHeaderRow = 4;
+  const expHeaderRow = 5;
   exp.getCell(expHeaderRow,1).value = 'Date'; exp.getCell(expHeaderRow,1).font = BOLD;
   exp.getCell(expHeaderRow,2).value = 'Description'; exp.getCell(expHeaderRow,2).font = BOLD;
   exp.getCell(expHeaderRow,3).value = 'Total'; exp.getCell(expHeaderRow,3).font = BOLD;
   rec.expenditureColumns.forEach((col,i)=>{
     const cell = exp.getCell(expHeaderRow, 4+i);
-    cell.value = col.label; cell.font = BOLD; cell.alignment = {wrapText:true};
+    cell.value = col.label; cell.font = BOLD; cell.alignment = {wrapText:true, horizontal:'center'};
   });
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
@@ -4255,36 +4280,51 @@ async function exportMonthlyLedger(key, previewOnly){
       if(col.source==='entries') exp.getCell(er, 4+i).value = Number((entry.amounts||{})[col.id])||0;
     });
     exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+    for(let c=1;c<=EXP_LAST_COL;c++) exp.getCell(er,c).font = c>=3 ? FONT_SMALL : FONT;
     er++;
   });
+  function expSummaryLabel(row, text){
+    exp.mergeCells(row,1,row,3);
+    exp.getCell(row,1).value = text;
+    exp.getCell(row,1).alignment = {horizontal:'left'};
+  }
   const expDataRow = er; // aggregate row for coa/manual columns (entries columns already itemized above)
-  exp.getCell(expDataRow,1).value = 'Recorded in Withdraw Notesheets';
-  exp.getCell(expDataRow,2).value = 'Category totals for the month';
+  expSummaryLabel(expDataRow, 'Recorded in Withdraw Notesheets - Category totals for the month');
   rec.expenditureColumns.forEach((col,i)=>{
     const amt = col.source==='coa' ? ((col.override!==undefined && col.override!==null) ? Number(col.override)||0 : (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0)) : col.source==='entries' ? 0 : (Number(col.amount)||0);
     exp.getCell(expDataRow, 4+i).value = amt;
   });
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
   const expTotalRow = expDataRow+1;
-  exp.getCell(expTotalRow,2).value = 'Total Expenditure:'; exp.getCell(expTotalRow,2).font = BOLD;
+  expSummaryLabel(expTotalRow, 'Total Expenditure:'); exp.getCell(expTotalRow,1).font = BOLD;
   for(let i=0;i<=rec.expenditureColumns.length;i++){
     const colLetter = exp.getColumn(3+i).letter;
     exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataStartRow}:${colLetter}${expDataRow})`};
     exp.getCell(expTotalRow, 3+i).font = BOLD;
   }
   const balanceRow = expTotalRow+1;
-  exp.getCell(balanceRow,2).value = 'Total Balance:';
+  expSummaryLabel(balanceRow, 'Total Balance:'); exp.getCell(balanceRow,1).font = BOLD;
   exp.getCell(balanceRow,3).value = {formula:`C${balanceRow+1}-C${expTotalRow}`};
   const incomeRefRow = balanceRow+1;
-  exp.getCell(incomeRefRow,2).value = 'Total Amount (Beginning + Income):';
+  expSummaryLabel(incomeRefRow, 'Total Amount (Beginning + Income):'); exp.getCell(incomeRefRow,1).font = FONT;
   exp.getCell(incomeRefRow,3).value = {formula:`'Monthly Revenue'!D${totalAmountRow}`};
+
+  // All-border across header through Total Income row, full width
+  for(let rr=expHeaderRow; rr<=incomeRefRow; rr++){
+    for(let cc=1; cc<=EXP_LAST_COL; cc++){
+      exp.getCell(rr,cc).border = thin;
+      if(!exp.getCell(rr,cc).font || !exp.getCell(rr,cc).font.name) exp.getCell(rr,cc).font = FONT;
+    }
+  }
 
   // Balance Sheet block
   let bs = incomeRefRow+2;
   exp.getCell(bs,5).value = 'Balance Sheet'; exp.getCell(bs,5).font = BOLD;
+  exp.mergeCells(bs,5,bs,15); exp.getCell(bs,5).alignment = {horizontal:'center'};
   bs++;
   exp.getCell(bs,5).value = 'Asset'; exp.getCell(bs,5).font = BOLD;
   exp.getCell(bs,10).value = 'Liabilities'; exp.getCell(bs,10).font = BOLD;
+  const balanceSheetHeaderRow = bs;
   const assetStartRow = bs+1;
   const computedNow = key===monthKeyFor(state.month,state.year) ? computeAll() : null;
   const latestDay = state.days.length ? state.days[state.days.length-1] : null;
@@ -4321,21 +4361,52 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow}:N${eduAssistRow})`};
   exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`};
 
-  // Head-wise distribution of Balance in Account note - mirrors the app's
-  // "Note: Head wise distribution" block, wasn't in the export before.
+  // Balance Sheet block: all-border across its full data width (E:O)
+  for(let rr=bs; rr<=totalRow; rr++){
+    for(let cc=5; cc<=15; cc++){
+      exp.getCell(rr,cc).border = thin;
+      if(!exp.getCell(rr,cc).font || !exp.getCell(rr,cc).font.name) exp.getCell(rr,cc).font = FONT;
+    }
+  }
+
+  // Head-wise distribution of Balance in Account (left block) and Bank
+  // Balance Breakdown (right block, next to it) - one blank line after the
+  // Balance Sheet's own Total row, side by side.
   let hw = totalRow+2;
-  exp.getCell(hw,5).value = 'Note: Head wise distribution of Balance in Account'; exp.getCell(hw,5).font = BOLD; hw++;
-  exp.getCell(hw,5).value = 'Account Balance for Gratuity'; exp.getCell(hw,9).value = {formula:`N${assetStartRow+2}`}; hw++;
-  exp.getCell(hw,5).value = 'Account Balance for Education Assistant Fund'; exp.getCell(hw,9).value = {formula:`N${eduAssistRow}`}; hw++;
-  exp.getCell(hw,5).value = 'Remaining Balance'; exp.getCell(hw,9).value = {formula:`I${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`}; const hwRemainRow = hw; hw++;
+  const bbCol = 11; // Bank Balance Breakdown starts a few columns right of Head-wise
+  exp.getCell(hw,5).value = 'Note: Head wise distribution of Balance in Account'; exp.getCell(hw,5).font = BOLD;
+  exp.getCell(hw,bbCol).value = 'Bank Balance breakdown'; exp.getCell(hw,bbCol).font = BOLD;
+  hw++;
+  const hwStartRow = hw;
+  exp.getCell(hw,5).value = 'Account Balance for Gratuity'; exp.getCell(hw,9).value = {formula:`N${assetStartRow+2}`};
+  if(state.banks[0]){ exp.getCell(hw,bbCol).value = state.banks[0].name; exp.getCell(hw,bbCol+3).value = Number(mlFig.bankBreakdownShown[state.banks[0].id])||0; }
+  hw++;
+  exp.getCell(hw,5).value = 'Account Balance for Education Assistant Fund'; exp.getCell(hw,9).value = {formula:`N${eduAssistRow}`};
+  if(state.banks[1]){ exp.getCell(hw,bbCol).value = state.banks[1].name; exp.getCell(hw,bbCol+3).value = Number(mlFig.bankBreakdownShown[state.banks[1].id])||0; }
+  hw++;
+  exp.getCell(hw,5).value = 'Remaining Balance'; exp.getCell(hw,9).value = {formula:`I${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`}; const hwRemainRow = hw;
+  state.banks.slice(2).forEach((b,i)=>{
+    // extra banks beyond the first two just extend the breakdown block downward
+    exp.getCell(hw+1+i,bbCol).value = b.name; exp.getCell(hw+1+i,bbCol+3).value = Number(mlFig.bankBreakdownShown[b.id])||0;
+  });
+  hw++;
   exp.getCell(hw,5).value = 'Total'; exp.getCell(hw,5).font = BOLD;
   exp.getCell(hw,9).value = {formula:`SUM(I${hwRemainRow-2}:I${hwRemainRow})`}; exp.getCell(hw,9).font = BOLD;
+  const bbEndRow = Math.max(hw, hwStartRow + Math.max(state.banks.length,1) - 1);
+  exp.getCell(bbEndRow,bbCol).value = exp.getCell(bbEndRow,bbCol).value || 'Total';
+  exp.getCell(bbEndRow,bbCol+3).value = {formula:`SUM(${exp.getColumn(bbCol+3).letter}${hwStartRow}:${exp.getColumn(bbCol+3).letter}${bbEndRow-1})`};
+  exp.getCell(bbEndRow,bbCol).font = BOLD; exp.getCell(bbEndRow,bbCol+3).font = BOLD;
+  // Both side-by-side blocks bordered across whatever data they contain
+  for(let rr=hw-4; rr<=Math.max(hw,bbEndRow); rr++){
+    for(let cc=5; cc<=9; cc++){ exp.getCell(rr,cc).border = thin; if(!exp.getCell(rr,cc).font||!exp.getCell(rr,cc).font.name) exp.getCell(rr,cc).font = FONT; }
+    for(let cc=bbCol; cc<=bbCol+3; cc++){ exp.getCell(rr,cc).border = thin; if(!exp.getCell(rr,cc).font||!exp.getCell(rr,cc).font.name) exp.getCell(rr,cc).font = FONT; }
+  }
 
   // User-added extra rows (green/yellow), each mapped to a figure already
   // computed for this month - written directly below the Balance Sheet
   // block, filled with the same colour chosen for it in the app.
   if(rec.customRows && rec.customRows.length){
-    let cr = totalRow+2;
+    let cr = Math.max(hw, bbEndRow) + 2;
     exp.getCell(cr,6).value = 'Extra rows'; exp.getCell(cr,6).font = BOLD; cr++;
     rec.customRows.forEach(row=>{
       const val = mlFig.customRowValues[row.id]||0;
