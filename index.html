@@ -495,7 +495,9 @@ function yearlyRunningTotalBefore(key){
       const rec = state.monthlyLedger.months[k];
       const monthTotals = monthRevenueTotals(rec);
       REVENUE_CATS.forEach(c=>{
-        totals[c.key] += monthTotals[c.key] + effectiveRevenueTransfer(rec, c.key);
+        let contrib = monthTotals[c.key] + effectiveRevenueTransfer(rec, c.key);
+        if(c.key==='eduAssist') contrib -= monthExpenditureColTotalForCoa(k, 'EduAssist');
+        totals[c.key] += contrib;
       });
     }
   });
@@ -2035,6 +2037,7 @@ function renderApp(){
     app.appendChild(renderNotesheetCard());
     app.appendChild(renderDepositNotesheetCard());
     app.appendChild(renderOnlinePaymentCard());
+    app.appendChild(renderBankStatementCard());
     app.appendChild(el(`
       <div class="card" id="section-monthly-ledger-launch">
         <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
@@ -2654,6 +2657,7 @@ function renderSectionNav(day){
       {id:'section-notesheets', num:'', label:'Withdraw Notesheets & Summary'},
       {id:'section-deposit-notesheet', num:'', label:'Deposit Notesheet'},
       {id:'section-online-payment', num:'', label:'Online Payment (SSL Commerz)'},
+      {id:'section-bank-statement', num:'', label:'TBL Bank Statement Cross-Check'},
       {id:'__open-monthly-ledger__', num:'', label:'Monthly Ledger'},
     ]},
   ];
@@ -2899,9 +2903,9 @@ function computeMonthlyLedgerFigures(key){
   const cashInHandShown = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCashInHand;
 
   const debtTotal = rec.balanceSheet.debtItems.reduce((s,d)=>s+(Number(d.amount)||0),0); // legacy, unused going forward
-  const eduAssistExpBefore = yearlyCoaExpenditureBefore('EduAssist', key);
+  yrtNew.eduAssist -= expAssistAmt; // net of this month's own EduAssist expenditure - carries forward correctly via the updated yearlyRunningTotalBefore
   const gratuityPayable = yrtNew.gratuity;
-  const eduAssistPayable = yrtNew.eduAssist - (eduAssistExpBefore + expAssistAmt);
+  const eduAssistPayable = yrtNew.eduAssist; // already net of expenditure, see above
 
   // "Balance in Bank Account" = Beginning Balance + this month's Income -
   // this month's Expenditure (the formula the person specified), used as
@@ -3211,10 +3215,6 @@ function renderMonthlyLedgerCard(){
         </div>
         <button class="secondary small" type="button" data-action="ml-add-month">+ New month</button>
         <button class="danger small" type="button" data-action="ml-delete-month">&#128465; Delete this month</button>
-        <button class="secondary small" type="button" data-action="ml-import">&#11014; Import previous ledger (.xlsx)</button>
-        <input type="file" id="ml-import-input" accept=".xlsx" style="display:none;">
-        <button class="secondary small" type="button" data-action="ml-import-full">&#11014; Import full month, day-by-day (.xlsx)</button>
-        <input type="file" id="ml-import-full-input" accept=".xlsx" style="display:none;">
         <button type="button" data-action="ml-export">&#11015; Export this month (.xlsx)</button>
         <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
         <button type="button" class="${mlTotalViewOpen?'danger':'secondary'} small" data-action="ml-toggle-total-view" style="margin-left:auto;">${mlTotalViewOpen?'&#9660; Showing Total (all months)':'&#9654; Show Total (all months)'}</button>
@@ -3234,11 +3234,6 @@ function renderMonthlyLedgerCard(){
       <div id="ml-yrt-before" style="font-size:12.5px;color:var(--ink-soft);display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 14px;margin-bottom:10px;">
         ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtBefore[c.key])}</div>`).join('')}
       </div>
-      ${!state.monthlyLedger.seed ? `<button class="secondary small" type="button" data-action="ml-set-seed">+ Set starting point (all Revenue, Expenditure &amp; Bank opening figures, entered once)</button>` : `
-        <button class="secondary small" type="button" data-action="ml-set-seed">Edit starting point (currently: through ${escapeHtml(state.monthlyLedger.seed.throughMonth)} ${escapeHtml(state.monthlyLedger.seed.year)})</button>
-        <button class="${state.monthlyLedger.seed.active!==false?'danger':'secondary'} small" type="button" data-action="ml-toggle-seed-active" style="margin-left:6px;">${state.monthlyLedger.seed.active!==false ? 'Turn off starting point' : 'Turn on starting point'}</button>
-        ${state.monthlyLedger.seed.active===false ? `<span class="tag" style="margin-left:6px;">off &mdash; data kept, not applied</span>` : ''}
-      `}
 
       <div class="divider"></div>
       <label>Revenue entries</label>
@@ -3384,16 +3379,6 @@ function renderMonthlyLedgerCard(){
   `);
 
   card.querySelector('#ml-month-select').onchange = (e)=>{ monthlyLedgerViewKey = e.target.value; render(); };
-  card.querySelector('#ml-import-input').onchange = (e)=>{
-    const file = e.target.files[0];
-    if(file) importMonthlyLedgerFile(file);
-    e.target.value = '';
-  };
-  card.querySelector('#ml-import-full-input').onchange = (e)=>{
-    const file = e.target.files[0];
-    if(file) importFullMonthFile(file);
-    e.target.value = '';
-  };
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const bankInp = card.querySelector('#ml-bank-balance-override');
@@ -4229,7 +4214,14 @@ async function exportMonthlyLedger(key, previewOnly){
   revSummaryLabel(r, 'Yearly Running Total'); rev.getCell(r,1).font = BOLD;
   REVENUE_CATS.forEach((c,i)=>{
     const colLetter = rev.getColumn(5+i).letter;
-    rev.getCell(r,5+i).value = {formula:`${colLetter}${totalIncomeRow}+${colLetter}${transferRow}+${colLetter}${yrtBeforeRow}`};
+    if(c.key==='eduAssist'){
+      // Net of this month's own EduAssist expenditure - can't be a live
+      // formula here since the Expenditure sheet (built later) is where
+      // that expenditure column lives; embed the already-computed net value.
+      rev.getCell(r,5+i).value = mlFig.yrtNew.eduAssist;
+    } else {
+      rev.getCell(r,5+i).value = {formula:`${colLetter}${totalIncomeRow}+${colLetter}${transferRow}+${colLetter}${yrtBeforeRow}`};
+    }
     rev.getCell(r,5+i).font = BOLD;
   });
   r++;
@@ -4284,7 +4276,7 @@ async function exportMonthlyLedger(key, previewOnly){
     er++;
   });
   function expSummaryLabel(row, text){
-    exp.mergeCells(row,1,row,3);
+    exp.mergeCells(row,1,row,2);
     exp.getCell(row,1).value = text;
     exp.getCell(row,1).alignment = {horizontal:'left'};
   }
@@ -4346,13 +4338,7 @@ async function exportMonthlyLedger(key, previewOnly){
 
   const eduAssistRow = assetStartRow+3;
   exp.getCell(eduAssistRow,10).value = 4; exp.getCell(eduAssistRow,11).value = 'Education Assistance Payable';
-  const eduCol = rec.expenditureColumns.find(c=>resolveColCoaKey(c)==='EduAssist');
-  const eduColIdx = eduCol ? rec.expenditureColumns.indexOf(eduCol) : -1;
-  const eduExpLetter = eduColIdx>=0 ? exp.getColumn(4+eduColIdx).letter : null;
-  const eduAssistExpBeforeVal = yearlyCoaExpenditureBefore('EduAssist', key); // prior months this year, embedded as a literal since it isn't practical to SUM across every earlier month's own sheet
-  exp.getCell(eduAssistRow,14).value = eduExpLetter
-    ? {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-(${eduAssistExpBeforeVal}+${eduExpLetter}${expTotalRow})`}
-    : {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}-${eduAssistExpBeforeVal}`};
+  exp.getCell(eduAssistRow,14).value = {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}`};
 
   const totalRow = assetStartRow+4;
   exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
@@ -5006,6 +4992,161 @@ function renderDepositNotesheetCard(){
    split the total across revenue categories. The export's own date
    (payment date, one or more days earlier) is ignored on purpose - the
    Monthly Ledger entry always uses the bank-credit date the user typed. */
+/* TBL (Trust Bank) Bank Statement Cross-Check: parses the bank's own
+   Account Statement export (Tran Date / Particular / Withdrawal / Deposit
+   / Balance, one header row, ending at a "Grand Total" row) and matches
+   each deposit/withdrawal the app has recorded for the month (Deposit
+   Notesheets, Online Payments/SSL Commerz, Withdraw Notesheets) against a
+   same-date, same-amount line in the statement. Anything that doesn't
+   line up - on either side - is surfaced clearly so it can be checked,
+   rather than silently assumed correct. SSL Commerz entries get a wider
+   +/-1 day tolerance since that lag is expected and already explained by
+   the user; everything else must match exactly on date. */
+async function parseTBLStatement(arrayBuffer){
+  await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
+  const ws = wb.worksheets[0];
+  let headerRow = null;
+  for(let r=1;r<=15;r++){
+    if(String(ws.getCell(r,1).value||'').trim()==='Tran Date'){ headerRow=r; break; }
+  }
+  if(!headerRow) throw new Error("Couldn't find the 'Tran Date' header row - is this a Trust Bank Account Statement export?");
+  const rows = [];
+  for(let r=headerRow+1; r<=ws.rowCount; r++){
+    const dateRaw = ws.getCell(r,1).value;
+    const particular = String(ws.getCell(r,2).value||'').trim();
+    if(particular==='Grand Total') break;
+    if(!dateRaw) continue;
+    const m = String(dateRaw).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(!m) continue;
+    if(particular==='Balance B/F') continue; // opening balance line, not a transaction
+    rows.push({
+      date: `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`,
+      particular,
+      withdrawal: Number(ws.getCell(r,3).value)||0,
+      deposit: Number(ws.getCell(r,4).value)||0,
+      balance: Number(ws.getCell(r,5).value)||0,
+    });
+  }
+  return rows;
+}
+
+function daysBetween(iso1, iso2){
+  return Math.round((new Date(iso1+'T00:00:00Z') - new Date(iso2+'T00:00:00Z')) / 86400000);
+}
+
+function crossCheckTBLStatement(stmtRows){
+  // Build the list of what the app expects to see, from every source that
+  // touches this bank: Deposit Notesheets + Online Payments on the deposit
+  // side, Withdraw Notesheets on the withdrawal side.
+  const expected = [];
+  (state.depositNotesheetLog||[]).forEach(l=>{
+    expected.push({side:'deposit', date:l.startISO && l.endISO ? null : null, checkDate:(l.revEntryDate||l.date||null), amount:l.grandTotal, label:`Deposit Notesheet #${l.noteNum||''}`.trim(), tolDays:0});
+  });
+  // depositNotesheetLog entries don't carry their own date field directly (the date lives on the linked Monthly Ledger revenue entry) - resolve it from there.
+  (state.depositNotesheetLog||[]).forEach((l,i)=>{
+    let foundDate = null;
+    Object.values(state.monthlyLedger.months).forEach(rec=>{
+      const e = rec.revenueEntries.find(en=>en.id===l.id);
+      if(e) foundDate = e.date;
+    });
+    expected[i].checkDate = foundDate;
+  });
+  (state.onlinePaymentLog||[]).forEach(l=>{
+    expected.push({side:'deposit', checkDate:l.bankDate, amount:l.grandTotal, label:`Online Payment (SSL Commerz)`, tolDays:1});
+  });
+  (state.withdrawNotesheetLog||[]).forEach(l=>{
+    expected.push({side:'withdrawal', checkDate:l.generatedDate||l.endDate, amount:l.grandTotal, label:`Withdraw Notesheet`, tolDays:0});
+  });
+
+  const usedStmtIdx = new Set();
+  const matched = [], missingFromStatement = [];
+  expected.filter(e=>e.checkDate && e.amount).forEach(e=>{
+    let foundIdx = -1;
+    for(let i=0;i<stmtRows.length;i++){
+      if(usedStmtIdx.has(i)) continue;
+      const row = stmtRows[i];
+      const amt = e.side==='deposit' ? row.deposit : row.withdrawal;
+      if(amt<=0) continue;
+      if(Math.abs(amt-e.amount)>1) continue;
+      if(Math.abs(daysBetween(row.date, e.checkDate))>e.tolDays) continue;
+      foundIdx = i; break;
+    }
+    if(foundIdx>=0){ usedStmtIdx.add(foundIdx); matched.push({...e, stmtDate:stmtRows[foundIdx].date}); }
+    else missingFromStatement.push(e);
+  });
+  const unmatchedStmtRows = stmtRows.filter((r,i)=>!usedStmtIdx.has(i) && (r.deposit>0 || r.withdrawal>0));
+  return {matched, missingFromStatement, unmatchedStmtRows};
+}
+
+function renderBankStatementCard(){
+  const card = el(`
+    <div class="card" id="section-bank-statement">
+      <h3><span class="num">&#127974;</span> TBL Bank Statement Cross-Check</h3>
+      <p class="subnote">Upload Trust Bank's own Account Statement export for a month. Every Deposit Notesheet, Online Payment (SSL Commerz), and Withdraw Notesheet recorded for that period is checked against it by date and amount - anything that doesn't line up is called out clearly so you know exactly what to check.</p>
+      <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
+        <div class="field" style="flex:1 1 260px;">
+          <label>Account Statement file (.xlsx)</label>
+          <input type="file" id="bs-file-input" accept=".xlsx">
+        </div>
+        <button class="secondary" type="button" id="bs-check-btn">&#128269; Cross-check</button>
+      </div>
+      <div id="bs-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
+      <div id="bs-results"></div>
+    </div>
+  `);
+  const fileInp = card.querySelector('#bs-file-input');
+  const statusEl = card.querySelector('#bs-status');
+  const resultsEl = card.querySelector('#bs-results');
+  card.querySelector('#bs-check-btn').onclick = async ()=>{
+    const file = fileInp.files && fileInp.files[0];
+    if(!file){ showAlert('Choose the Account Statement .xlsx file first.'); return; }
+    statusEl.textContent = 'Reading statement\u2026';
+    resultsEl.innerHTML = '';
+    try{
+      const stmtRows = await parseTBLStatement(await file.arrayBuffer());
+      const {matched, missingFromStatement, unmatchedStmtRows} = crossCheckTBLStatement(stmtRows);
+      statusEl.textContent = `${stmtRows.length} statement line(s) read. ${matched.length} matched, ${missingFromStatement.length} app entr${missingFromStatement.length===1?'y':'ies'} not found in the statement, ${unmatchedStmtRows.length} statement line(s) not yet recorded in the app.`;
+      const sec = (title,color)=>`<div style="margin-top:10px;"><div style="font-weight:700; font-size:12.5px; color:${color};">${title}</div></div>`;
+      let html = '';
+      if(missingFromStatement.length){
+        html += sec(`&#9888; Recorded in the app but NOT found in the bank statement (check these):`, 'var(--danger)');
+        html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + missingFromStatement.map(e=>`
+          <tr style="border-bottom:1px solid var(--line-soft);">
+            <td style="padding:3px 6px;">${e.label}</td>
+            <td style="padding:3px 6px;">${e.checkDate||'(no date on record)'}</td>
+            <td style="padding:3px 6px; text-align:right;" class="mono">${money(e.amount)}</td>
+            <td style="padding:3px 6px;">${e.side}</td>
+          </tr>`).join('') + `</tbody></table>`;
+      }
+      if(unmatchedStmtRows.length){
+        html += sec(`&#9888; In the bank statement but NOT yet recorded in the app (check if these need an entry - e.g. Salary by Account, Bank Charges):`, 'var(--danger)');
+        html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + unmatchedStmtRows.map(r=>`
+          <tr style="border-bottom:1px solid var(--line-soft);">
+            <td style="padding:3px 6px;">${r.date}</td>
+            <td style="padding:3px 6px;">${escapeHtml(r.particular)}</td>
+            <td style="padding:3px 6px; text-align:right;" class="mono">${r.deposit>0?'+'+money(r.deposit):'-'+money(r.withdrawal)}</td>
+          </tr>`).join('') + `</tbody></table>`;
+      }
+      if(matched.length){
+        html += sec(`&#10003; Matched (${matched.length}):`, 'var(--ink-soft)');
+        html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + matched.map(e=>`
+          <tr style="border-bottom:1px solid var(--line-soft);">
+            <td style="padding:3px 6px;">${e.label}</td>
+            <td style="padding:3px 6px;">${e.checkDate}</td>
+            <td style="padding:3px 6px; text-align:right;" class="mono">${money(e.amount)}</td>
+          </tr>`).join('') + `</tbody></table>`;
+      }
+      resultsEl.innerHTML = html || '<p class="subnote">Nothing to compare - no app entries or statement lines found.</p>';
+    }catch(e){
+      statusEl.textContent = '';
+      showAlert('Could not read that file: ' + e.message);
+    }
+  };
+  return card;
+}
+
 /* Online Payment (SSL Commerz): the raw export is a whole month's worth of
    individual student transactions (one row per payment, dated the day the
    student paid). SSL Commerz doesn't settle same-day - money lands in the
