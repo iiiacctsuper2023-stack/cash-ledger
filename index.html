@@ -2036,9 +2036,6 @@ function renderApp(){
     app.appendChild(renderDayPanel(selectedDayId, computed));
     app.appendChild(renderNotesheetCard());
     app.appendChild(renderDepositNotesheetCard());
-    app.appendChild(renderOnlinePaymentCard());
-    app.appendChild(renderBankStatementCard());
-    app.appendChild(renderDueRegisterCard());
     app.appendChild(el(`
       <div class="card" id="section-monthly-ledger-launch">
         <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
@@ -2657,9 +2654,9 @@ function renderSectionNav(day){
     {id:'section-notesheets', num:String(4+state.banks.length), label:'Notesheets', flyout:[
       {id:'section-notesheets', num:'', label:'Withdraw Notesheets & Summary'},
       {id:'section-deposit-notesheet', num:'', label:'Deposit Notesheet'},
-      {id:'section-online-payment', num:'', label:'Online Payment (SSL Commerz)'},
-      {id:'section-bank-statement', num:'', label:'TBL Bank Statement Cross-Check'},
-      {id:'section-due-register', num:'', label:'Import Due Register'},
+      {id:'ml:section-online-payment', num:'', label:'Online Payment (SSL Commerz)'},
+      {id:'ml:section-bank-statement', num:'', label:'TBL Bank Statement Cross-Check'},
+      {id:'ml:section-due-register', num:'', label:'Import Due Register'},
       {id:'__open-monthly-ledger__', num:'', label:'Monthly Ledger'},
     ]},
   ];
@@ -2690,6 +2687,13 @@ function renderSectionNav(day){
             monthlyLedgerMinimized = false;
             if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
             render();
+          } else if(sub.id.startsWith('ml:')){
+            const realId = sub.id.slice(3);
+            monthlyLedgerOpen = true;
+            monthlyLedgerMinimized = false;
+            if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
+            render();
+            requestAnimationFrame(()=> scrollToId(realId));
           } else {
             scrollToId(sub.id);
           }
@@ -3403,7 +3407,18 @@ function renderMonthlyLedgerCard(){
   drawMlCustomRowsList(card.querySelector('#ml-custom-rows-list'), rec, f);
   drawMlBankBreakdownList(card.querySelector('#ml-bank-breakdown-list'), rec, bankBreakdownShown, isLiveMonth);
 
-  return card;
+  /* SSL Commerz, Due Register import, and the TBL notesheet-matching
+     cross-check all feed or check this same month's figures, so they're
+     rendered as part of this same Monthly Ledger window (not separate
+     top-level page sections anymore) - each keeps its own saved history
+     below its form, removable, and removing an entry un-does whatever it
+     applied to this Monthly Ledger month. */
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(card);
+  wrap.appendChild(renderOnlinePaymentCard());
+  wrap.appendChild(renderDueRegisterCard());
+  wrap.appendChild(renderBankStatementCard());
+  return wrap;
 }
 
 function drawMlGrid(container, dataObj, kind){
@@ -4868,7 +4883,11 @@ function renderNotesheetCard(){
                 <td style="padding:4px 6px;" class="mono">${l.summaryLabel}</td>
                 <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
-                <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" data-action="delete-withdraw-log" data-id="${l.id}" title="Delete this saved record">&times;</button></td>
+                <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
+                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-withdraw-log" data-id="${l.id}" title="View this notesheet">&#128065;</button>
+                  <button type="button" class="secondary small" data-action="download-withdraw-log" data-id="${l.id}" title="Download this notesheet">&#11015;</button>` : ''}
+                  <button type="button" class="danger small" data-action="delete-withdraw-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -4920,7 +4939,11 @@ function renderDepositNotesheetCard(){
                 <td style="padding:4px 6px;" class="mono">#${l.noteNum}</td>
                 <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
-                <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" data-action="delete-deposit-log" data-id="${l.id}" title="Delete this saved record">&times;</button></td>
+                <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
+                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-deposit-log" data-id="${l.id}" title="View this notesheet">&#128065;</button>
+                  <button type="button" class="secondary small" data-action="download-deposit-log" data-id="${l.id}" title="Download this notesheet">&#11015;</button>` : ''}
+                  <button type="button" class="danger small" data-action="delete-deposit-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -5151,7 +5174,7 @@ async function parseDuesRegisterFile(arrayBuffer){
   return {dueTotals, dueStudents, advanceTotal, needsReview};
 }
 
-async function exportDueList(dueStudents, monthKey){
+async function buildDueListWorkbook(dueStudents, monthKey){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Due List');
@@ -5184,6 +5207,10 @@ async function exportDueList(dueStudents, monthKey){
     r += 2;
   });
   ws.getCell(r,4).value = grandTotal; ws.getCell(r,4).font = BOLD;
+  return wb;
+}
+async function exportDueList(dueStudents, monthKey){
+  const wb = await buildDueListWorkbook(dueStudents, monthKey);
   await downloadWorkbook(wb, `Due_List_${monthKeyLabel(monthKey).replace(/\s+/g,'_')}.xlsx`);
 }
 
@@ -5191,7 +5218,7 @@ let lastDueImportReview = null;
 let lastDueImportStatus = null;
 let lastDueStudents = null;
 function renderDueRegisterCard(){
-  const targetKey = monthlyLedgerViewKey || earliestTrackedMonthKey();
+  const targetKey = monthKeyFor(state.month, state.year) || monthlyLedgerViewKey || earliestTrackedMonthKey();
   const card = el(`
     <div class="card" id="section-due-register">
       <h3><span class="num">&#128220;</span> Import Due Register</h3>
@@ -5206,6 +5233,25 @@ function renderDueRegisterCard(){
       </div>
       <div id="dr-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;">${lastDueImportStatus ? escapeHtml(lastDueImportStatus) : ''}</div>
       <div id="dr-review">${lastDueImportReview && lastDueImportReview.length ? drDueReviewHtml(lastDueImportReview) : ''}</div>
+      ${(state.dueImportLog||[]).length ? `
+      <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+          <tbody>
+            ${state.dueImportLog.slice(-5).reverse().map(l=>`
+              <tr style="border-bottom:1px solid var(--line-soft);">
+                <td style="padding:4px 6px;" class="mono">${monthKeyLabel(l.targetKey)}</td>
+                <td style="padding:4px 6px; text-align:right;" class="mono">${money(Object.values(l.catTotals||{}).reduce((s,v)=>s+(v||0),0))}</td>
+                <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
+                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-due-log" data-id="${l.id}" title="View this Due List">&#128065;</button>
+                  <button type="button" class="secondary small" data-action="download-due-log" data-id="${l.id}" title="Download this Due List">&#11015;</button>` : ''}
+                  <button type="button" class="danger small" data-action="delete-due-log" data-id="${l.id}" title="Delete this saved record (also removes it from Monthly Ledger)">&times;</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
     </div>
   `);
   const fileInp = card.querySelector('#dr-file-input');
@@ -5218,13 +5264,28 @@ function renderDueRegisterCard(){
     try{
       const {dueTotals, dueStudents, advanceTotal, needsReview} = await parseDuesRegisterFile(await file.arrayBuffer());
       const rec = getMonthlyLedgerMonth(targetKey);
+      // Snapshot what's being overwritten so this import can be cleanly
+      // un-done later from the history list below (delete = revert).
+      const prevCatTotals = {};
+      Object.keys(dueTotals).forEach(catKey=>{ prevCatTotals[catKey] = rec.revenueTotalDue[catKey]||0; });
+      const prevAdvancePayment = rec.balanceSheet.advancePayment||0;
+      const advanceApplied = advanceTotal>0;
       Object.keys(dueTotals).forEach(catKey=>{ rec.revenueTotalDue[catKey] = dueTotals[catKey]; });
-      if(advanceTotal>0) rec.balanceSheet.advancePayment = advanceTotal;
-      saveState();
+      if(advanceApplied) rec.balanceSheet.advancePayment = advanceTotal;
       lastDueImportReview = needsReview;
       lastDueStudents = dueStudents;
       const catCount = Object.keys(dueTotals).length;
       lastDueImportStatus = `Applied Due figures across ${catCount} categor${catCount===1?'y':'ies'} to ${monthKeyLabel(targetKey)}.${advanceTotal>0 ? ` Advance total ${money(advanceTotal)} applied too.` : ''} ${needsReview.length} row(s) need your manual review below.`;
+      if(!Array.isArray(state.dueImportLog)) state.dueImportLog = [];
+      const fileName = `Due_List_${monthKeyLabel(targetKey).replace(/\s+/g,'_')}.xlsx`;
+      let fileBase64 = null;
+      try{ fileBase64 = await workbookToBase64(await buildDueListWorkbook(dueStudents, targetKey)); }catch(e){ /* view/download simply won't be offered for this entry if this fails */ }
+      state.dueImportLog.push({
+        id:uid(), appliedAt:new Date().toISOString(), targetKey,
+        catTotals:dueTotals, prevCatTotals, advanceTotal, prevAdvancePayment, advanceApplied,
+        fileName, fileBase64
+      });
+      saveState();
       render();
     }catch(e){
       statusEl.textContent = '';
@@ -5257,6 +5318,84 @@ function drDueReviewHtml(needsReview){
   </div>`;
 }
 
+/* Small generic modal (reuses the xlsx-preview overlay's look) for things
+   that aren't a workbook - e.g. re-showing a saved cross-check's results. */
+function showHtmlModal(title, bodyHtml, {onDownload}={}){
+  const overlay = el(`
+    <div class="xlsx-preview-overlay">
+      <div class="xlsx-preview-modal">
+        <div class="xlsx-preview-head">
+          <h4>${escapeHtml(title||'')}</h4>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${onDownload ? '<button type="button" class="secondary" id="htmlm-download">&#11015; Download</button>' : ''}
+            <button type="button" class="secondary" id="htmlm-close">&times; Close</button>
+          </div>
+        </div>
+        <div class="xlsx-preview-body" style="padding:12px;">${bodyHtml}</div>
+      </div>
+    </div>
+  `);
+  overlay.querySelector('#htmlm-close').onclick = ()=> overlay.remove();
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  if(onDownload){ overlay.querySelector('#htmlm-download').onclick = async ()=>{ await onDownload(); overlay.remove(); }; }
+  document.body.appendChild(overlay);
+}
+function buildCrossCheckResultsHtml(matched, missingFromStatement, unmatchedStmtRows){
+  const sec = (title,color)=>`<div style="margin-top:10px;"><div style="font-weight:700; font-size:12.5px; color:${color};">${title}</div></div>`;
+  let html = '';
+  if(missingFromStatement.length){
+    html += sec(`&#9888; Recorded in the app but NOT found in the bank statement (check these):`, 'var(--danger)');
+    html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + missingFromStatement.map(e=>`
+      <tr style="border-bottom:1px solid var(--line-soft);">
+        <td style="padding:3px 6px;">${e.label}</td>
+        <td style="padding:3px 6px;">${e.checkDate||'(no date on record)'}</td>
+        <td style="padding:3px 6px; text-align:right;" class="mono">${money(e.amount)}</td>
+        <td style="padding:3px 6px;">${e.side}</td>
+      </tr>`).join('') + `</tbody></table>`;
+  }
+  if(unmatchedStmtRows.length){
+    html += sec(`&#9888; In the bank statement but NOT yet recorded in the app (check if these need an entry - e.g. Salary by Account, Bank Charges):`, 'var(--danger)');
+    html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + unmatchedStmtRows.map(r=>`
+      <tr style="border-bottom:1px solid var(--line-soft);">
+        <td style="padding:3px 6px;">${r.date}</td>
+        <td style="padding:3px 6px;">${escapeHtml(r.particular)}</td>
+        <td style="padding:3px 6px; text-align:right;" class="mono">${r.deposit>0?'+'+money(r.deposit):'-'+money(r.withdrawal)}</td>
+      </tr>`).join('') + `</tbody></table>`;
+  }
+  if(matched.length){
+    html += sec(`&#10003; Matched (${matched.length}):`, 'var(--ink-soft)');
+    html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + matched.map(e=>`
+      <tr style="border-bottom:1px solid var(--line-soft);">
+        <td style="padding:3px 6px;">${e.label}</td>
+        <td style="padding:3px 6px;">${e.checkDate}</td>
+        <td style="padding:3px 6px; text-align:right;" class="mono">${money(e.amount)}</td>
+      </tr>`).join('') + `</tbody></table>`;
+  }
+  return html || '<p class="subnote">Nothing to compare - no app entries or statement lines found.</p>';
+}
+function bankCrossCheckHistoryHtml(){
+  if(!(state.bankCrossCheckLog||[]).length) return '';
+  return `
+      <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;" id="bs-history-wrap">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history</div>
+        <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+          <tbody>
+            ${state.bankCrossCheckLog.slice(-5).reverse().map(l=>`
+              <tr style="border-bottom:1px solid var(--line-soft);">
+                <td style="padding:4px 6px;" class="mono">${escapeHtml(l.fileName)}</td>
+                <td style="padding:4px 6px;">${l.checkedAt.slice(0,10)}</td>
+                <td style="padding:4px 6px; text-align:right;">${l.matchedCount} matched, ${l.missingCount+l.unmatchedCount} to check</td>
+                <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
+                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-bank-cross-log" data-id="${l.id}" title="View this cross-check">&#128065;</button>
+                  <button type="button" class="secondary small" data-action="download-bank-cross-log" data-id="${l.id}" title="Download the uploaded statement">&#11015;</button>` : ''}
+                  <button type="button" class="danger small" data-action="delete-bank-cross-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+}
 function renderBankStatementCard(){
   const card = el(`
     <div class="card" id="section-bank-statement">
@@ -5271,6 +5410,7 @@ function renderBankStatementCard(){
       </div>
       <div id="bs-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
       <div id="bs-results"></div>
+      ${bankCrossCheckHistoryHtml()}
     </div>
   `);
   const fileInp = card.querySelector('#bs-file-input');
@@ -5282,40 +5422,25 @@ function renderBankStatementCard(){
     statusEl.textContent = 'Reading statement\u2026';
     resultsEl.innerHTML = '';
     try{
-      const stmtRows = await parseTBLStatement(await file.arrayBuffer());
+      const buf = await file.arrayBuffer();
+      const stmtRows = await parseTBLStatement(buf);
       const {matched, missingFromStatement, unmatchedStmtRows} = crossCheckTBLStatement(stmtRows);
       statusEl.textContent = `${stmtRows.length} statement line(s) read. ${matched.length} matched, ${missingFromStatement.length} app entr${missingFromStatement.length===1?'y':'ies'} not found in the statement, ${unmatchedStmtRows.length} statement line(s) not yet recorded in the app.`;
-      const sec = (title,color)=>`<div style="margin-top:10px;"><div style="font-weight:700; font-size:12.5px; color:${color};">${title}</div></div>`;
-      let html = '';
-      if(missingFromStatement.length){
-        html += sec(`&#9888; Recorded in the app but NOT found in the bank statement (check these):`, 'var(--danger)');
-        html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + missingFromStatement.map(e=>`
-          <tr style="border-bottom:1px solid var(--line-soft);">
-            <td style="padding:3px 6px;">${e.label}</td>
-            <td style="padding:3px 6px;">${e.checkDate||'(no date on record)'}</td>
-            <td style="padding:3px 6px; text-align:right;" class="mono">${money(e.amount)}</td>
-            <td style="padding:3px 6px;">${e.side}</td>
-          </tr>`).join('') + `</tbody></table>`;
-      }
-      if(unmatchedStmtRows.length){
-        html += sec(`&#9888; In the bank statement but NOT yet recorded in the app (check if these need an entry - e.g. Salary by Account, Bank Charges):`, 'var(--danger)');
-        html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + unmatchedStmtRows.map(r=>`
-          <tr style="border-bottom:1px solid var(--line-soft);">
-            <td style="padding:3px 6px;">${r.date}</td>
-            <td style="padding:3px 6px;">${escapeHtml(r.particular)}</td>
-            <td style="padding:3px 6px; text-align:right;" class="mono">${r.deposit>0?'+'+money(r.deposit):'-'+money(r.withdrawal)}</td>
-          </tr>`).join('') + `</tbody></table>`;
-      }
-      if(matched.length){
-        html += sec(`&#10003; Matched (${matched.length}):`, 'var(--ink-soft)');
-        html += `<table style="width:100%; font-size:12.5px; border-collapse:collapse;"><tbody>` + matched.map(e=>`
-          <tr style="border-bottom:1px solid var(--line-soft);">
-            <td style="padding:3px 6px;">${e.label}</td>
-            <td style="padding:3px 6px;">${e.checkDate}</td>
-            <td style="padding:3px 6px; text-align:right;" class="mono">${money(e.amount)}</td>
-          </tr>`).join('') + `</tbody></table>`;
-      }
-      resultsEl.innerHTML = html || '<p class="subnote">Nothing to compare - no app entries or statement lines found.</p>';
+      resultsEl.innerHTML = buildCrossCheckResultsHtml(matched, missingFromStatement, unmatchedStmtRows);
+      if(!Array.isArray(state.bankCrossCheckLog)) state.bankCrossCheckLog = [];
+      state.bankCrossCheckLog.push({
+        id:uid(), checkedAt:new Date().toISOString(), fileName:file.name,
+        matchedCount:matched.length, missingCount:missingFromStatement.length, unmatchedCount:unmatchedStmtRows.length,
+        matched, missingFromStatement, unmatchedStmtRows,
+        fileBase64: arrayBufferToBase64(buf)
+      });
+      saveState();
+      // Refresh just the saved-history block below - the results just
+      // shown above (in #bs-results) are left alone so they don't vanish.
+      const oldHist = card.querySelector('#bs-history-wrap');
+      const newHistHtml = bankCrossCheckHistoryHtml();
+      if(oldHist) oldHist.outerHTML = newHistHtml;
+      else if(newHistHtml) card.appendChild(el(newHistHtml));
     }catch(e){
       statusEl.textContent = '';
       showAlert('Could not read that file: ' + e.message);
@@ -5409,7 +5534,11 @@ function renderOnlinePaymentCard(){
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;">${l.bankDate}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
-                <td style="padding:4px 6px; text-align:right;"><button type="button" class="danger small" data-action="delete-online-payment-log" data-id="${l.id}" title="Delete this saved record">&times;</button></td>
+                <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
+                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-online-payment-log" data-id="${l.id}" title="View">&#128065;</button>
+                  <button type="button" class="secondary small" data-action="download-online-payment-log" data-id="${l.id}" title="Download">&#11015;</button>` : ''}
+                  <button type="button" class="danger small" data-action="delete-online-payment-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -5449,9 +5578,9 @@ function renderOnlinePaymentCard(){
       tbody.appendChild(tr);
     });
     previewWrap.appendChild(table);
-    table.querySelector('#op-save-all-btn').onclick = ()=>{
+    table.querySelector('#op-save-all-btn').onclick = async ()=>{
       if(currentBuckets.some(b=>!b.date)){ showAlert('Every row needs a date before saving.'); return; }
-      currentBuckets.forEach(b=> saveOnlinePaymentBucket(b));
+      for(const b of currentBuckets){ await saveOnlinePaymentBucket(b); }
       saveState(); render();
     };
   }
@@ -5473,7 +5602,31 @@ function renderOnlinePaymentCard(){
   return card;
 }
 
-function saveOnlinePaymentBucket(b){
+/* One small single-sheet workbook per bank-credit bucket, purely so the
+   category breakdown that was recorded can be viewed/downloaded again
+   later from the saved history list, same as a notesheet. */
+async function buildOnlinePaymentWorkbook(b){
+  await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Online Payment');
+  const BOLD = {bold:true};
+  ws.getColumn(1).width = 34; ws.getColumn(2).width = 18;
+  let r=1;
+  ws.getCell(r,1).value = `Online Payment (SSL Commerz) \u2014 bank credit ${b.date}`; ws.getCell(r,1).font = BOLD; r+=2;
+  const rows = [
+    ['Admission Fee', b.admissionFee], ['Session Fee', b.sessionFee], ['Tuition Fee', b.tuitionFee],
+    ['Muqaddam Fee', b.mqmFee], ['Books & Stationery', b.booksSty], ['Transport Fee', b.transportFee],
+    ['Uniform Fee', b.uniform], ['Event Fee', b.eventFee], ['Misc (Exam Fee / Late Fine)', b.misc],
+  ];
+  rows.forEach(([label,amt])=>{
+    if(!amt) return;
+    ws.getCell(r,1).value = label; ws.getCell(r,2).value = amt; r++;
+  });
+  ws.getCell(r,1).value = 'Total'; ws.getCell(r,1).font = BOLD;
+  ws.getCell(r,2).value = b.total; ws.getCell(r,2).font = BOLD;
+  return wb;
+}
+async function saveOnlinePaymentBucket(b){
   const logId = uid();
   const revEntry = {id:logId, date:b.date, desc:`Online Payment (SSL Commerz) - entered ${b.date}`};
   REVENUE_CATS.forEach(c=>{ revEntry[c.key] = 0; });
@@ -5490,7 +5643,10 @@ function saveOnlinePaymentBucket(b){
   const mlKey = monthKeyFor(MONTHS[parseInt(m,10)-1], y);
   getMonthlyLedgerMonth(mlKey).revenueEntries.push(revEntry);
   if(!Array.isArray(state.onlinePaymentLog)) state.onlinePaymentLog = [];
-  state.onlinePaymentLog.push({id:logId, generatedAt:new Date().toISOString(), bankDate:b.date, grandTotal:b.total});
+  const fileName = `Online_Payment_${b.date}.xlsx`;
+  let fileBase64 = null;
+  try{ fileBase64 = await workbookToBase64(await buildOnlinePaymentWorkbook(b)); }catch(e){ /* view/download simply won't be offered for this entry if this fails */ }
+  state.onlinePaymentLog.push({id:logId, generatedAt:new Date().toISOString(), bankDate:b.date, grandTotal:b.total, fileName, fileBase64});
 }
 
 function drawTransferList(container, day, field, emptyText){
@@ -5891,6 +6047,16 @@ function wireDelegation(){
       state.withdrawNotesheetLog = (state.withdrawNotesheetLog||[]).filter(l=>l.id!==id);
       saveState(); render(); return;
     }
+    if(action==='view-withdraw-log'){
+      const l = (state.withdrawNotesheetLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) viewStoredWorkbook(l.fileBase64, l.fileName, `Notesheets & Summary (${l.startDate} to ${l.endDate})`);
+      return;
+    }
+    if(action==='download-withdraw-log'){
+      const l = (state.withdrawNotesheetLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) downloadStoredWorkbook(l.fileBase64, l.fileName);
+      return;
+    }
     if(action==='toggle-recon-detail'){
       const bankId = t.dataset.bank;
       reconDetailOpen[bankId] = !reconDetailOpen[bankId];
@@ -5904,12 +6070,74 @@ function wireDelegation(){
       });
       saveState(); render(); return;
     }
+    if(action==='view-deposit-log'){
+      const l = (state.depositNotesheetLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) viewStoredWorkbook(l.fileBase64, l.fileName, `Deposit Notesheet #${l.noteNum}`);
+      return;
+    }
+    if(action==='download-deposit-log'){
+      const l = (state.depositNotesheetLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) downloadStoredWorkbook(l.fileBase64, l.fileName);
+      return;
+    }
     if(action==='delete-online-payment-log'){
       const id = t.dataset.id;
       state.onlinePaymentLog = (state.onlinePaymentLog||[]).filter(l=>l.id!==id);
       Object.values(state.monthlyLedger.months).forEach(rec=>{
         rec.revenueEntries = rec.revenueEntries.filter(e=>e.id!==id);
       });
+      saveState(); render(); return;
+    }
+    if(action==='view-online-payment-log'){
+      const l = (state.onlinePaymentLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) viewStoredWorkbook(l.fileBase64, l.fileName, `Online Payment \u2014 ${l.bankDate}`);
+      return;
+    }
+    if(action==='download-online-payment-log'){
+      const l = (state.onlinePaymentLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) downloadStoredWorkbook(l.fileBase64, l.fileName);
+      return;
+    }
+    if(action==='delete-due-log'){
+      const id = t.dataset.id;
+      const l = (state.dueImportLog||[]).find(x=>x.id===id);
+      if(l){
+        const rec = state.monthlyLedger.months[l.targetKey];
+        if(rec){
+          // Revert exactly what this import overwrote, back to what it was
+          // just before this import - mirrors deleting a notesheet entry.
+          Object.keys(l.prevCatTotals||{}).forEach(catKey=>{ rec.revenueTotalDue[catKey] = l.prevCatTotals[catKey]; });
+          if(l.advanceApplied) rec.balanceSheet.advancePayment = l.prevAdvancePayment;
+        }
+      }
+      state.dueImportLog = (state.dueImportLog||[]).filter(l=>l.id!==id);
+      saveState(); render(); return;
+    }
+    if(action==='view-due-log'){
+      const l = (state.dueImportLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) viewStoredWorkbook(l.fileBase64, l.fileName, `Due List \u2014 ${monthKeyLabel(l.targetKey)}`);
+      return;
+    }
+    if(action==='download-due-log'){
+      const l = (state.dueImportLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) downloadStoredWorkbook(l.fileBase64, l.fileName);
+      return;
+    }
+    if(action==='view-bank-cross-log'){
+      const l = (state.bankCrossCheckLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) showHtmlModal(`${l.fileName} \u2014 ${l.checkedAt.slice(0,10)}`,
+        buildCrossCheckResultsHtml(l.matched, l.missingFromStatement, l.unmatchedStmtRows),
+        {onDownload: ()=>downloadStoredWorkbook(l.fileBase64, l.fileName)});
+      return;
+    }
+    if(action==='download-bank-cross-log'){
+      const l = (state.bankCrossCheckLog||[]).find(x=>x.id===t.dataset.id);
+      if(l) downloadStoredWorkbook(l.fileBase64, l.fileName);
+      return;
+    }
+    if(action==='delete-bank-cross-log'){
+      const id = t.dataset.id;
+      state.bankCrossCheckLog = (state.bankCrossCheckLog||[]).filter(l=>l.id!==id);
       saveState(); render(); return;
     }
     if(action==='ml-add-month'){
@@ -6673,19 +6901,21 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   const dateText = depositFormatISODateRangeText(startISO, endISO);
   const lines = buildDepositLines(parsed.totals);
   // Miscellaneous Collection: cash income logged in the Daily Ledger under
-  // a head other than Service Revenue. Only days inside [startISO, endISO]
-  // with a non-zero day.miscCollection contribute a line here, appended
-  // after all the Cloud Campus fee categories above, named by whatever
-  // description was entered for that day's collection (falling back to a
-  // plain "Miscellaneous collection" label if none was given). A day with
-  // no Miscellaneous Collection simply contributes nothing.
+  // a head other than Service Revenue. Every day inside [startISO, endISO]
+  // with a non-zero day.miscCollection is summed into a SINGLE line here,
+  // appended after all the Cloud Campus fee categories above, always
+  // labelled with the plain "Miscellaneous collection" description (no
+  // per-day description text, and never more than one line no matter how
+  // many days contributed) - this keeps the extra-row math below correct
+  // and matches the institute's template wording. A range with no
+  // Miscellaneous Collection at all contributes nothing, so the notesheet
+  // comes out exactly as it did before this line existed.
+  let miscTotal = 0;
   (state.days||[]).forEach(day=>{
     if(!day.date || day.date < startISO || day.date > endISO) return;
-    const amt = Number(day.miscCollection)||0;
-    if(amt<=0) return;
-    const descText = miscCollectionDescText(day);
-    lines.push([descText ? `Miscellaneous collection - ${descText}` : 'Miscellaneous collection', amt]);
+    miscTotal += Number(day.miscCollection)||0;
   });
+  if(miscTotal>0) lines.push(['Miscellaneous collection', miscTotal]);
   if(!lines.length){ showAlert('No non-zero fee categories were found in that file.'); return; }
 
   const noteNum = state.nextDepositNotesheetNo || 117;
@@ -6712,19 +6942,61 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   }
 
   if(lines.length > (fixedLastCatRow - firstRow + 1)){
-    // More non-zero categories than the template has rows for - insert
-    // extra blank rows above the fixed Total row. spliceRows (unlike
-    // duplicateRow) correctly shifts the merged blocks below it - the
-    // Total/Words/signature rows - as single intact merges instead of
-    // corrupting/tripling them.
+    // More non-zero categories (e.g. a Miscellaneous Collection line pushing
+    // past the template's 6 pre-formatted rows) than the template has rows
+    // for. ws.spliceRows() looks like the right tool here, but ExcelJS has
+    // a bug where inserting rows above a block of merged cells duplicates
+    // those merges instead of shifting them - that's what was causing
+    // "Total collected amount", the amount-in-words line and the signatory
+    // block to each repeat several times in the exported file. Instead,
+    // shift everything below the category block down by hand: unmerge ->
+    // copy cell-by-cell from the bottom row up -> re-merge at the new row
+    // numbers. This never touches ExcelJS's merge-splicing code at all, so
+    // every one of those blocks ends up shifted down exactly once, still a
+    // single merged range each - and nothing is ever added below the
+    // amount-in-words line, only the existing signature block shifts down
+    // to make room.
     const extra = lines.length - (fixedLastCatRow - firstRow + 1);
+    const shiftPoint = fixedLastCatRow;
+
+    const parseRange = (rng)=>{
+      const m = rng.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+      return {c1:m[1], r1:+m[2], c2:m[3], r2:+m[4]};
+    };
+    const belowMerges = (ws.model.merges||[]).filter(rng=>parseRange(rng).r1 > shiftPoint);
+    belowMerges.forEach(rng=>{ try{ ws.unMergeCells(rng); }catch(e){ /* ignore */ } });
+
+    let lastRow = ws.rowCount || shiftPoint;
+    belowMerges.forEach(rng=>{ const {r2} = parseRange(rng); if(r2>lastRow) lastRow = r2; });
+
+    for(let r = lastRow; r > shiftPoint; r--){
+      const srcRow = ws.getRow(r);
+      const dstRow = ws.getRow(r + extra);
+      dstRow.height = srcRow.height;
+      srcRow.eachCell({includeEmpty:true}, (cell, colNumber)=>{
+        const dstCell = dstRow.getCell(colNumber);
+        dstCell.value = cell.value;
+        dstCell.style = JSON.parse(JSON.stringify(cell.style));
+      });
+    }
+    // The rows just vacated become the new blank category slots - clear
+    // out whatever used to live there (now duplicated one row down) before
+    // filling them in with the extra category lines below.
+    for(let i=0;i<extra;i++){
+      ws.getRow(shiftPoint+1+i).eachCell({includeEmpty:true}, cell=>{ cell.value = null; });
+    }
+    belowMerges.forEach(rng=>{
+      const {c1,r1,c2,r2} = parseRange(rng);
+      try{ ws.mergeCells(`${c1}${r1+extra}:${c2}${r2+extra}`); }catch(e){ /* ignore */ }
+    });
+
     const templateStyles = [3,4,10].map(c=>({...ws.getCell(fixedLastCatRow,c).style}));
     const templateHeight = ws.getRow(fixedLastCatRow).height;
-    ws.spliceRows(fixedLastCatRow+1, 0, ...Array(extra).fill([]));
     for(let i=0;i<extra;i++){
-      const r = fixedLastCatRow+1+i;
+      const r = shiftPoint+1+i;
       if(templateHeight) ws.getRow(r).height = templateHeight;
       [3,4,10].forEach((c,idx)=>{ ws.getCell(r,c).style = {...templateStyles[idx]}; });
+      try{ ws.mergeCells(`D${r}:I${r}`); }catch(e){ /* ignore */ }
     }
   }
   const lastCatRow = fixedLastCatRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
@@ -6790,7 +7062,8 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   state.depositNotesheetLog.push({
     id:depositLogId, generatedAt:new Date().toISOString(), noteNum, startDate:startISO, endDate:endISO,
     lines: lines.map(([desc,amt])=>({desc,amt})),
-    grandTotal: lines.reduce((s,[,amt])=>s+amt,0)
+    grandTotal: lines.reduce((s,[,amt])=>s+amt,0),
+    fileName:`Revenue_deposit-${noteNum}.xlsx`, fileBase64: await workbookToBase64(wb)
   });
 
   saveState();
@@ -7354,11 +7627,12 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
 
   if(shouldSave && incrementNumbering){
     if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
+    const fileName = `Notesheets_${startDate}_to_${endDate}.xlsx`;
     state.withdrawNotesheetLog.push({
       id:uid(), generatedAt:new Date().toISOString(), generatedDate:new Date().toISOString().slice(0,10), startDate, endDate,
       summaryLabel:`${state.summaryCounterYear}-${summaryNum}`,
       categories: summaryRows.map(r=>({label:r.label, total:r.total})),
-      grandTotal
+      grandTotal, fileName, fileBase64: await workbookToBase64(wb)
     });
   }
 
@@ -7578,6 +7852,17 @@ function downloadStoredWorkbook(base64, filename){
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+}
+async function viewStoredWorkbook(base64, filename, title){
+  if(!base64){ showAlert('No saved copy of this file was found.'); return; }
+  try{
+    await loadExcelJS();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(base64ToArrayBuffer(base64));
+    showWorkbookPreview(wb, {title: title||filename, onDownload: ()=>downloadStoredWorkbook(base64, filename)});
+  }catch(e){
+    showAlert('Could not open the saved file: ' + e.message);
+  }
 }
 
 async function exportDay(dayId){
