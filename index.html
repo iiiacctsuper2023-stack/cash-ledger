@@ -5201,34 +5201,67 @@ async function buildDueListWorkbook(dueStudents, monthKey){
   const ws = wb.addWorksheet('Due List');
   const FONT = {name:'Times New Roman', size:11};
   const BOLD = {name:'Times New Roman', size:11, bold:true};
-  ws.getColumn(1).width = 14; ws.getColumn(2).width = 30; ws.getColumn(3).width = 20; ws.getColumn(4).width = 14;
+  const TOTAL_BOLD = {name:'Times New Roman', size:12, bold:true};
+  const GRAND_BOLD = {name:'Times New Roman', size:13, bold:true};
+  const THIN_BORDER = {top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'}};
+  const CENTER = {horizontal:'center', vertical:'middle'};
+  ws.getColumn(1).width = 14; ws.getColumn(2).width = 30; ws.getColumn(3).width = 20; ws.getColumn(4).width = 14; ws.getColumn(5).width = 16;
   const [y,m] = monthKey.split('-');
   const monthIdx = MONTHS.indexOf(m);
   const lastDay = new Date(Date.UTC(parseInt(y,10), monthIdx+1, 0)).getUTCDate();
   const ordinal = n => n%10===1&&n!==11?n+'st':n%10===2&&n!==12?n+'nd':n%10===3&&n!==13?n+'rd':n+'th';
+  const borderRow = (row, cols)=>{ for(let cc=1;cc<=cols;cc++) ws.getCell(row,cc).border = THIN_BORDER; };
+
   let r = 1;
-  ws.getCell(r,1).value = `Due as on ${ordinal(lastDay)} ${m} ${y}`; ws.getCell(r,1).font = BOLD; r++;
+  ws.mergeCells(r,1,r,4);
+  ws.getCell(r,1).value = `Due as on ${ordinal(lastDay)} ${m} ${y}`; ws.getCell(r,1).font = BOLD; ws.getCell(r,1).alignment = CENTER;
+  borderRow(r,4);
+  r++;
+
   let grandTotal = 0;
+  let sectionsWritten = 0;
   REVENUE_CATS.forEach(c=>{
     const students = dueStudents[c.key];
     if(!students || !students.length) return;
-    ws.getCell(r,1).value = DUE_LIST_SECTION_TITLE[c.key] || c.label; ws.getCell(r,1).font = BOLD; r++;
+
+    if(sectionsWritten>0){
+      // Separator line between the previous section's Total and this new category
+      ws.mergeCells(r,1,r,4);
+      ws.getCell(r,1).alignment = CENTER;
+      borderRow(r,4);
+      r++;
+    }
+    sectionsWritten++;
+
+    ws.mergeCells(r,1,r,4);
+    ws.getCell(r,1).value = DUE_LIST_SECTION_TITLE[c.key] || c.label; ws.getCell(r,1).font = BOLD; ws.getCell(r,1).alignment = CENTER;
+    borderRow(r,4);
+    r++;
+
     ws.getCell(r,1).value = 'Student ID'; ws.getCell(r,2).value = 'Student Name'; ws.getCell(r,3).value = 'Category'; ws.getCell(r,4).value = 'Dues Amount';
     for(let cc=1;cc<=4;cc++) ws.getCell(r,cc).font = BOLD;
+    borderRow(r,4);
     r++;
+
     let sectionTotal = 0;
     students.forEach(s=>{
       ws.getCell(r,1).value = s.studentId; ws.getCell(r,2).value = s.name; ws.getCell(r,3).value = s.category; ws.getCell(r,4).value = s.amount;
       ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
       for(let cc=1;cc<=4;cc++) ws.getCell(r,cc).font = FONT;
+      borderRow(r,4);
       sectionTotal += s.amount;
       r++;
     });
-    ws.getCell(r,1).value = 'Total'; ws.getCell(r,1).font = BOLD; ws.getCell(r,4).value = sectionTotal; ws.getCell(r,4).font = BOLD; ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
+
+    ws.mergeCells(r,1,r,3);
+    ws.getCell(r,1).value = 'Total'; ws.getCell(r,1).font = TOTAL_BOLD; ws.getCell(r,1).alignment = CENTER;
+    ws.getCell(r,4).value = sectionTotal; ws.getCell(r,4).font = TOTAL_BOLD; ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
+    borderRow(r,4);
     grandTotal += sectionTotal;
-    r += 2;
+    r++;
   });
-  ws.getCell(r,4).value = grandTotal; ws.getCell(r,4).font = BOLD; ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
+
+  ws.getCell(r,5).value = grandTotal; ws.getCell(r,5).font = GRAND_BOLD; ws.getCell(r,5).numFmt = ASIAN_NUMFMT;
   return wb;
 }
 async function exportDueList(dueStudents, monthKey){
