@@ -5083,13 +5083,16 @@ function crossCheckTBLStatement(stmtRows){
 }
 
 /* Due Register import: the raw export is one row per outstanding fee (or
-   advance payment), each tagged with which month it belongs to and which
-   account(s)/category it's under. A row with a single category maps
-   straight to that Revenue category's "Total Due" for its month. A row
-   naming MULTIPLE categories (comma-separated) or a month label we can't
-   parse (e.g. "Adm-26") is never guessed at - it's collected and handed
-   back to the accountant to split/assign by hand, by Student ID. */
-const MONTH_ABBR_MAP = {Jan:'January',Feb:'February',Mar:'March',Apr:'April',May:'May',Jun:'June',Jul:'July',Aug:'August',Sep:'September',Oct:'October',Nov:'November',Dec:'December'};
+   advance payment) as of right now, tagged with which account(s)/category
+   it's under and (for context only) which month it originally arose in.
+   This is a current-state snapshot, not a monthly flow - so every row's
+   Dues Amount rolls into ONE combined per-category total, applied to
+   whichever month is currently open in the Monthly Ledger (its "Due
+   Payment" balance as of that month's end), matching the "Due as on <date>"
+   framing of the Due List export built alongside it. A row naming
+   MULTIPLE categories (comma-separated) is never guessed at - it's
+   collected and handed back to the accountant to split/assign by hand,
+   by Student ID. */
 const DUE_ACCOUNT_TO_REVENUE_KEY = {
   'transport -ar':'transportFee', 'transport-ar':'transportFee', 'transport':'transportFee',
   'tuition fee':'tuitionFee',
@@ -5100,13 +5103,11 @@ const DUE_ACCOUNT_TO_REVENUE_KEY = {
   'books & sty':'booksSty', 'books & stationeries':'booksSty',
   'event fee':'eventFee',
 };
-function parseDueMonthLabel(label){
-  const m = String(label||'').trim().match(/^([A-Za-z]{3})-(\d{2})$/);
-  if(!m) return null;
-  const monthName = MONTH_ABBR_MAP[m[1]];
-  if(!monthName) return null; // e.g. "Adm-26" - not a real calendar month, needs manual review
-  return {monthName, year:'20'+m[2]};
-}
+// Section titles for the Due List export, matching the accountant's own template wording
+const DUE_LIST_SECTION_TITLE = {
+  tuitionFee:'Tuition Fee', admissionFee:'Admission Fee & Admission Form', transportFee:'Transport Fee Due',
+  mqmFee:'Muqaddam Fee', uniform:'Uniform Fee Due', sessionFee:'Session Fee Due', booksSty:'Books & Stationery Due', eventFee:'Event Fee Due',
+};
 async function parseDuesRegisterFile(arrayBuffer){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
@@ -5119,7 +5120,8 @@ async function parseDuesRegisterFile(arrayBuffer){
     if(found['Student ID'] && found['Dues Amount']){ headerRow=r; headers=found; break; }
   }
   if(!headerRow) throw new Error("Couldn't find the 'Student ID' / 'Dues Amount' header row in this file.");
-  const dueByMonth = {}; // mlKey -> {catKey -> amount}
+  const dueTotals = {}; // catKey -> total amount
+  const dueStudents = {}; // catKey -> [{studentId, name, category, amount}]
   let advanceTotal = 0;
   const needsReview = [];
   for(let r=headerRow+1; r<=ws.rowCount; r++){
@@ -5127,41 +5129,80 @@ async function parseDuesRegisterFile(arrayBuffer){
     const studentId = row.getCell(headers['Student ID']).value;
     if(!studentId) continue;
     const name = row.getCell(headers['Student Name']).value||'';
+    const category = row.getCell(headers['Category']) ? (row.getCell(headers['Category']).value||'') : '';
     const duesAmt = Number(row.getCell(headers['Dues Amount']).value)||0;
     const advAmt = Number(row.getCell(headers['Advance Amount']).value)||0;
     const duesMonthLabel = row.getCell(headers['Dues Month/Year']).value;
     const duesAccounts = String(row.getCell(headers['Dues Account(s)']).value||'').trim();
 
     if(duesAmt>0){
-      const parsed = parseDueMonthLabel(duesMonthLabel);
       const accList = duesAccounts.split(',').map(s=>s.trim()).filter(Boolean);
       const singleKey = accList.length===1 ? DUE_ACCOUNT_TO_REVENUE_KEY[accList[0].toLowerCase()] : null;
-      if(!parsed || accList.length!==1 || !singleKey){
+      if(accList.length!==1 || !singleKey){
         needsReview.push({studentId, name, amount:duesAmt, accounts:duesAccounts, monthLabel:duesMonthLabel, type:'due'});
       } else {
-        const mlKey = monthKeyFor(parsed.monthName, parsed.year);
-        if(!dueByMonth[mlKey]) dueByMonth[mlKey] = {};
-        dueByMonth[mlKey][singleKey] = (dueByMonth[mlKey][singleKey]||0) + duesAmt;
+        dueTotals[singleKey] = (dueTotals[singleKey]||0) + duesAmt;
+        if(!dueStudents[singleKey]) dueStudents[singleKey] = [];
+        dueStudents[singleKey].push({studentId:String(studentId), name:String(name), category:String(category), amount:duesAmt});
       }
     }
-    advanceTotal += advAmt; // one combined figure across every row/month - goes into a single Advance Payment box, not split by month
+    advanceTotal += advAmt; // one combined figure across every row - goes into a single Advance Payment box, not split by month
   }
-  return {dueByMonth, advanceTotal, needsReview};
+  return {dueTotals, dueStudents, advanceTotal, needsReview};
+}
+
+async function exportDueList(dueStudents, monthKey){
+  await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Due List');
+  const FONT = {name:'Times New Roman', size:11};
+  const BOLD = {name:'Times New Roman', size:11, bold:true};
+  ws.getColumn(1).width = 14; ws.getColumn(2).width = 30; ws.getColumn(3).width = 20; ws.getColumn(4).width = 14;
+  const [y,m] = monthKey.split('-');
+  const monthIdx = MONTHS.indexOf(m);
+  const lastDay = new Date(Date.UTC(parseInt(y,10), monthIdx+1, 0)).getUTCDate();
+  const ordinal = n => n%10===1&&n!==11?n+'st':n%10===2&&n!==12?n+'nd':n%10===3&&n!==13?n+'rd':n+'th';
+  let r = 1;
+  ws.getCell(r,1).value = `Due as on ${ordinal(lastDay)} ${m} ${y}`; ws.getCell(r,1).font = BOLD; r++;
+  let grandTotal = 0;
+  REVENUE_CATS.forEach(c=>{
+    const students = dueStudents[c.key];
+    if(!students || !students.length) return;
+    ws.getCell(r,1).value = DUE_LIST_SECTION_TITLE[c.key] || c.label; ws.getCell(r,1).font = BOLD; r++;
+    ws.getCell(r,1).value = 'Student ID'; ws.getCell(r,2).value = 'Student Name'; ws.getCell(r,3).value = 'Category'; ws.getCell(r,4).value = 'Dues Amount';
+    for(let cc=1;cc<=4;cc++) ws.getCell(r,cc).font = BOLD;
+    r++;
+    let sectionTotal = 0;
+    students.forEach(s=>{
+      ws.getCell(r,1).value = s.studentId; ws.getCell(r,2).value = s.name; ws.getCell(r,3).value = s.category; ws.getCell(r,4).value = s.amount;
+      for(let cc=1;cc<=4;cc++) ws.getCell(r,cc).font = FONT;
+      sectionTotal += s.amount;
+      r++;
+    });
+    ws.getCell(r,1).value = 'Total'; ws.getCell(r,1).font = BOLD; ws.getCell(r,4).value = sectionTotal; ws.getCell(r,4).font = BOLD;
+    grandTotal += sectionTotal;
+    r += 2;
+  });
+  ws.getCell(r,4).value = grandTotal; ws.getCell(r,4).font = BOLD;
+  await downloadWorkbook(wb, `Due_List_${monthKeyLabel(monthKey).replace(/\s+/g,'_')}.xlsx`);
 }
 
 let lastDueImportReview = null;
 let lastDueImportStatus = null;
+let lastDueStudents = null;
 function renderDueRegisterCard(){
+  const targetKey = monthlyLedgerViewKey || earliestTrackedMonthKey();
   const card = el(`
     <div class="card" id="section-due-register">
       <h3><span class="num">&#128220;</span> Import Due Register</h3>
-      <p class="subnote">Upload the Dues Register export. Each row's Dues Amount goes into that row's own month's "Total Due" by category. Every row's Advance Amount is summed into one combined total and placed in the Advance Payment box for whichever month is currently open in the Monthly Ledger. Rows naming more than one Due category, or with a month label that isn't a normal calendar month (e.g. "Adm-26"), are listed below by Student ID instead of being guessed at.</p>
+      <p class="subnote">Upload the Dues Register export. This is a current snapshot, not a monthly flow - every row's Dues Amount is combined per category and applied as the "Due Payment" as of ${targetKey?escapeHtml(monthKeyLabel(targetKey)):'the selected month'} (whichever month is currently open in the Monthly Ledger). Every row's Advance Amount is likewise combined into one total for the Advance Payment box. Rows naming more than one Due category are listed below by Student ID instead of being guessed at - add those by hand once you've decided the split.</p>
       <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
         <div class="field" style="flex:1 1 260px;">
           <label>Dues Register file (.xlsx)</label>
           <input type="file" id="dr-file-input" accept=".xlsx">
         </div>
         <button class="secondary" type="button" id="dr-import-btn">&#11014; Import</button>
+        ${lastDueStudents ? `<button class="secondary" type="button" id="dr-export-btn">&#128190; Export Due List (.xlsx)</button>` : ''}
       </div>
       <div id="dr-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;">${lastDueImportStatus ? escapeHtml(lastDueImportStatus) : ''}</div>
       <div id="dr-review">${lastDueImportReview && lastDueImportReview.length ? drDueReviewHtml(lastDueImportReview) : ''}</div>
@@ -5172,30 +5213,32 @@ function renderDueRegisterCard(){
   card.querySelector('#dr-import-btn').onclick = async ()=>{
     const file = fileInp.files && fileInp.files[0];
     if(!file){ showAlert('Choose the Dues Register .xlsx file first.'); return; }
+    if(!targetKey){ showAlert('Add at least one month to the Monthly Ledger first, so there\'s somewhere to apply this to.'); return; }
     statusEl.textContent = 'Reading\u2026';
     try{
-      const {dueByMonth, advanceTotal, needsReview} = await parseDuesRegisterFile(await file.arrayBuffer());
-      let monthsTouched = 0;
-      Object.keys(dueByMonth).forEach(mlKey=>{
-        const rec = getMonthlyLedgerMonth(mlKey);
-        Object.keys(dueByMonth[mlKey]).forEach(catKey=>{ rec.revenueTotalDue[catKey] = dueByMonth[mlKey][catKey]; });
-        monthsTouched++;
-      });
-      if(advanceTotal>0){
-        const targetKey = monthlyLedgerViewKey || earliestTrackedMonthKey();
-        if(targetKey) getMonthlyLedgerMonth(targetKey).balanceSheet.advancePayment = advanceTotal;
-      }
+      const {dueTotals, dueStudents, advanceTotal, needsReview} = await parseDuesRegisterFile(await file.arrayBuffer());
+      const rec = getMonthlyLedgerMonth(targetKey);
+      Object.keys(dueTotals).forEach(catKey=>{ rec.revenueTotalDue[catKey] = dueTotals[catKey]; });
+      if(advanceTotal>0) rec.balanceSheet.advancePayment = advanceTotal;
       saveState();
       lastDueImportReview = needsReview;
-      lastDueImportStatus = `Imported Due figures for ${monthsTouched} month(s).${advanceTotal>0 ? ` Advance total ${money(advanceTotal)} applied to ${monthlyLedgerViewKey||'the earliest tracked month'}.` : ''} ${needsReview.length} row(s) need your manual review below.`;
+      lastDueStudents = dueStudents;
+      const catCount = Object.keys(dueTotals).length;
+      lastDueImportStatus = `Applied Due figures across ${catCount} categor${catCount===1?'y':'ies'} to ${monthKeyLabel(targetKey)}.${advanceTotal>0 ? ` Advance total ${money(advanceTotal)} applied too.` : ''} ${needsReview.length} row(s) need your manual review below.`;
       render();
     }catch(e){
       statusEl.textContent = '';
       showAlert('Could not read that file: ' + e.message);
     }
   };
+  const exportBtn = card.querySelector('#dr-export-btn');
+  if(exportBtn) exportBtn.onclick = ()=>{
+    if(!targetKey){ showAlert('No month selected to export this against.'); return; }
+    exportDueList(lastDueStudents, targetKey);
+  };
   return card;
 }
+
 function drDueReviewHtml(needsReview){
   return `<div style="margin-top:10px;">
     <div style="font-weight:700; font-size:12.5px; color:var(--danger);">&#9888; Needs your review (multiple categories or unrecognized month label) - not imported automatically:</div>
@@ -7499,6 +7542,36 @@ function showWorkbookPreview(wb, {title, onDownload}){
 
 async function downloadWorkbook(wb, filename){
   const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* Saves a copy of a generated workbook as base64 so it can be re-viewed or
+   re-downloaded later from a history list without regenerating it (which
+   could come out different if the underlying data has since changed). */
+function arrayBufferToBase64(buf){
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function base64ToArrayBuffer(b64){
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+async function workbookToBase64(wb){
+  const buf = await wb.xlsx.writeBuffer();
+  return arrayBufferToBase64(buf);
+}
+function downloadStoredWorkbook(base64, filename){
+  if(!base64){ showAlert('No saved copy of this file was found.'); return; }
+  const buf = base64ToArrayBuffer(base64);
   const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
