@@ -2038,6 +2038,7 @@ function renderApp(){
     app.appendChild(renderDepositNotesheetCard());
     app.appendChild(renderOnlinePaymentCard());
     app.appendChild(renderBankStatementCard());
+    app.appendChild(renderDueRegisterCard());
     app.appendChild(el(`
       <div class="card" id="section-monthly-ledger-launch">
         <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
@@ -2658,6 +2659,7 @@ function renderSectionNav(day){
       {id:'section-deposit-notesheet', num:'', label:'Deposit Notesheet'},
       {id:'section-online-payment', num:'', label:'Online Payment (SSL Commerz)'},
       {id:'section-bank-statement', num:'', label:'TBL Bank Statement Cross-Check'},
+      {id:'section-due-register', num:'', label:'Import Due Register'},
       {id:'__open-monthly-ledger__', num:'', label:'Monthly Ledger'},
     ]},
   ];
@@ -5080,6 +5082,138 @@ function crossCheckTBLStatement(stmtRows){
   return {matched, missingFromStatement, unmatchedStmtRows};
 }
 
+/* Due Register import: the raw export is one row per outstanding fee (or
+   advance payment), each tagged with which month it belongs to and which
+   account(s)/category it's under. A row with a single category maps
+   straight to that Revenue category's "Total Due" for its month. A row
+   naming MULTIPLE categories (comma-separated) or a month label we can't
+   parse (e.g. "Adm-26") is never guessed at - it's collected and handed
+   back to the accountant to split/assign by hand, by Student ID. */
+const MONTH_ABBR_MAP = {Jan:'January',Feb:'February',Mar:'March',Apr:'April',May:'May',Jun:'June',Jul:'July',Aug:'August',Sep:'September',Oct:'October',Nov:'November',Dec:'December'};
+const DUE_ACCOUNT_TO_REVENUE_KEY = {
+  'transport -ar':'transportFee', 'transport-ar':'transportFee', 'transport':'transportFee',
+  'tuition fee':'tuitionFee',
+  'uniform fees':'uniform', 'uniform':'uniform',
+  'admission fee':'admissionFee', 'admission fee & form':'admissionFee', 'admission fee -ar':'admissionFee',
+  'muqaddam fees':'mqmFee',
+  'session fees':'sessionFee', 'session fee':'sessionFee',
+  'books & sty':'booksSty', 'books & stationeries':'booksSty',
+  'event fee':'eventFee',
+};
+function parseDueMonthLabel(label){
+  const m = String(label||'').trim().match(/^([A-Za-z]{3})-(\d{2})$/);
+  if(!m) return null;
+  const monthName = MONTH_ABBR_MAP[m[1]];
+  if(!monthName) return null; // e.g. "Adm-26" - not a real calendar month, needs manual review
+  return {monthName, year:'20'+m[2]};
+}
+async function parseDuesRegisterFile(arrayBuffer){
+  await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
+  const ws = wb.worksheets[0];
+  let headerRow = null, headers = {};
+  for(let r=1;r<=10;r++){
+    const found = {};
+    ws.getRow(r).eachCell((cell,colNum)=>{ found[String(cell.value||'').trim()] = colNum; });
+    if(found['Student ID'] && found['Dues Amount']){ headerRow=r; headers=found; break; }
+  }
+  if(!headerRow) throw new Error("Couldn't find the 'Student ID' / 'Dues Amount' header row in this file.");
+  const dueByMonth = {}; // mlKey -> {catKey -> amount}
+  let advanceTotal = 0;
+  const needsReview = [];
+  for(let r=headerRow+1; r<=ws.rowCount; r++){
+    const row = ws.getRow(r);
+    const studentId = row.getCell(headers['Student ID']).value;
+    if(!studentId) continue;
+    const name = row.getCell(headers['Student Name']).value||'';
+    const duesAmt = Number(row.getCell(headers['Dues Amount']).value)||0;
+    const advAmt = Number(row.getCell(headers['Advance Amount']).value)||0;
+    const duesMonthLabel = row.getCell(headers['Dues Month/Year']).value;
+    const duesAccounts = String(row.getCell(headers['Dues Account(s)']).value||'').trim();
+
+    if(duesAmt>0){
+      const parsed = parseDueMonthLabel(duesMonthLabel);
+      const accList = duesAccounts.split(',').map(s=>s.trim()).filter(Boolean);
+      const singleKey = accList.length===1 ? DUE_ACCOUNT_TO_REVENUE_KEY[accList[0].toLowerCase()] : null;
+      if(!parsed || accList.length!==1 || !singleKey){
+        needsReview.push({studentId, name, amount:duesAmt, accounts:duesAccounts, monthLabel:duesMonthLabel, type:'due'});
+      } else {
+        const mlKey = monthKeyFor(parsed.monthName, parsed.year);
+        if(!dueByMonth[mlKey]) dueByMonth[mlKey] = {};
+        dueByMonth[mlKey][singleKey] = (dueByMonth[mlKey][singleKey]||0) + duesAmt;
+      }
+    }
+    advanceTotal += advAmt; // one combined figure across every row/month - goes into a single Advance Payment box, not split by month
+  }
+  return {dueByMonth, advanceTotal, needsReview};
+}
+
+let lastDueImportReview = null;
+let lastDueImportStatus = null;
+function renderDueRegisterCard(){
+  const card = el(`
+    <div class="card" id="section-due-register">
+      <h3><span class="num">&#128220;</span> Import Due Register</h3>
+      <p class="subnote">Upload the Dues Register export. Each row's Dues Amount goes into that row's own month's "Total Due" by category. Every row's Advance Amount is summed into one combined total and placed in the Advance Payment box for whichever month is currently open in the Monthly Ledger. Rows naming more than one Due category, or with a month label that isn't a normal calendar month (e.g. "Adm-26"), are listed below by Student ID instead of being guessed at.</p>
+      <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
+        <div class="field" style="flex:1 1 260px;">
+          <label>Dues Register file (.xlsx)</label>
+          <input type="file" id="dr-file-input" accept=".xlsx">
+        </div>
+        <button class="secondary" type="button" id="dr-import-btn">&#11014; Import</button>
+      </div>
+      <div id="dr-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;">${lastDueImportStatus ? escapeHtml(lastDueImportStatus) : ''}</div>
+      <div id="dr-review">${lastDueImportReview && lastDueImportReview.length ? drDueReviewHtml(lastDueImportReview) : ''}</div>
+    </div>
+  `);
+  const fileInp = card.querySelector('#dr-file-input');
+  const statusEl = card.querySelector('#dr-status');
+  card.querySelector('#dr-import-btn').onclick = async ()=>{
+    const file = fileInp.files && fileInp.files[0];
+    if(!file){ showAlert('Choose the Dues Register .xlsx file first.'); return; }
+    statusEl.textContent = 'Reading\u2026';
+    try{
+      const {dueByMonth, advanceTotal, needsReview} = await parseDuesRegisterFile(await file.arrayBuffer());
+      let monthsTouched = 0;
+      Object.keys(dueByMonth).forEach(mlKey=>{
+        const rec = getMonthlyLedgerMonth(mlKey);
+        Object.keys(dueByMonth[mlKey]).forEach(catKey=>{ rec.revenueTotalDue[catKey] = dueByMonth[mlKey][catKey]; });
+        monthsTouched++;
+      });
+      if(advanceTotal>0){
+        const targetKey = monthlyLedgerViewKey || earliestTrackedMonthKey();
+        if(targetKey) getMonthlyLedgerMonth(targetKey).balanceSheet.advancePayment = advanceTotal;
+      }
+      saveState();
+      lastDueImportReview = needsReview;
+      lastDueImportStatus = `Imported Due figures for ${monthsTouched} month(s).${advanceTotal>0 ? ` Advance total ${money(advanceTotal)} applied to ${monthlyLedgerViewKey||'the earliest tracked month'}.` : ''} ${needsReview.length} row(s) need your manual review below.`;
+      render();
+    }catch(e){
+      statusEl.textContent = '';
+      showAlert('Could not read that file: ' + e.message);
+    }
+  };
+  return card;
+}
+function drDueReviewHtml(needsReview){
+  return `<div style="margin-top:10px;">
+    <div style="font-weight:700; font-size:12.5px; color:var(--danger);">&#9888; Needs your review (multiple categories or unrecognized month label) - not imported automatically:</div>
+    <table style="width:100%; font-size:12.5px; border-collapse:collapse; margin-top:4px;">
+      <thead><tr style="border-bottom:1px solid var(--line-soft); text-align:left;"><th style="padding:3px 6px;">Student ID</th><th style="padding:3px 6px;">Name</th><th style="padding:3px 6px;">Type</th><th style="padding:3px 6px;">Month label</th><th style="padding:3px 6px;">Account(s)</th><th style="padding:3px 6px; text-align:right;">Amount</th></tr></thead>
+      <tbody>${needsReview.map(x=>`
+        <tr style="border-bottom:1px solid var(--line-soft);">
+          <td style="padding:3px 6px;">${escapeHtml(String(x.studentId))}</td>
+          <td style="padding:3px 6px;">${escapeHtml(String(x.name))}</td>
+          <td style="padding:3px 6px;">${x.type}</td>
+          <td style="padding:3px 6px;">${escapeHtml(String(x.monthLabel||''))}</td>
+          <td style="padding:3px 6px;">${escapeHtml(x.accounts)}</td>
+          <td style="padding:3px 6px; text-align:right;" class="mono">${money(x.amount)}</td>
+        </tr>`).join('')}</tbody>
+    </table>
+  </div>`;
+}
+
 function renderBankStatementCard(){
   const card = el(`
     <div class="card" id="section-bank-statement">
@@ -6536,9 +6670,19 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   if(lines.length > (fixedLastCatRow - firstRow + 1)){
     // More non-zero categories than the template has rows for - insert
-    // extra rows above the fixed Total row, copied from row 16's style.
+    // extra blank rows above the fixed Total row. spliceRows (unlike
+    // duplicateRow) correctly shifts the merged blocks below it - the
+    // Total/Words/signature rows - as single intact merges instead of
+    // corrupting/tripling them.
     const extra = lines.length - (fixedLastCatRow - firstRow + 1);
-    for(let i=0;i<extra;i++) ws.duplicateRow(fixedLastCatRow, 1, true);
+    const templateStyles = [3,4,10].map(c=>({...ws.getCell(fixedLastCatRow,c).style}));
+    const templateHeight = ws.getRow(fixedLastCatRow).height;
+    ws.spliceRows(fixedLastCatRow+1, 0, ...Array(extra).fill([]));
+    for(let i=0;i<extra;i++){
+      const r = fixedLastCatRow+1+i;
+      if(templateHeight) ws.getRow(r).height = templateHeight;
+      [3,4,10].forEach((c,idx)=>{ ws.getCell(r,c).style = {...templateStyles[idx]}; });
+    }
   }
   const lastCatRow = fixedLastCatRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
   const totalRow = fixedTotalRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
