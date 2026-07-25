@@ -416,6 +416,7 @@ function getMonthlyLedgerMonth(key){
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
         bankBalanceOverride:null, bankBreakdown:{},
         otherAsset:{label:'Debt to III Assets Ltd', amount:250000} },
+      locked:false,
     };
   }
   return state.monthlyLedger.months[key];
@@ -589,6 +590,7 @@ let duplicateWarning = null;   // string message, or null - shown as a dismissib
 let duplicateWarningTimer = null; // auto-clears the undo offer after a short window
 let passwordFormOpen = false;  // true = show the set/change-password mini form
 let dayLockPasswordFormOpen = false; // true = show the set/change day-lock-password mini form
+let monthLockPasswordFormOpen = false; // true = show the set month-lock-password mini form (Monthly Ledger)
 let lockError = '';            // error text shown on a failed unlock attempt
 
 function defaultState(){
@@ -615,6 +617,7 @@ function defaultState(){
     payableRegistry:[],
     lockPasswordHash:null,
     dayLockPasswordHash:null,
+    monthLockPasswordHash:null,
     archive:[],
     templates:[],
     /* User-editable "data link" and "export formatting" knobs, so small
@@ -1256,6 +1259,7 @@ function migrateState(){
   (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(day=>{ ensureMiscCollectionSections(day); }); });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
+  if(state.monthLockPasswordHash===undefined) state.monthLockPasswordHash = null;
   if(state.payableRegistry===undefined) state.payableRegistry = [];
   if(state.monthlyLedger===undefined) state.monthlyLedger = { months:{}, seed:null };
   if(state.settings===undefined) state.settings = defaultState().settings;
@@ -1273,6 +1277,7 @@ function migrateState(){
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
     if(!rec.expenditureEntries) rec.expenditureEntries = [];
     if(!rec.customRows) rec.customRows = [];
+    if(rec.locked===undefined) rec.locked = false;
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -2013,6 +2018,7 @@ function renderApp(){
     app.appendChild(renderHeader());
     if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
     if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
+    if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
     app.appendChild(renderSetup());
     document.getElementById('app').replaceChildren(app);
     return;
@@ -2020,6 +2026,7 @@ function renderApp(){
   app.appendChild(renderHeader());
   if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
   if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
+  if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
   if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
   if(summaryOpen) app.appendChild(renderCategorySummaryCard());
@@ -2088,6 +2095,7 @@ function renderHeader(){
           ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
           ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
           ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : ''}
+          ${!state.monthLockPasswordHash ? '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Set month-lock password</button>' : ''}
           ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
         </div>
       </div>
@@ -2187,6 +2195,51 @@ function renderDayLockPasswordForm(){
     showAlert('Day-lock password saved. Unlocking a finalized day will now ask for it.');
   };
   card.querySelector('#dlpw-cancel').onclick = ()=>{ dayLockPasswordFormOpen = false; render(); };
+  return card;
+}
+
+/* Inline mini-form for setting a separate password used only to unlock a
+   finalized/locked month in the Monthly Ledger (distinct from both the
+   screen-lock and day-lock passwords above). */
+function renderMonthLockPasswordForm(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128273;</span> Set Month-Lock Password</h3>
+      <p class="subnote">This password is only asked for when unlocking a finalized month in the Monthly Ledger &mdash; separate from the screen-lock and day-lock passwords. Once set, it stays set and can't be changed or removed from within the app.</p>
+      <div class="row">
+        <div class="field">
+          <label>New month-lock password</label>
+          <input type="password" id="mlpw-new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm new password</label>
+          <input type="password" id="mlpw-confirm" autocomplete="new-password">
+        </div>
+      </div>
+      <div id="mlpw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button type="button" id="mlpw-save">Set month-lock password</button>
+        <button class="secondary" type="button" id="mlpw-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  const newInp = card.querySelector('#mlpw-new');
+  const confirmInp = card.querySelector('#mlpw-confirm');
+  wirePasswordToggle(newInp);
+  wirePasswordToggle(confirmInp);
+  const errBox = card.querySelector('#mlpw-error');
+  card.querySelector('#mlpw-save').onclick = async ()=>{
+    const a = newInp.value, b = confirmInp.value;
+    if(!a){ errBox.textContent = 'Enter a password.'; return; }
+    if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
+    if(a!==b){ errBox.textContent = 'Passwords do not match.'; return; }
+    state.monthLockPasswordHash = await sha256Hex(a);
+    monthLockPasswordFormOpen = false;
+    await saveState();
+    render();
+    showAlert('Month-lock password saved. Locking a month in the Monthly Ledger will now ask for it when unlocking.');
+  };
+  card.querySelector('#mlpw-cancel').onclick = ()=>{ monthLockPasswordFormOpen = false; render(); };
   return card;
 }
 
@@ -3220,7 +3273,7 @@ function renderMonthlyLedgerCard(){
           <select id="ml-month-select">${monthOptions}</select>
         </div>
         <button class="secondary small" type="button" data-action="ml-add-month">+ New month</button>
-        <button class="danger small" type="button" data-action="ml-delete-month">&#128465; Delete this month</button>
+        <button class="danger small" type="button" data-action="ml-delete-month" ${rec.locked?'disabled title="Unlock this month first"':''}>&#128465; Delete this month</button>
         <button type="button" data-action="ml-export">&#11015; Export this month (.xlsx)</button>
         <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
         <button type="button" class="${mlTotalViewOpen?'danger':'secondary'} small" data-action="ml-toggle-total-view" style="margin-left:auto;">${mlTotalViewOpen?'&#9660; Showing Total (all months)':'&#9654; Show Total (all months)'}</button>
@@ -3228,6 +3281,15 @@ function renderMonthlyLedgerCard(){
       ${mlTotalViewOpen ? renderMlTotalBox() : ''}
       ${!isLiveMonth ? `<p class="subnote" style="color:var(--danger);">This isn't the month currently open in the Daily Ledger (${state.month} ${state.year}) - Cash in Hand can't be pulled live for it here, so it shows as 0/blank until you switch the Daily Ledger to that month, or enter it manually below. ("Auto" expenditure columns are unaffected - they're pulled from saved Withdraw Notesheet history, not the live Daily Ledger.)</p>` : ''}
 
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:6px 0 0;${rec.locked?'border-left-color:var(--danger);':''}">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:15px;">${rec.locked?'&#128274;':'&#128275;'}</span>
+          <span style="font-size:13px;color:var(--ink-soft);">${rec.locked ? ('This month is locked - figures can\'t be edited until it\'s unlocked'+((state.monthLockPasswordHash||state.lockPasswordHash)?' with the password':'')+'.') : 'Once a month is finalized, lock it to prevent accidental edits.'}</span>
+        </div>
+        <button class="${rec.locked?'danger':'secondary'} small" type="button" data-action="${rec.locked?'ml-unlock-month':'ml-lock-month'}">${rec.locked?'Unlock this month':'Lock this month'}</button>
+      </div>
+
+      <div class="${rec.locked?'locked-day':''}">
       <div class="divider"></div>
       <h3 style="font-size:14px;">Revenue</h3>
       <div class="row">
@@ -3380,6 +3442,7 @@ function renderMonthlyLedgerCard(){
       <div class="row">
         <button class="secondary small" type="button" data-action="ml-add-custom-row" data-color="green">+ Add green row</button>
         <button class="secondary small" type="button" data-action="ml-add-custom-row" data-color="yellow">+ Add yellow row</button>
+      </div>
       </div>
     </div>
   `);
@@ -6058,6 +6121,7 @@ function wireDelegation(){
 
     if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
     if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
+    if(action==='toggle-monthlock-password-form'){ monthLockPasswordFormOpen = !monthLockPasswordFormOpen; render(); return; }
     if(action==='lock-now'){
       if(!state.lockPasswordHash){ showAlert('Set a password first.'); return; }
       locked = true; lockError = ''; render();
@@ -6202,12 +6266,28 @@ function wireDelegation(){
     if(action==='ml-delete-month'){
       const keyToDelete = monthlyLedgerViewKey;
       if(!keyToDelete || !state.monthlyLedger.months[keyToDelete]){ return; }
+      if(state.monthlyLedger.months[keyToDelete].locked){ showAlert('This month is locked - unlock it first before deleting.'); return; }
       showConfirm(`Delete ${monthKeyLabel(keyToDelete)} from the Monthly Ledger? This can't be undone.`, ()=>{
         delete state.monthlyLedger.months[keyToDelete];
         const remaining = Object.keys(state.monthlyLedger.months).sort();
         monthlyLedgerViewKey = remaining.length ? remaining[remaining.length-1] : null;
         saveState(); render();
       });
+      return;
+    }
+    if(action==='ml-lock-month'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      showConfirm(`Lock ${monthKeyLabel(monthlyLedgerViewKey)}? Its figures can't be edited again until you unlock it.`, ()=>{
+        rec.locked = true; saveState(); render();
+      }, 'Lock this month');
+      return;
+    }
+    if(action==='ml-unlock-month'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      const gateHash = state.monthLockPasswordHash || state.lockPasswordHash;
+      showPasswordPrompt(`Enter password to unlock ${monthKeyLabel(monthlyLedgerViewKey)} for editing.`, ()=>{
+        rec.locked = false; saveState(); render();
+      }, 'Unlock', gateHash);
       return;
     }
     if(action==='ml-add-revenue'){
