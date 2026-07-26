@@ -592,6 +592,18 @@ let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
 let mlTotalViewOpen = false; // shows a combined all-months summary above the per-month Balance Sheet when true
 let locked = false;            // true = show the lock screen instead of the app
+/* --- Data Encryption ("vault") session state ---------------------------
+   Separate from the screen-lock above: this actually encrypts the saved
+   data (AES-256-GCM, key derived from a passphrase via PBKDF2). The key
+   lives ONLY in memory for this tab and is never written anywhere - it
+   must be re-derived (passphrase re-entered) after every page reload. */
+let vaultKey = null;            // CryptoKey, session-only, never persisted
+let vaultSaltB64 = null;        // base64 salt matching whichever key is in vaultKey
+let vaultEnabled = false;       // true once encryption has been turned on this session
+let vaultLocked = false;        // true = show the vault-unlock screen instead of the app
+let vaultError = '';
+let pendingVaultEnvelope = null; // raw {salt,iv,data} read from storage, awaiting passphrase
+let vaultSetupFormOpen = false; // true = show the "Enable Data Encryption" mini form
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
 let lastUndoTimer = null;
@@ -983,6 +995,117 @@ async function sha256Hex(text){
   const buf = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+
+/* --- Data Encryption (vault) ------------------------------------------
+   Real encryption of the saved data itself, on top of (and independent
+   from) the screen-lock above. AES-256-GCM with a key derived from a
+   user passphrase via PBKDF2-SHA256 (600,000 iterations - the strongest
+   practical choice available through the browser's native Web Crypto
+   API, which is what every reputable password manager and encrypted-
+   notes tool builds on; there is no dependency-free way to reach for
+   memory-hard KDFs like Argon2 without pulling in an external library,
+   which would mean trusting that library's supply chain with the same
+   financial data this feature exists to protect - so PBKDF2 at a high
+   iteration count is the deliberate choice here, not a shortcut).
+   Nothing about the passphrase or the derived key is ever written to
+   disk/cloud - only the random salt and the ciphertext are. That means
+   there is NO recovery path if the passphrase is lost; that's what makes
+   this real encryption rather than a resettable screen lock. */
+const VAULT_ENC_MAGIC = '__ledgerEnc';
+function b64FromBuf(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function bufFromB64(b64){ const bin=atob(b64); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i); return arr.buffer; }
+async function deriveVaultKey(passphrase, saltBytes){
+  const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), {name:'PBKDF2'}, false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt: saltBytes, iterations: 600000, hash:'SHA-256'},
+    baseKey, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']
+  );
+}
+async function vaultEncrypt(plainText, key){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipherBuf = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(plainText));
+  return { iv: b64FromBuf(iv), data: b64FromBuf(cipherBuf) };
+}
+async function vaultDecrypt(envelope, key){
+  const iv = new Uint8Array(bufFromB64(envelope.iv));
+  const plainBuf = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, bufFromB64(envelope.data));
+  return new TextDecoder().decode(plainBuf);
+}
+function looksLikeVaultEnvelope(text){
+  try{
+    const obj = JSON.parse(text);
+    if(obj && obj[VAULT_ENC_MAGIC]===true && obj.salt && obj.iv && obj.data) return obj;
+  }catch(e){}
+  return null;
+}
+/* Wraps a plain state-JSON string for persistence: encrypted if the
+   vault is currently on and unlocked, otherwise passed through as-is. */
+async function serializeForPersistence(plainJson){
+  if(vaultEnabled && vaultKey){
+    const {iv,data} = await vaultEncrypt(plainJson, vaultKey);
+    return JSON.stringify({[VAULT_ENC_MAGIC]:true, v:1, salt:vaultSaltB64, iv, data});
+  }
+  return plainJson;
+}
+/* Tries to unlock the envelope captured at load time with a passphrase
+   the person just typed. On success, loads it as the live state and
+   keeps the derived key in memory for subsequent saves this session. */
+async function attemptVaultUnlock(passphrase){
+  if(!pendingVaultEnvelope) return false;
+  try{
+    const saltBytes = new Uint8Array(bufFromB64(pendingVaultEnvelope.salt));
+    const key = await deriveVaultKey(passphrase, saltBytes);
+    const plainJson = await vaultDecrypt(pendingVaultEnvelope, key);
+    const parsed = JSON.parse(plainJson);
+    state = parsed;
+    migrateState();
+    vaultKey = key;
+    vaultSaltB64 = pendingVaultEnvelope.salt;
+    vaultEnabled = true;
+    vaultLocked = false;
+    pendingVaultEnvelope = null;
+    locked = !!state.lockPasswordHash;
+    return true;
+  }catch(e){
+    return false; // wrong passphrase, or corrupted/tampered data
+  }
+}
+/* Promise-based passphrase prompt for one-off decrypt operations (an
+   encrypted file being connected, or an encrypted backup being
+   imported) that aren't the main boot-time unlock screen. */
+function promptVaultPassphrase(message){
+  return new Promise((resolve)=>{
+    const overlay = el(`
+      <div class="modal-overlay">
+        <div class="modal-box">
+          <p>${escapeHtml(message)}</p>
+          <input type="password" id="vault-pp-input" autocomplete="current-password" placeholder="Encryption passphrase" style="margin:2px 0 4px;">
+          <div id="vault-pp-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
+          <div class="modal-actions">
+            <button class="secondary" type="button" id="vault-pp-cancel">Cancel</button>
+            <button class="danger" type="button" id="vault-pp-ok">Unlock</button>
+          </div>
+        </div>
+      </div>
+    `);
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#vault-pp-input');
+    wirePasswordToggle(input);
+    const finish = (val)=>{ overlay.remove(); resolve(val); };
+    overlay.querySelector('#vault-pp-cancel').onclick = ()=> finish(null);
+    overlay.querySelector('#vault-pp-ok').onclick = ()=>{
+      const v = input.value||'';
+      if(!v) return;
+      finish(v);
+    };
+    input.onkeydown = (e)=>{ if(e.key==='Enter') overlay.querySelector('#vault-pp-ok').click(); };
+    let downOnBackdrop = false;
+    overlay.addEventListener('mousedown', (e)=>{ downOnBackdrop = (e.target===overlay); });
+    overlay.addEventListener('mouseup', (e)=>{ if(downOnBackdrop && e.target===overlay) finish(null); downOnBackdrop=false; });
+    setTimeout(()=>input.focus(), 30);
+  });
+}
+
 function addDaysStr(dateStr, delta){
   const d = new Date(dateStr+'T00:00:00');
   d.setDate(d.getDate()+delta);
@@ -1137,13 +1260,14 @@ function idbDelete(key){
     }catch(e){ resolve(false); }
   });
 }
-async function writeStateToConnectedFile(){
+async function writeStateToConnectedFile(preSerialized){
   if(!fsFileHandle) return;
   try{
     const perm = await fsFileHandle.queryPermission({mode:'readwrite'});
     if(perm!=='granted') return; // don't block saving elsewhere; UI offers "Reconnect"
+    const text = preSerialized!==undefined ? preSerialized : await serializeForPersistence(JSON.stringify(state, null, 2));
     const writable = await fsFileHandle.createWritable();
-    await writable.write(JSON.stringify(state, null, 2));
+    await writable.write(text);
     await writable.close();
   }catch(e){ /* disk write failed - window.storage/localStorage still has the data */ }
 }
@@ -1167,7 +1291,23 @@ async function connectToFile(){
     const text = await file.text();
     if(text && text.trim()){
       let parsed;
-      try{ parsed = JSON.parse(text); }catch(e){ parsed = null; }
+      const envelope = looksLikeVaultEnvelope(text);
+      if(envelope){
+        const pass = await promptVaultPassphrase('This file is encrypted. Enter its passphrase to load it.');
+        if(pass===null) return;
+        try{
+          const saltBytes = new Uint8Array(bufFromB64(envelope.salt));
+          const key = await deriveVaultKey(pass, saltBytes);
+          const plainJson = await vaultDecrypt(envelope, key);
+          parsed = JSON.parse(plainJson);
+          vaultKey = key; vaultSaltB64 = envelope.salt; vaultEnabled = true;
+        }catch(e){
+          showAlert('Incorrect passphrase, or the file could not be read.');
+          return;
+        }
+      } else {
+        try{ parsed = JSON.parse(text); }catch(e){ parsed = null; }
+      }
       if(!parsed || typeof parsed!=='object' || !Array.isArray(parsed.days)){
         showAlert("That file isn't a ledger backup. Pick an empty/new file, or one exported from this tool.");
         return;
@@ -1232,17 +1372,19 @@ async function tryReconnectFile(){
 }
 
 async function saveState(){
-  const json = JSON.stringify(state);
+  if(vaultLocked) return; // never overwrite still-encrypted storage with the placeholder state
+  const plainJson = JSON.stringify(state);
+  const toWrite = await serializeForPersistence(plainJson);
   let savedToCloud = false;
   try{
-    const res = await window.storage.set('state', json);
+    const res = await window.storage.set('state', toWrite);
     if(res) savedToCloud = true;
   }catch(e){ /* window.storage not available here */ }
   if(!savedToCloud){
-    try{ localStorage.setItem(LOCAL_STORAGE_KEY, json); }
+    try{ localStorage.setItem(LOCAL_STORAGE_KEY, toWrite); }
     catch(e){ /* localStorage blocked too (e.g. private browsing) */ }
   }
-  writeStateToConnectedFile();
+  writeStateToConnectedFile(toWrite);
 }
 function migrateState(){
   const d = defaultState();
@@ -1305,15 +1447,26 @@ function migrateState(){
   (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(stampStatus); });
 }
 async function loadState(){
+  let raw = null;
   try{
     const res = await window.storage.get('state');
-    if(res && res.value){ state = JSON.parse(res.value); migrateState(); return; }
+    if(res && res.value) raw = res.value;
   }catch(e){ /* window.storage not available here */ }
-  try{
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if(raw){ state = JSON.parse(raw); migrateState(); return; }
-  }catch(e){ /* localStorage not available either */ }
-  state = defaultState();
+  if(raw===null){
+    try{ raw = localStorage.getItem(LOCAL_STORAGE_KEY); }
+    catch(e){ /* localStorage not available either */ }
+  }
+  if(!raw){ state = defaultState(); return; }
+  const envelope = looksLikeVaultEnvelope(raw);
+  if(envelope){
+    pendingVaultEnvelope = envelope;
+    vaultEnabled = true;
+    vaultLocked = true;
+    state = defaultState(); // placeholder until attemptVaultUnlock() succeeds
+    return;
+  }
+  try{ state = JSON.parse(raw); migrateState(); }
+  catch(e){ state = defaultState(); }
 }
 
 /* --- Portable JSON backup ---------------------------------------------
@@ -1322,9 +1475,11 @@ async function loadState(){
    that survives a deleted chat, a different browser, or a different
    computer - the person carries it themselves and re-imports it wherever
    they open this tool next. */
-function exportBackupJson(){
+async function exportBackupJson(){
   const label = (state.month && state.year) ? `${state.month}${state.year}` : 'backup';
-  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const plainJson = JSON.stringify(state, null, 2);
+  const toWrite = await serializeForPersistence(plainJson);
+  const blob = new Blob([toWrite], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1333,26 +1488,47 @@ function exportBackupJson(){
   URL.revokeObjectURL(url);
 }
 function importBackupJson(file){
-  showConfirm('Importing a backup replaces all data currently in this ledger (in this browser/chat) with what\'s in the file. Continue?', ()=>{
-    const reader = new FileReader();
-    reader.onload = async ()=>{
-      try{
-        const parsed = JSON.parse(reader.result);
-        if(!parsed || typeof parsed!=='object' || !Array.isArray(parsed.days)){ throw new Error('not a ledger backup'); }
-        state = parsed;
-        migrateState();
-        selectedDayId = null;
-        notesheetRange = null;
-        locked = !!state.lockPasswordHash;
-        await saveState();
-        render();
-        showAlert('Backup imported successfully.');
-      }catch(e){
-        showAlert('That file could not be read as a valid Daily Cash & Bank Ledger backup.');
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    const text = reader.result;
+    const envelope = looksLikeVaultEnvelope(text);
+    const doImport = async ()=>{
+      let parsed;
+      if(envelope){
+        const pass = await promptVaultPassphrase('This backup is encrypted. Enter its passphrase to import it.');
+        if(pass===null) return;
+        try{
+          const saltBytes = new Uint8Array(bufFromB64(envelope.salt));
+          const key = await deriveVaultKey(pass, saltBytes);
+          const plainJson = await vaultDecrypt(envelope, key);
+          parsed = JSON.parse(plainJson);
+          if(!parsed || typeof parsed!=='object' || !Array.isArray(parsed.days)) throw new Error('not a ledger backup');
+          vaultKey = key; vaultSaltB64 = envelope.salt; vaultEnabled = true;
+        }catch(e){
+          showAlert('Incorrect passphrase, or the file could not be read as a valid backup.');
+          return;
+        }
+      } else {
+        try{
+          parsed = JSON.parse(text);
+          if(!parsed || typeof parsed!=='object' || !Array.isArray(parsed.days)) throw new Error('not a ledger backup');
+        }catch(e){
+          showAlert('That file could not be read as a valid Daily Cash & Bank Ledger backup.');
+          return;
+        }
       }
+      state = parsed;
+      migrateState();
+      selectedDayId = null;
+      notesheetRange = null;
+      locked = !!state.lockPasswordHash;
+      await saveState();
+      render();
+      showAlert('Backup imported successfully.');
     };
-    reader.readAsText(file);
-  }, 'Import & replace');
+    showConfirm('Importing a backup replaces all data currently in this ledger (in this browser/chat) with what\'s in the file. Continue?', doImport, 'Import & replace');
+  };
+  reader.readAsText(file);
 }
 
 /* ======================================================================
@@ -2027,6 +2203,11 @@ function renderApp(){
      iframe/artifact preview) clamp scroll to the top; swapping the
      whole subtree in one step avoids that empty in-between state. */
   const app = document.createDocumentFragment();
+  if(vaultLocked){
+    app.appendChild(renderVaultUnlockScreen());
+    document.getElementById('app').replaceChildren(app);
+    return;
+  }
   if(state.lockPasswordHash && locked){
     app.appendChild(renderLockScreen());
     document.getElementById('app').replaceChildren(app);
@@ -2037,6 +2218,7 @@ function renderApp(){
     if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
     if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
     if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
+    if(vaultSetupFormOpen && !vaultEnabled) app.appendChild(renderVaultSetupForm());
     app.appendChild(renderSetup());
     document.getElementById('app').replaceChildren(app);
     return;
@@ -2045,6 +2227,7 @@ function renderApp(){
   if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
   if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
   if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
+  if(vaultSetupFormOpen && !vaultEnabled) app.appendChild(renderVaultSetupForm());
   if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
   if(summaryOpen) app.appendChild(renderCategorySummaryCard());
@@ -2114,6 +2297,14 @@ function renderHeader(){
           ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
           ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : ''}
           ${!state.monthLockPasswordHash ? '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Set month-lock password</button>' : ''}
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          ${!vaultEnabled ? '<button class="secondary" data-action="toggle-vault-form">&#128272; Enable data encryption</button>' : `
+            <span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Saved data is encrypted (AES-256) with your passphrase before it leaves this browser">&#128272; Data encrypted</span>
+            <button class="secondary" data-action="vault-lock-now">Lock data now</button>
+            <button class="secondary" data-action="disable-vault">Disable encryption</button>
+          `}
           ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
         </div>
       </div>
@@ -2169,6 +2360,56 @@ function renderPasswordForm(){
     showAlert('Password saved. Use "Lock now" any time you want to lock the screen.');
   };
   card.querySelector('#pw-cancel').onclick = ()=>{ passwordFormOpen = false; render(); };
+  return card;
+}
+
+/* Inline mini-form for turning on real Data Encryption (distinct from the
+   screen-lock password above, and stronger: this encrypts the data
+   itself, so it stays unreadable in window.storage, localStorage, a
+   connected file, or an exported backup - including to whoever operates
+   that storage). */
+function renderVaultSetupForm(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128272;</span> Enable Data Encryption</h3>
+      <p class="subnote">Encrypts the saved data itself (AES-256-GCM, key derived from this passphrase via PBKDF2) before it's written anywhere - cloud storage, this browser, a connected file, or exported backups. Unlike the screen-lock password, nobody who has access to the raw storage or a synced file (including a cloud provider it's synced to) can read it without this passphrase. <strong>There is no reset</strong> - if it's lost, the data cannot be recovered. Keep it somewhere safe outside this app.</p>
+      <div class="row">
+        <div class="field">
+          <label>New encryption passphrase</label>
+          <input type="password" id="vault-new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm passphrase</label>
+          <input type="password" id="vault-confirm" autocomplete="new-password">
+        </div>
+      </div>
+      <div id="vault-setup-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button type="button" id="vault-save">Enable encryption</button>
+        <button class="secondary" type="button" id="vault-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  const newInp = card.querySelector('#vault-new');
+  const confirmInp = card.querySelector('#vault-confirm');
+  wirePasswordToggle(newInp);
+  wirePasswordToggle(confirmInp);
+  const errBox = card.querySelector('#vault-setup-error');
+  card.querySelector('#vault-save').onclick = async ()=>{
+    const a = newInp.value, b = confirmInp.value;
+    if(!a){ errBox.textContent = 'Enter a passphrase.'; return; }
+    if(a.length<8){ errBox.textContent = 'Use at least 8 characters - this protects real financial data.'; return; }
+    if(a!==b){ errBox.textContent = 'Passphrases do not match.'; return; }
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    vaultSaltB64 = b64FromBuf(saltBytes);
+    vaultKey = await deriveVaultKey(a, saltBytes);
+    vaultEnabled = true;
+    vaultSetupFormOpen = false;
+    await saveState();
+    render();
+    showAlert('Encryption enabled. Every save from now on is encrypted with this passphrase - you\'ll need to re-enter it the next time this page loads.');
+  };
+  card.querySelector('#vault-cancel').onclick = ()=>{ vaultSetupFormOpen = false; render(); };
   return card;
 }
 
@@ -2300,6 +2541,50 @@ function renderLockScreen(){
   pwInp.onkeydown = (e)=>{ if(e.key==='Enter') doUnlock(); };
   const importFileInput = wrap.querySelector('#lock-import-file-input');
   wrap.querySelector('#lock-import-backup').onclick = ()=>importFileInput.click();
+  importFileInput.onchange = ()=>{
+    const file = importFileInput.files[0];
+    if(file) importBackupJson(file);
+    importFileInput.value = '';
+  };
+  setTimeout(()=>pwInp.focus(), 0);
+  return wrap;
+}
+
+/* Full-screen passphrase prompt shown instead of the app while the vault
+   is locked - i.e. the saved data is encrypted and hasn't been decrypted
+   yet this session. Distinct from renderLockScreen() above (that's just
+   a screen lock over already-readable data; this is the real thing). */
+function renderVaultUnlockScreen(){
+  const wrap = el(`
+    <div style="max-width:420px; margin:80px auto 0;">
+      <div class="card">
+        <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
+        <h1 style="margin-bottom:14px;">&#128272; Data Encrypted</h1>
+        <p class="subnote">This ledger's saved data is encrypted. Enter the encryption passphrase to open it.</p>
+        <div class="field">
+          <label>Encryption passphrase</label>
+          <input type="password" id="vault-unlock-pw" autocomplete="current-password">
+        </div>
+        <div id="vault-unlock-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;">${escapeHtml(vaultError)}</div>
+        <button type="button" id="vault-unlock-btn">Unlock</button>
+        <div class="divider"></div>
+        <p class="subnote" style="margin-bottom:6px;">Forgotten the passphrase? There's no reset &mdash; the data cannot be decrypted without it. If you have an older unencrypted (or differently-encrypted) backup file, you can import that instead; it will replace what's here.</p>
+        <button class="secondary small" type="button" id="vault-lock-import-backup">Import a backup file instead</button>
+        <input type="file" id="vault-lock-import-file-input" accept="application/json,.json" style="display:none;">
+      </div>
+    </div>
+  `);
+  const pwInp = wrap.querySelector('#vault-unlock-pw');
+  wirePasswordToggle(pwInp);
+  const doUnlock = async ()=>{
+    const ok = await attemptVaultUnlock(pwInp.value);
+    if(ok){ vaultError=''; render(); }
+    else { vaultError = 'Incorrect passphrase, or the data is corrupted.'; render(); }
+  };
+  wrap.querySelector('#vault-unlock-btn').onclick = doUnlock;
+  pwInp.onkeydown = (e)=>{ if(e.key==='Enter') doUnlock(); };
+  const importFileInput = wrap.querySelector('#vault-lock-import-file-input');
+  wrap.querySelector('#vault-lock-import-backup').onclick = ()=>importFileInput.click();
   importFileInput.onchange = ()=>{
     const file = importFileInput.files[0];
     if(file) importBackupJson(file);
@@ -6249,6 +6534,30 @@ function wireDelegation(){
     if(action==='lock-now'){
       if(!state.lockPasswordHash){ showAlert('Set a password first.'); return; }
       locked = true; lockError = ''; render();
+      return;
+    }
+    if(action==='toggle-vault-form'){ vaultSetupFormOpen = !vaultSetupFormOpen; render(); return; }
+    if(action==='vault-lock-now'){
+      if(!vaultEnabled || !vaultKey){ return; }
+      (async ()=>{
+        const plainJson = JSON.stringify(state);
+        const {iv,data} = await vaultEncrypt(plainJson, vaultKey);
+        pendingVaultEnvelope = {[VAULT_ENC_MAGIC]:true, v:1, salt:vaultSaltB64, iv, data};
+        vaultKey = null;
+        vaultError = '';
+        vaultLocked = true;
+        render();
+      })();
+      return;
+    }
+    if(action==='disable-vault'){
+      showConfirm('Turn off data encryption? The saved data will be re-written in plain (unencrypted) form from here on.', async ()=>{
+        vaultEnabled = false;
+        vaultKey = null;
+        vaultSaltB64 = null;
+        await saveState();
+        render();
+      }, 'Disable encryption');
       return;
     }
     if(action==='export-backup'){ exportBackupJson(); return; }
