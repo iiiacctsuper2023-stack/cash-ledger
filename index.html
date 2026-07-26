@@ -410,8 +410,17 @@ function getMonthlyLedgerMonth(key){
       revenueTotalDue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       beginningBankBalance:0,
+      houseRentDeposit:0,
+      houseRentDepositDate:'',
+      houseRentDepositBankId:null,
       expenditureColumns:defaultExpenditureColumns(),
       expenditureEntries:[],
+      salaryByAccount:0,
+      salaryByAccountDate:'',
+      salaryByAccountBankId:null,
+      salaryByCash:0,
+      salaryByCashDate:'',
+      salaryByCashBankId:null,
       customRows:[],
       balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
         bankBalanceOverride:null, bankBreakdown:{},
@@ -1278,6 +1287,15 @@ function migrateState(){
     if(!rec.expenditureEntries) rec.expenditureEntries = [];
     if(!rec.customRows) rec.customRows = [];
     if(rec.locked===undefined) rec.locked = false;
+    if(rec.houseRentDeposit===undefined) rec.houseRentDeposit = 0;
+    if(rec.salaryByAccount===undefined) rec.salaryByAccount = 0;
+    if(rec.salaryByCash===undefined) rec.salaryByCash = 0;
+    if(rec.houseRentDepositDate===undefined) rec.houseRentDepositDate = '';
+    if(rec.houseRentDepositBankId===undefined) rec.houseRentDepositBankId = null;
+    if(rec.salaryByAccountDate===undefined) rec.salaryByAccountDate = '';
+    if(rec.salaryByAccountBankId===undefined) rec.salaryByAccountBankId = null;
+    if(rec.salaryByCashDate===undefined) rec.salaryByCashDate = '';
+    if(rec.salaryByCashBankId===undefined) rec.salaryByCashBankId = null;
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -2933,7 +2951,7 @@ function computeMonthlyLedgerFigures(key){
   const yrtNew = {};
   REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + effectiveRevenueTransfer(rec, c.key); });
   const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
-  const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome;
+  const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome + (Number(rec.houseRentDeposit)||0);
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
   if(seedActive){
@@ -2948,6 +2966,7 @@ function computeMonthlyLedgerFigures(key){
     expTotal += amt;
     return amt;
   });
+  expTotal += (Number(rec.salaryByAccount)||0) + (Number(rec.salaryByCash)||0);
   const totalBalance = totalAmount - expTotal; // Total Amount (Beginning Balance + Total Income) minus Expenditure, per the Revenue sheet
 
   const expAssistCol = rec.expenditureColumns.find(c=>resolveColCoaKey(c)==='EduAssist');
@@ -2980,7 +2999,17 @@ function computeMonthlyLedgerFigures(key){
     const ov = rec.balanceSheet.bankBreakdown[b.id];
     const base = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
     const beginningAdd = seedActive ? (Number((seed.bankBreakdown||{})[b.id])||0) : 0;
-    bankBreakdownShown[b.id] = (base===null && beginningAdd===0) ? null : (Number(base)||0) + beginningAdd;
+    // House Rent Deposit / Salary by Account / Salary by Cash are money
+    // movements that don't pass through the day-to-day voucher flow, so
+    // they're layered on top of whichever bank was picked for each - but
+    // only into the auto figure, never on top of a manual override (the
+    // person's own typed number already accounts for whatever it needs to).
+    let manualAdj = 0;
+    if(rec.houseRentDepositBankId===b.id) manualAdj += Number(rec.houseRentDeposit)||0;
+    if(rec.salaryByAccountBankId===b.id) manualAdj -= Number(rec.salaryByAccount)||0;
+    if(rec.salaryByCashBankId===b.id) manualAdj -= Number(rec.salaryByCash)||0;
+    const autoAdj = (ov!==undefined && ov!==null) ? 0 : manualAdj;
+    bankBreakdownShown[b.id] = (base===null && beginningAdd===0 && autoAdj===0) ? null : (Number(base)||0) + beginningAdd + autoAdj;
   });
   const bankBreakdownSum = state.banks.reduce((s,b)=>s+(Number(bankBreakdownShown[b.id])||0),0);
   const bankBreakdownMismatch = bankBalanceShown!==null && Math.abs(bankBreakdownSum - (Number(bankBalanceShown)||0)) > 1;
@@ -3019,11 +3048,18 @@ function computeMonthlyLedgerFigures(key){
     customRowValues[row.id] = v;
   });
 
+  // Mandatory manual figures - must be filled in (non-zero) by hand each
+  // month; flagged in the UI and checked before export.
+  const mandatoryIssues = [];
+  if(!rec.houseRentDeposit) mandatoryIssues.push('House Rent Deposit (Revenue)');
+  if(!rec.salaryByAccount) mandatoryIssues.push('Salary by Account (Expenditure)');
+  if(!rec.salaryByCash) mandatoryIssues.push('Salary by Cash (Expenditure)');
+
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
-    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues};
+    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues, mandatoryIssues};
 }
 
 /* Self-service editing modal: lets the user fix small "data link" and
@@ -3165,6 +3201,8 @@ function refreshMonthlyLedgerComputedOnly(){
   setDisplay('ml-warn-asset-liability', f.assetLiabilityMismatch);
   const yrtNewBox = document.getElementById('ml-yrt-new');
   if(yrtNewBox) yrtNewBox.innerHTML = REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(f.yrtNew[c.key])}</div>`).join('');
+  const bankBreakdownBox = document.getElementById('ml-bank-breakdown-list');
+  if(bankBreakdownBox) drawMlBankBreakdownList(bankBreakdownBox, f.rec, f.bankBreakdownShown, f.isLiveMonth);
 }
 
 function renderMonthlyLedgerWindowInPlace(){
@@ -3254,7 +3292,7 @@ function renderMonthlyLedgerCard(){
     liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoCashInHand, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
-    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity} = f;
+    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, mandatoryIssues} = f;
 
   const monthOptions = (()=>{
     const keys = new Set(Object.keys(state.monthlyLedger.months));
@@ -3290,12 +3328,17 @@ function renderMonthlyLedgerCard(){
       </div>
 
       <div class="${rec.locked?'locked-day':''}">
+      ${mandatoryIssues.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Required before this month is complete: ${mandatoryIssues.map(escapeHtml).join(', ')}.</p>` : ''}
       <div class="divider"></div>
       <h3 style="font-size:14px;">Revenue</h3>
       <div class="row">
         <div class="field">
           <label>Beginning Balance (Bank)</label>
           <input type="text" inputmode="decimal" id="ml-beginning-balance" value="${formatAsianAmount(rec.beginningBankBalance)}">
+        </div>
+        <div class="field">
+          <label>House Rent Deposit <span class="tag" title="Set at the bottom of the page, in Manual Bank Items">see below</span></label>
+          <input type="text" inputmode="decimal" value="${formatAsianAmount(rec.houseRentDeposit)}" readonly style="background:var(--paper);${!rec.houseRentDeposit?'border-color:var(--danger);':''}">
         </div>
       </div>
       <p class="subnote" style="margin-top:-4px;">Yearly running total carried in from ${monthKeyLabel(key).split(' ')[1]===  (state.monthlyLedger.seed?state.monthlyLedger.seed.year:'') ? 'the imported seed' : 'earlier tracked months'} this year (read-only, derived automatically):</p>
@@ -3323,10 +3366,20 @@ function renderMonthlyLedgerCard(){
       <div id="ml-yrt-new" style="font-size:12.5px;color:var(--ink-soft);display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 14px;margin-bottom:6px;">
         ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtNew[c.key])}</div>`).join('')}
       </div>
-      <div class="computed total"><span class="lbl">Total Amount (Beginning Balance + Total Income)</span><span id="ml-total-amount">${money(totalAmount)}</span></div>
+      <div class="computed total"><span class="lbl">Total Amount (Beginning Balance + Total Income + House Rent Deposit)</span><span id="ml-total-amount">${money(totalAmount)}</span></div>
 
       <div class="divider"></div>
       <h3 style="font-size:14px;">Expenditure</h3>
+      <div class="row">
+        <div class="field">
+          <label>Salary by Account <span class="tag" title="Set at the bottom of the page, in Manual Bank Items">see below</span></label>
+          <input type="text" inputmode="decimal" value="${formatAsianAmount(rec.salaryByAccount)}" readonly style="background:var(--paper);${!rec.salaryByAccount?'border-color:var(--danger);':''}">
+        </div>
+        <div class="field">
+          <label>Salary by Cash <span class="tag" title="Set at the bottom of the page, in Manual Bank Items">see below</span></label>
+          <input type="text" inputmode="decimal" value="${formatAsianAmount(rec.salaryByCash)}" readonly style="background:var(--paper);${!rec.salaryByCash?'border-color:var(--danger);':''}">
+        </div>
+      </div>
       <div id="ml-expenditure-list"></div>
       <div class="row" style="flex-wrap:wrap;">
         <button class="secondary small" type="button" data-action="ml-add-expcol">+ Add column (auto from a CoA category)</button>
@@ -3481,7 +3534,65 @@ function renderMonthlyLedgerCard(){
   wrap.appendChild(renderOnlinePaymentCard());
   wrap.appendChild(renderDueRegisterCard());
   wrap.appendChild(renderBankStatementCard());
+  wrap.appendChild(renderMlManualBankItemsCard());
   return wrap;
+}
+
+/* Manual Bank Items: House Rent Deposit / Salary by Account / Salary by
+   Cash - money movements that skip the day-to-day voucher flow, entered
+   once per month by hand. Kept at the very bottom of the Monthly Ledger
+   window (with Due Register / Bank Statement etc.) instead of inline in
+   the Revenue/Expenditure sections above, each tagged with a date and
+   which bank it moves in/out of, so that bank's figure in the Bank
+   Balance breakdown further up shifts to match automatically. */
+function renderMlManualBankItemsCard(){
+  const key = monthlyLedgerViewKey || monthKeyFor(state.month, state.year) || monthKeyFor(MONTHS[new Date().getMonth()], String(new Date().getFullYear()));
+  const rec = getMonthlyLedgerMonth(key);
+
+  const bankOptions = (selected)=> `<option value="">&mdash; Select bank &mdash;</option>` +
+    state.banks.map(b=>`<option value="${b.id}" ${selected===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('');
+
+  const item = (labelText, amtVal, amtId, dateVal, dateId, bankVal, bankId)=>`
+    <div class="line-item" style="align-items:flex-end;flex-wrap:wrap;">
+      <div class="field" style="min-width:150px;margin-bottom:0;">
+        <label>${labelText} <span style="color:var(--danger);">*</span></label>
+        <input type="text" inputmode="decimal" id="${amtId}" value="${formatAsianAmount(amtVal)}" style="${!amtVal?'border-color:var(--danger);':''}">
+      </div>
+      <div class="field" style="min-width:150px;margin-bottom:0;">
+        <label>Date</label>
+        <input type="date" id="${dateId}" value="${dateVal||''}">
+      </div>
+      <div class="field" style="min-width:170px;margin-bottom:0;">
+        <label>Bank</label>
+        <select id="${bankId}">${bankOptions(bankVal)}</select>
+      </div>
+    </div>
+  `;
+
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128181;</span> Manual Bank Items</h3>
+      <p class="subnote">House Rent Deposit and Salary payments are entered by hand each month, since they don't pass through the day-to-day vouchers. Pick which bank each one moves through &mdash; that bank's figure in the Bank Balance breakdown further up adjusts automatically.</p>
+      ${state.banks.length===0 ? `<p class="empty">Add at least one bank account (in the Cash &amp; Bank Ledger) first, to link these to a bank.</p>` : ''}
+      ${item('House Rent Deposit', rec.houseRentDeposit, 'ml2-house-rent-deposit', rec.houseRentDepositDate, 'ml2-house-rent-deposit-date', rec.houseRentDepositBankId, 'ml2-house-rent-deposit-bank')}
+      ${item('Salary by Account', rec.salaryByAccount, 'ml2-salary-account', rec.salaryByAccountDate, 'ml2-salary-account-date', rec.salaryByAccountBankId, 'ml2-salary-account-bank')}
+      ${item('Salary by Cash', rec.salaryByCash, 'ml2-salary-cash', rec.salaryByCashDate, 'ml2-salary-cash-date', rec.salaryByCashBankId, 'ml2-salary-cash-bank')}
+    </div>
+  `);
+
+  wireAmountInput(card.querySelector('#ml2-house-rent-deposit'), (num)=>{ rec.houseRentDeposit = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  wireAmountInput(card.querySelector('#ml2-salary-account'), (num)=>{ rec.salaryByAccount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  wireAmountInput(card.querySelector('#ml2-salary-cash'), (num)=>{ rec.salaryByCash = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+
+  card.querySelector('#ml2-house-rent-deposit-date').onchange = (e)=>{ rec.houseRentDepositDate = e.target.value; saveState(); };
+  card.querySelector('#ml2-salary-account-date').onchange = (e)=>{ rec.salaryByAccountDate = e.target.value; saveState(); };
+  card.querySelector('#ml2-salary-cash-date').onchange = (e)=>{ rec.salaryByCashDate = e.target.value; saveState(); };
+
+  card.querySelector('#ml2-house-rent-deposit-bank').onchange = (e)=>{ rec.houseRentDepositBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
+  card.querySelector('#ml2-salary-account-bank').onchange = (e)=>{ rec.salaryByAccountBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
+  card.querySelector('#ml2-salary-cash-bank').onchange = (e)=>{ rec.salaryByCashBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
+
+  return card;
 }
 
 function drawMlGrid(container, dataObj, kind){
@@ -4238,10 +4349,17 @@ async function exportMonthlyLedger(key, previewOnly){
   });
 
   let r = headerRowNum+1;
+  const beginningBalanceRow = r;
   rev.getCell(r,1).value = '-';
   rev.getCell(r,2).value = 'Beginning Balance Bank';
   rev.getCell(r,3).value = 'Beginning Balance Bank';
   rev.getCell(r,4).value = Number(rec.beginningBankBalance)||0;
+  r++;
+  const houseRentDepositRow = r;
+  rev.getCell(r,1).value = '-';
+  rev.getCell(r,2).value = 'House Rent Deposit';
+  rev.getCell(r,3).value = 'House Rent Deposit';
+  rev.getCell(r,4).value = Number(rec.houseRentDeposit)||0;
   r++;
   const yrtBeforeRow = r;
   rev.getCell(r,3).value = 'Yearly Running Total from Previous Month';
@@ -4306,7 +4424,7 @@ async function exportMonthlyLedger(key, previewOnly){
   r++;
   const totalAmountRow = r;
   revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
-  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${dataStartRow-2}`};
+  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+D${houseRentDepositRow}`};
   rev.getCell(r,4).font = BOLD;
 
   // All-border across the whole used block, first line through last line -
@@ -4371,11 +4489,17 @@ async function exportMonthlyLedger(key, previewOnly){
     exp.getCell(expDataRow, 4+i).value = amt;
   });
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
-  const expTotalRow = expDataRow+1;
+  const salaryAccountRow = expDataRow+1;
+  expSummaryLabel(salaryAccountRow, 'Salary by Account'); exp.getCell(salaryAccountRow,1).font = FONT;
+  exp.getCell(salaryAccountRow,3).value = Number(rec.salaryByAccount)||0;
+  const salaryCashRow = salaryAccountRow+1;
+  expSummaryLabel(salaryCashRow, 'Salary by Cash'); exp.getCell(salaryCashRow,1).font = FONT;
+  exp.getCell(salaryCashRow,3).value = Number(rec.salaryByCash)||0;
+  const expTotalRow = salaryCashRow+1;
   expSummaryLabel(expTotalRow, 'Total Expenditure:'); exp.getCell(expTotalRow,1).font = BOLD;
   for(let i=0;i<=rec.expenditureColumns.length;i++){
     const colLetter = exp.getColumn(3+i).letter;
-    exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataStartRow}:${colLetter}${expDataRow})`};
+    exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataStartRow}:${colLetter}${salaryCashRow})`};
     exp.getCell(expTotalRow, 3+i).font = BOLD;
   }
   const balanceRow = expTotalRow+1;
@@ -6418,6 +6542,11 @@ function wireDelegation(){
       return;
     }
     if(action==='ml-export'){
+      const f = computeMonthlyLedgerFigures(monthlyLedgerViewKey);
+      if(f.mandatoryIssues.length){
+        showAlert(`Fill these required fields first: ${f.mandatoryIssues.join(', ')}.`);
+        return;
+      }
       exportMonthlyLedger(monthlyLedgerViewKey);
       return;
     }
