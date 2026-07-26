@@ -7508,6 +7508,7 @@ function writeRow(ws, r, {voucher='', label='', size=11, bold=false, valueCol='C
 }
 
 function writeDaySheet(ws, day, cmp, beginRefs){
+  ws.pageSetup = { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }; // paperSize 9 = A4
   ws.getColumn(1).width = 13;
   ws.getColumn(2).width = 58;
   ws.getColumn(3).width = 18;
