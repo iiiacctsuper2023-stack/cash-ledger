@@ -5692,6 +5692,7 @@ async function buildDueListWorkbook(dueStudents, monthKey){
 
   let grandTotal = 0;
   let sectionsWritten = 0;
+  const sectionTotalAddrs = [];
   REVENUE_CATS.forEach(c=>{
     const students = dueStudents[c.key];
     if(!students || !students.length) return;
@@ -5716,6 +5717,7 @@ async function buildDueListWorkbook(dueStudents, monthKey){
     r++;
 
     let sectionTotal = 0;
+    const dataStart = r;
     students.forEach(s=>{
       ws.getCell(r,1).value = s.studentId; ws.getCell(r,2).value = s.name; ws.getCell(r,3).value = s.category; ws.getCell(r,4).value = s.amount;
       ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
@@ -5724,16 +5726,20 @@ async function buildDueListWorkbook(dueStudents, monthKey){
       sectionTotal += s.amount;
       r++;
     });
+    const dataEnd = r-1;
 
     ws.mergeCells(r,1,r,3);
     ws.getCell(r,1).value = 'Total'; ws.getCell(r,1).font = TOTAL_BOLD; ws.getCell(r,1).alignment = CENTER;
-    ws.getCell(r,4).value = sectionTotal; ws.getCell(r,4).font = TOTAL_BOLD; ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
+    ws.getCell(r,4).value = dataEnd>=dataStart ? {formula:`SUM(D${dataStart}:D${dataEnd})`} : 0;
+    ws.getCell(r,4).font = TOTAL_BOLD; ws.getCell(r,4).numFmt = ASIAN_NUMFMT;
     borderRow(r,4);
+    sectionTotalAddrs.push(`D${r}`);
     grandTotal += sectionTotal;
     r++;
   });
 
-  ws.getCell(r,5).value = grandTotal; ws.getCell(r,5).font = GRAND_BOLD; ws.getCell(r,5).numFmt = ASIAN_NUMFMT;
+  ws.getCell(r,5).value = sectionTotalAddrs.length ? {formula: sectionTotalAddrs.join('+')} : grandTotal;
+  ws.getCell(r,5).font = GRAND_BOLD; ws.getCell(r,5).numFmt = ASIAN_NUMFMT;
   return wb;
 }
 async function exportDueList(dueStudents, monthKey){
@@ -7982,32 +7988,29 @@ async function exportAnnualSummary(year){
   r++;
 
   const monthColTotals = new Array(12).fill(0);
+  const catRowNums = [];
   SUMMARY_ORDER.forEach(catKey=>{
     const cat = COA.find(c=>c.key===catKey);
     put(`A${r}`, cat.label);
-    let rowTotal = 0;
     for(let m=0;m<12;m++){
       const mm = String(m+1).padStart(2,'0');
       const total = vouchers.filter(v=>v.catKey===catKey && v.date.slice(5,7)===mm).reduce((s,v)=>s+v.amount,0);
       put(String.fromCharCode(66+m)+r, total||'', {numFmt:ASIAN_NUMFMT});
-      rowTotal += total;
       monthColTotals[m] += total;
     }
-    put('N'+r, rowTotal, {bold:true, numFmt:ASIAN_NUMFMT});
+    put('N'+r, {formula:`SUM(B${r}:M${r})`}, {bold:true, numFmt:ASIAN_NUMFMT});
+    catRowNums.push(r);
     r++;
   });
   put(`A${r}`, 'Total', {bold:true});
-  for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, monthColTotals[m], {bold:true, numFmt:ASIAN_NUMFMT}); }
-  put('N'+r, monthColTotals.reduce((s,v)=>s+v,0), {bold:true, numFmt:ASIAN_NUMFMT});
-
-  if(previewOnly){
-    showWorkbookPreview(wb, {
-      title: `Monthly Ledger \u2014 ${monthKeyLabel(key)}`,
-      onDownload: ()=> downloadWorkbook(wb, `${key}_Monthly_Ledger.xlsx`)
-    });
-  } else {
-    await downloadWorkbook(wb, `${key}_Monthly_Ledger.xlsx`);
+  const firstCatRow = catRowNums[0], lastCatRow = catRowNums[catRowNums.length-1];
+  for(let m=0;m<12;m++){
+    const colLetter = String.fromCharCode(66+m);
+    put(colLetter+r, catRowNums.length ? {formula:`SUM(${colLetter}${firstCatRow}:${colLetter}${lastCatRow})`} : 0, {bold:true, numFmt:ASIAN_NUMFMT});
   }
+  put('N'+r, catRowNums.length ? {formula:`SUM(N${firstCatRow}:N${lastCatRow})`} : 0, {bold:true, numFmt:ASIAN_NUMFMT});
+
+  await downloadWorkbook(wb, `Annual_Summary_${year}.xlsx`);
 }
 
 function uniqueSheetName(base, used){
