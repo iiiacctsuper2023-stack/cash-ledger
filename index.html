@@ -610,9 +610,11 @@ let lastUndoTimer = null;
 let duplicateWarning = null;   // string message, or null - shown as a dismissible toast
 let duplicateWarningTimer = null; // auto-clears the undo offer after a short window
 let passwordFormOpen = false;  // true = show the set/change-password mini form
+let securityFormOpen = false;  // true = show the set/change security-question mini form
 let dayLockPasswordFormOpen = false; // true = show the set/change day-lock-password mini form
 let monthLockPasswordFormOpen = false; // true = show the set month-lock-password mini form (Monthly Ledger)
 let lockError = '';            // error text shown on a failed unlock attempt
+let lockScreenChangeMode = false; // true = the lock screen shows "change password" fields instead of just "unlock"
 
 function defaultState(){
   const coaEmpty = {};
@@ -639,6 +641,8 @@ function defaultState(){
     lockPasswordHash:null,
     dayLockPasswordHash:null,
     monthLockPasswordHash:null,
+    securityQuestion:'',
+    securityAnswerHash:null,
     archive:[],
     templates:[],
     /* User-editable "data link" and "export formatting" knobs, so small
@@ -994,6 +998,16 @@ async function sha256Hex(text){
   const enc = new TextEncoder().encode(text);
   const buf = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+/* Security question: one shared question/answer used to verify identity
+   before changing any of the three lock passwords below (login, day-lock,
+   month-lock). The answer is normalized (trimmed, lowercased) before
+   hashing so capitalization/whitespace don't cause false rejections. */
+function normalizeSecurityAnswer(s){ return (s||'').trim().toLowerCase(); }
+async function verifySecurityAnswer(answer){
+  if(!state.securityAnswerHash) return false;
+  const h = await sha256Hex(normalizeSecurityAnswer(answer));
+  return h === state.securityAnswerHash;
 }
 
 /* --- Data Encryption (vault) ------------------------------------------
@@ -1411,6 +1425,8 @@ function migrateState(){
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(state.monthLockPasswordHash===undefined) state.monthLockPasswordHash = null;
+  if(state.securityQuestion===undefined) state.securityQuestion = '';
+  if(state.securityAnswerHash===undefined) state.securityAnswerHash = null;
   if(state.payableRegistry===undefined) state.payableRegistry = [];
   if(state.monthlyLedger===undefined) state.monthlyLedger = { months:{}, seed:null };
   if(state.settings===undefined) state.settings = defaultState().settings;
@@ -2215,18 +2231,20 @@ function renderApp(){
   }
   if(!state.setupDone){
     app.appendChild(renderHeader());
-    if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
+    if(passwordFormOpen) app.appendChild(renderPasswordForm());
     if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
     if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
+    if(securityFormOpen) app.appendChild(renderSecurityQuestionForm());
     if(vaultSetupFormOpen && !vaultEnabled) app.appendChild(renderVaultSetupForm());
     app.appendChild(renderSetup());
     document.getElementById('app').replaceChildren(app);
     return;
   }
   app.appendChild(renderHeader());
-  if(passwordFormOpen && !state.lockPasswordHash) app.appendChild(renderPasswordForm());
+  if(passwordFormOpen) app.appendChild(renderPasswordForm());
   if(dayLockPasswordFormOpen) app.appendChild(renderDayLockPasswordForm());
   if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
+  if(securityFormOpen) app.appendChild(renderSecurityQuestionForm());
   if(vaultSetupFormOpen && !vaultEnabled) app.appendChild(renderVaultSetupForm());
   if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
@@ -2293,10 +2311,11 @@ function renderHeader(){
         </div>
         <div class="toolbar-divider"></div>
         <div class="toolbar-group">
-          ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : ''}
+          ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : '<button class="secondary" data-action="toggle-password-form">&#128274; Change password</button>'}
           ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
-          ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : ''}
-          ${!state.monthLockPasswordHash ? '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Set month-lock password</button>' : ''}
+          ${!state.dayLockPasswordHash ? '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Set day-lock password</button>' : '<button class="secondary" data-action="toggle-daylock-password-form">&#128273; Change day-lock password</button>'}
+          ${!state.monthLockPasswordHash ? '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Set month-lock password</button>' : '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Change month-lock password</button>'}
+          ${!state.securityAnswerHash ? '<button class="secondary" data-action="toggle-security-form">&#10067; Set security question</button>' : '<button class="secondary" data-action="toggle-security-form">&#10067; Change security question</button>'}
         </div>
         <div class="toolbar-divider"></div>
         <div class="toolbar-group">
@@ -2322,10 +2341,22 @@ function renderHeader(){
 /* Inline mini-form for setting, changing, or removing the screen-lock
    password. Shown under the header while passwordFormOpen is true. */
 function renderPasswordForm(){
+  const isChange = !!state.lockPasswordHash;
   const card = el(`
     <div class="card">
-      <h3><span class="num">&#128274;</span> Set Password</h3>
-      <p class="subnote">This only locks the on-screen view in this browser &mdash; the saved data itself isn't encrypted, so treat it as a screen lock, not a vault. Once set, it can only be removed (not changed) from here &mdash; use "Remove password" and set a new one if you need to update it.</p>
+      <h3><span class="num">&#128274;</span> ${isChange ? 'Change' : 'Set'} Password</h3>
+      <p class="subnote">This only locks the on-screen view in this browser &mdash; the saved data itself isn't encrypted here (see Data Encryption above for that), so treat it as a screen lock, not a vault.${isChange ? ' Changing it requires the current password and your security answer.' : ''}</p>
+      ${isChange ? `
+      <div class="row">
+        <div class="field">
+          <label>Current password</label>
+          <input type="password" id="pw-current" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>Security answer</label>
+          <input type="password" id="pw-secanswer" autocomplete="off">
+        </div>
+      </div>` : ''}
       <div class="row">
         <div class="field">
           <label>New password</label>
@@ -2338,17 +2369,27 @@ function renderPasswordForm(){
       </div>
       <div id="pw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
       <div class="row" style="flex-wrap:wrap;">
-        <button type="button" id="pw-save">Set password</button>
+        <button type="button" id="pw-save">${isChange ? 'Change password' : 'Set password'}</button>
         <button class="secondary" type="button" id="pw-cancel">Cancel</button>
       </div>
     </div>
   `);
+  const currentInp = card.querySelector('#pw-current');
+  const secAnsInp = card.querySelector('#pw-secanswer');
+  if(currentInp) wirePasswordToggle(currentInp);
+  if(secAnsInp) wirePasswordToggle(secAnsInp);
   const newInp = card.querySelector('#pw-new');
   const confirmInp = card.querySelector('#pw-confirm');
   wirePasswordToggle(newInp);
   wirePasswordToggle(confirmInp);
   const errBox = card.querySelector('#pw-error');
   card.querySelector('#pw-save').onclick = async ()=>{
+    if(isChange){
+      if(!state.securityAnswerHash){ errBox.textContent = 'Set a security question first (see the button below) before changing the password.'; return; }
+      const curHash = await sha256Hex(currentInp.value||'');
+      if(curHash !== state.lockPasswordHash){ errBox.textContent = 'Current password is incorrect.'; return; }
+      if(!(await verifySecurityAnswer(secAnsInp.value))){ errBox.textContent = 'Security answer is incorrect.'; return; }
+    }
     const a = newInp.value, b = confirmInp.value;
     if(!a){ errBox.textContent = 'Enter a password.'; return; }
     if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
@@ -2357,9 +2398,73 @@ function renderPasswordForm(){
     passwordFormOpen = false;
     await saveState();
     render();
-    showAlert('Password saved. Use "Lock now" any time you want to lock the screen.');
+    showAlert(isChange ? 'Password changed.' : 'Password saved. Use "Lock now" any time you want to lock the screen.');
   };
   card.querySelector('#pw-cancel').onclick = ()=>{ passwordFormOpen = false; render(); };
+  return card;
+}
+
+/* Inline mini-form for setting/updating the shared security question and
+   answer used to verify identity when changing any of the three lock
+   passwords. Updating an already-set question requires the current login
+   password (if one exists) as its own light guard. */
+function renderSecurityQuestionForm(){
+  const isChange = !!state.securityAnswerHash;
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#10067;</span> ${isChange ? 'Change' : 'Set'} Security Question</h3>
+      <p class="subnote">Used to verify it's really you when changing the Login, Day-Lock, or Month-Lock password.</p>
+      ${isChange && state.lockPasswordHash ? `
+      <div class="field">
+        <label>Current login password (to confirm it's you)</label>
+        <input type="password" id="sq-verify-pw" autocomplete="current-password">
+      </div>` : ''}
+      <div class="field">
+        <label>Security question</label>
+        <input type="text" id="sq-question" value="${escapeHtml(state.securityQuestion||'')}" placeholder="e.g. What is the name of your first school?">
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Answer</label>
+          <input type="password" id="sq-answer" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Confirm answer</label>
+          <input type="password" id="sq-answer-confirm" autocomplete="off">
+        </div>
+      </div>
+      <div id="sq-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
+      <div class="row" style="flex-wrap:wrap;">
+        <button type="button" id="sq-save">${isChange ? 'Update' : 'Save'} security question</button>
+        <button class="secondary" type="button" id="sq-cancel">Cancel</button>
+      </div>
+    </div>
+  `);
+  const verifyInp = card.querySelector('#sq-verify-pw');
+  if(verifyInp) wirePasswordToggle(verifyInp);
+  const ansInp = card.querySelector('#sq-answer');
+  const ansConfirmInp = card.querySelector('#sq-answer-confirm');
+  wirePasswordToggle(ansInp);
+  wirePasswordToggle(ansConfirmInp);
+  const errBox = card.querySelector('#sq-error');
+  card.querySelector('#sq-save').onclick = async ()=>{
+    if(isChange && state.lockPasswordHash){
+      const h = await sha256Hex(verifyInp.value||'');
+      if(h !== state.lockPasswordHash){ errBox.textContent = 'Current login password is incorrect.'; return; }
+    }
+    const q = (card.querySelector('#sq-question').value||'').trim();
+    const a = ansInp.value, ac = ansConfirmInp.value;
+    if(!q){ errBox.textContent = 'Enter a security question.'; return; }
+    if(!a){ errBox.textContent = 'Enter an answer.'; return; }
+    if(a !== ac){ errBox.textContent = 'Answers do not match.'; return; }
+    state.securityQuestion = q;
+    state.securityAnswerHash = await sha256Hex(normalizeSecurityAnswer(a));
+    securityFormOpen = false;
+    await saveState();
+    render();
+    showAlert('Security question saved.');
+  };
+  card.querySelector('#sq-cancel').onclick = ()=>{ securityFormOpen = false; render(); };
   return card;
 }
 
@@ -2416,10 +2521,22 @@ function renderVaultSetupForm(){
 /* Inline mini-form for setting a separate password used only to unlock a
    finalized/locked day (distinct from the screen-lock password above). */
 function renderDayLockPasswordForm(){
+  const isChange = !!state.dayLockPasswordHash;
   const card = el(`
     <div class="card">
-      <h3><span class="num">&#128273;</span> Set Day-Lock Password</h3>
-      <p class="subnote">This password is only asked for when unlocking a finalized day &mdash; separate from the screen-lock password. Once set, it stays set and can't be changed or removed from within the app.</p>
+      <h3><span class="num">&#128273;</span> ${isChange ? 'Change' : 'Set'} Day-Lock Password</h3>
+      <p class="subnote">This password is only asked for when unlocking a finalized day &mdash; separate from the screen-lock password.${isChange ? ' Changing it requires the current day-lock password and your security answer.' : ''}</p>
+      ${isChange ? `
+      <div class="row">
+        <div class="field">
+          <label>Current day-lock password</label>
+          <input type="password" id="dlpw-current" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>Security answer</label>
+          <input type="password" id="dlpw-secanswer" autocomplete="off">
+        </div>
+      </div>` : ''}
       <div class="row">
         <div class="field">
           <label>New day-lock password</label>
@@ -2432,17 +2549,27 @@ function renderDayLockPasswordForm(){
       </div>
       <div id="dlpw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
       <div class="row" style="flex-wrap:wrap;">
-        <button type="button" id="dlpw-save">Set day-lock password</button>
+        <button type="button" id="dlpw-save">${isChange ? 'Change day-lock password' : 'Set day-lock password'}</button>
         <button class="secondary" type="button" id="dlpw-cancel">Cancel</button>
       </div>
     </div>
   `);
+  const currentInp = card.querySelector('#dlpw-current');
+  const secAnsInp = card.querySelector('#dlpw-secanswer');
+  if(currentInp) wirePasswordToggle(currentInp);
+  if(secAnsInp) wirePasswordToggle(secAnsInp);
   const newInp = card.querySelector('#dlpw-new');
   const confirmInp = card.querySelector('#dlpw-confirm');
   wirePasswordToggle(newInp);
   wirePasswordToggle(confirmInp);
   const errBox = card.querySelector('#dlpw-error');
   card.querySelector('#dlpw-save').onclick = async ()=>{
+    if(isChange){
+      if(!state.securityAnswerHash){ errBox.textContent = 'Set a security question first before changing this password.'; return; }
+      const curHash = await sha256Hex(currentInp.value||'');
+      if(curHash !== state.dayLockPasswordHash){ errBox.textContent = 'Current day-lock password is incorrect.'; return; }
+      if(!(await verifySecurityAnswer(secAnsInp.value))){ errBox.textContent = 'Security answer is incorrect.'; return; }
+    }
     const a = newInp.value, b = confirmInp.value;
     if(!a){ errBox.textContent = 'Enter a password.'; return; }
     if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
@@ -2451,7 +2578,7 @@ function renderDayLockPasswordForm(){
     dayLockPasswordFormOpen = false;
     await saveState();
     render();
-    showAlert('Day-lock password saved. Unlocking a finalized day will now ask for it.');
+    showAlert(isChange ? 'Day-lock password changed.' : 'Day-lock password saved. Unlocking a finalized day will now ask for it.');
   };
   card.querySelector('#dlpw-cancel').onclick = ()=>{ dayLockPasswordFormOpen = false; render(); };
   return card;
@@ -2461,10 +2588,22 @@ function renderDayLockPasswordForm(){
    finalized/locked month in the Monthly Ledger (distinct from both the
    screen-lock and day-lock passwords above). */
 function renderMonthLockPasswordForm(){
+  const isChange = !!state.monthLockPasswordHash;
   const card = el(`
     <div class="card">
-      <h3><span class="num">&#128273;</span> Set Month-Lock Password</h3>
-      <p class="subnote">This password is only asked for when unlocking a finalized month in the Monthly Ledger &mdash; separate from the screen-lock and day-lock passwords. Once set, it stays set and can't be changed or removed from within the app.</p>
+      <h3><span class="num">&#128273;</span> ${isChange ? 'Change' : 'Set'} Month-Lock Password</h3>
+      <p class="subnote">This password is only asked for when unlocking a finalized month in the Monthly Ledger &mdash; separate from the screen-lock and day-lock passwords.${isChange ? ' Changing it requires the current month-lock password and your security answer.' : ''}</p>
+      ${isChange ? `
+      <div class="row">
+        <div class="field">
+          <label>Current month-lock password</label>
+          <input type="password" id="mlpw-current" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>Security answer</label>
+          <input type="password" id="mlpw-secanswer" autocomplete="off">
+        </div>
+      </div>` : ''}
       <div class="row">
         <div class="field">
           <label>New month-lock password</label>
@@ -2477,17 +2616,27 @@ function renderMonthLockPasswordForm(){
       </div>
       <div id="mlpw-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;"></div>
       <div class="row" style="flex-wrap:wrap;">
-        <button type="button" id="mlpw-save">Set month-lock password</button>
+        <button type="button" id="mlpw-save">${isChange ? 'Change month-lock password' : 'Set month-lock password'}</button>
         <button class="secondary" type="button" id="mlpw-cancel">Cancel</button>
       </div>
     </div>
   `);
+  const currentInp = card.querySelector('#mlpw-current');
+  const secAnsInp = card.querySelector('#mlpw-secanswer');
+  if(currentInp) wirePasswordToggle(currentInp);
+  if(secAnsInp) wirePasswordToggle(secAnsInp);
   const newInp = card.querySelector('#mlpw-new');
   const confirmInp = card.querySelector('#mlpw-confirm');
   wirePasswordToggle(newInp);
   wirePasswordToggle(confirmInp);
   const errBox = card.querySelector('#mlpw-error');
   card.querySelector('#mlpw-save').onclick = async ()=>{
+    if(isChange){
+      if(!state.securityAnswerHash){ errBox.textContent = 'Set a security question first before changing this password.'; return; }
+      const curHash = await sha256Hex(currentInp.value||'');
+      if(curHash !== state.monthLockPasswordHash){ errBox.textContent = 'Current month-lock password is incorrect.'; return; }
+      if(!(await verifySecurityAnswer(secAnsInp.value))){ errBox.textContent = 'Security answer is incorrect.'; return; }
+    }
     const a = newInp.value, b = confirmInp.value;
     if(!a){ errBox.textContent = 'Enter a password.'; return; }
     if(a.length<4){ errBox.textContent = 'Use at least 4 characters.'; return; }
@@ -2496,7 +2645,7 @@ function renderMonthLockPasswordForm(){
     monthLockPasswordFormOpen = false;
     await saveState();
     render();
-    showAlert('Month-lock password saved. Locking a month in the Monthly Ledger will now ask for it when unlocking.');
+    showAlert(isChange ? 'Month-lock password changed.' : 'Month-lock password saved. Locking a month in the Monthly Ledger will now ask for it when unlocking.');
   };
   card.querySelector('#mlpw-cancel').onclick = ()=>{ monthLockPasswordFormOpen = false; render(); };
   return card;
@@ -2508,15 +2657,33 @@ function renderLockScreen(){
     <div style="max-width:420px; margin:80px auto 0;">
       <div class="card">
         <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
-        <h1 style="margin-bottom:14px;">&#128274; Locked</h1>
-        <p class="subnote">Enter the password to open the Daily Cash &amp; Bank Ledger.</p>
+        <h1 style="margin-bottom:14px;">&#128274; ${lockScreenChangeMode ? 'Change Password' : 'Locked'}</h1>
+        <p class="subnote">${lockScreenChangeMode ? 'Enter the current password and your security answer, then choose a new password.' : 'Enter the password to open the Daily Cash &amp; Bank Ledger.'}</p>
         <p style="font-size:10.5px;color:var(--ink-soft);opacity:.65;margin:-8px 0 14px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</p>
         <div class="field">
-          <label>Password</label>
+          <label>${lockScreenChangeMode ? 'Current password' : 'Password'}</label>
           <input type="password" id="unlock-pw" autocomplete="current-password">
         </div>
+        ${lockScreenChangeMode ? `
+        <div class="field">
+          <label>Security answer</label>
+          <input type="password" id="unlock-secanswer" autocomplete="off">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>New password</label>
+            <input type="password" id="unlock-newpw" autocomplete="new-password">
+          </div>
+          <div class="field">
+            <label>Confirm new password</label>
+            <input type="password" id="unlock-newpw-confirm" autocomplete="new-password">
+          </div>
+        </div>` : ''}
         <div id="unlock-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;">${escapeHtml(lockError)}</div>
-        <button type="button" id="unlock-btn">Unlock</button>
+        <button type="button" id="unlock-btn">${lockScreenChangeMode ? 'Change password &amp; unlock' : 'Unlock'}</button>
+        <div style="margin-top:10px;">
+          ${state.securityAnswerHash ? `<button class="secondary small" type="button" id="unlock-toggle-change">${lockScreenChangeMode ? 'Back to unlock' : 'Change password instead'}</button>` : ''}
+        </div>
         <div class="divider"></div>
         <p class="subnote" style="margin-bottom:6px;">Forgotten the password? There's no reset here &mdash; the only way back in is a backup file exported earlier.</p>
         <button class="secondary small" type="button" id="lock-import-backup">Import a backup file instead</button>
@@ -2526,19 +2693,44 @@ function renderLockScreen(){
   `);
   const pwInp = wrap.querySelector('#unlock-pw');
   wirePasswordToggle(pwInp);
+  const secAnsInp = wrap.querySelector('#unlock-secanswer');
+  const newPwInp = wrap.querySelector('#unlock-newpw');
+  const newPwConfirmInp = wrap.querySelector('#unlock-newpw-confirm');
+  if(secAnsInp) wirePasswordToggle(secAnsInp);
+  if(newPwInp) wirePasswordToggle(newPwInp);
+  if(newPwConfirmInp) wirePasswordToggle(newPwConfirmInp);
   const doUnlock = async ()=>{
     const hash = await sha256Hex(pwInp.value);
     if(hash === state.lockPasswordHash){
       locked = false;
       lockError = '';
+      lockScreenChangeMode = false;
       render();
     } else {
       lockError = 'Incorrect password.';
       render();
     }
   };
-  wrap.querySelector('#unlock-btn').onclick = doUnlock;
-  pwInp.onkeydown = (e)=>{ if(e.key==='Enter') doUnlock(); };
+  const doChange = async ()=>{
+    const curHash = await sha256Hex(pwInp.value||'');
+    if(curHash !== state.lockPasswordHash){ lockError = 'Current password is incorrect.'; render(); return; }
+    if(!(await verifySecurityAnswer(secAnsInp.value))){ lockError = 'Security answer is incorrect.'; render(); return; }
+    const a = newPwInp.value, b = newPwConfirmInp.value;
+    if(!a){ lockError = 'Enter a new password.'; render(); return; }
+    if(a.length<4){ lockError = 'Use at least 4 characters.'; render(); return; }
+    if(a!==b){ lockError = 'New passwords do not match.'; render(); return; }
+    state.lockPasswordHash = await sha256Hex(a);
+    locked = false;
+    lockError = '';
+    lockScreenChangeMode = false;
+    await saveState();
+    render();
+    showAlert('Password changed.');
+  };
+  wrap.querySelector('#unlock-btn').onclick = ()=>{ lockScreenChangeMode ? doChange() : doUnlock(); };
+  pwInp.onkeydown = (e)=>{ if(e.key==='Enter' && !lockScreenChangeMode) doUnlock(); };
+  const toggleBtn = wrap.querySelector('#unlock-toggle-change');
+  if(toggleBtn) toggleBtn.onclick = ()=>{ lockScreenChangeMode = !lockScreenChangeMode; lockError = ''; render(); };
   const importFileInput = wrap.querySelector('#lock-import-file-input');
   wrap.querySelector('#lock-import-backup').onclick = ()=>importFileInput.click();
   importFileInput.onchange = ()=>{
@@ -2718,6 +2910,7 @@ function renderDayPanel(dayId, computed){
         <span style="font-size:13px;color:var(--ink-soft);">${day.locked ? ('This day is locked - entries can\'t be edited until it\'s unlocked'+((state.dayLockPasswordHash||state.lockPasswordHash)?' with the password':'')+'.') : 'Once a day is finalized, lock it to prevent accidental edits.'}</span>
       </div>
       <button class="${day.locked?'danger':'secondary'} small" type="button" data-action="${day.locked?'unlock-day':'lock-day'}" data-day="${day.id}">${day.locked?'Unlock this day':'Lock this day'}</button>
+      <button class="secondary small" type="button" data-action="toggle-daylock-password-form">&#128273; ${state.dayLockPasswordHash?'Change':'Set'} day-lock password</button>
       <button class="secondary small" type="button" data-action="print-day-sheet" data-day="${day.id}">&#128424; Print day sheet</button>
       <button class="secondary small" type="button" data-action="print-all-vouchers" data-day="${day.id}">&#128424; Print all vouchers</button>
     </div>
@@ -3208,6 +3401,34 @@ function lastDayCashInHandInMonth(monthKey){
   return computed[last.id] ? computed[last.id].cashInHand : null;
 }
 
+/* Sums a per-bank Daily Ledger field (salaryAccount or salaryCash, from
+   each day's Bank section) across every day in the given month, across
+   all banks - this is what lets a Salary entry made in the Daily Ledger
+   flow into the Monthly Ledger automatically. */
+function sumDailyBankFieldForMonth(key, field){
+  let total = 0;
+  state.days.forEach(day=>{
+    if(day.date.slice(0,7)!==key) return;
+    Object.values(day.banksDaily||{}).forEach(bd=>{ total += Number(bd && bd[field])||0; });
+  });
+  return total;
+}
+/* Effective Salary by Account/Cash for the Monthly Ledger: the manual
+   figure in "Manual Bank Items" if one was typed in (kept for cases
+   where the salary wasn't routed through a day's Bank section, or needs
+   a different total), otherwise the sum of what's already been entered
+   day by day in the Daily Ledger's Bank section for that month. */
+function effectiveSalaryByAccount(key){
+  const rec = getMonthlyLedgerMonth(key);
+  const manual = Number(rec.salaryByAccount)||0;
+  return manual!==0 ? manual : sumDailyBankFieldForMonth(key, 'salaryAccount');
+}
+function effectiveSalaryByCash(key){
+  const rec = getMonthlyLedgerMonth(key);
+  const manual = Number(rec.salaryByCash)||0;
+  return manual!==0 ? manual : sumDailyBankFieldForMonth(key, 'salaryCash');
+}
+
 function computeMonthlyLedgerFigures(key){
   const rec = getMonthlyLedgerMonth(key);
   const isLiveMonth = key === monthKeyFor(state.month, state.year);
@@ -3251,7 +3472,7 @@ function computeMonthlyLedgerFigures(key){
     expTotal += amt;
     return amt;
   });
-  expTotal += (Number(rec.salaryByAccount)||0) + (Number(rec.salaryByCash)||0);
+  expTotal += effectiveSalaryByAccount(key) + effectiveSalaryByCash(key);
   const totalBalance = totalAmount - expTotal; // Total Amount (Beginning Balance + Total Income) minus Expenditure, per the Revenue sheet
 
   const expAssistCol = rec.expenditureColumns.find(c=>resolveColCoaKey(c)==='EduAssist');
@@ -3284,15 +3505,20 @@ function computeMonthlyLedgerFigures(key){
     const ov = rec.balanceSheet.bankBreakdown[b.id];
     const base = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
     const beginningAdd = seedActive ? (Number((seed.bankBreakdown||{})[b.id])||0) : 0;
-    // House Rent Deposit / Salary by Account / Salary by Cash are money
-    // movements that don't pass through the day-to-day voucher flow, so
-    // they're layered on top of whichever bank was picked for each - but
-    // only into the auto figure, never on top of a manual override (the
-    // person's own typed number already accounts for whatever it needs to).
+    // House Rent Deposit is a money movement that doesn't pass through
+    // the day-to-day voucher flow, so it's layered on top of whichever
+    // bank was picked for it - but only into the auto figure, never on
+    // top of a manual override (the person's own typed number already
+    // accounts for whatever it needs to). Salary by Account/Cash only
+    // gets the same treatment when it's a genuine manual figure typed
+    // into Manual Bank Items - when it's instead auto-summed from the
+    // Daily Ledger's Bank section, it's already reflected in that bank's
+    // own day-by-day closing balance, so adjusting again here would
+    // double-count it.
     let manualAdj = 0;
     if(rec.houseRentDepositBankId===b.id) manualAdj += Number(rec.houseRentDeposit)||0;
-    if(rec.salaryByAccountBankId===b.id) manualAdj -= Number(rec.salaryByAccount)||0;
-    if(rec.salaryByCashBankId===b.id) manualAdj -= Number(rec.salaryByCash)||0;
+    if((Number(rec.salaryByAccount)||0)!==0 && rec.salaryByAccountBankId===b.id) manualAdj -= Number(rec.salaryByAccount)||0;
+    if((Number(rec.salaryByCash)||0)!==0 && rec.salaryByCashBankId===b.id) manualAdj -= Number(rec.salaryByCash)||0;
     const autoAdj = (ov!==undefined && ov!==null) ? 0 : manualAdj;
     bankBreakdownShown[b.id] = (base===null && beginningAdd===0 && autoAdj===0) ? null : (Number(base)||0) + beginningAdd + autoAdj;
   });
@@ -3337,8 +3563,8 @@ function computeMonthlyLedgerFigures(key){
   // month; flagged in the UI and checked before export.
   const mandatoryIssues = [];
   if(!rec.houseRentDeposit) mandatoryIssues.push('House Rent Deposit (Revenue)');
-  if(!rec.salaryByAccount) mandatoryIssues.push('Salary by Account (Expenditure)');
-  if(!rec.salaryByCash) mandatoryIssues.push('Salary by Cash (Expenditure)');
+  if(!effectiveSalaryByAccount(key)) mandatoryIssues.push('Salary by Account (Expenditure)');
+  if(!effectiveSalaryByCash(key)) mandatoryIssues.push('Salary by Cash (Expenditure)');
 
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
@@ -3610,6 +3836,7 @@ function renderMonthlyLedgerCard(){
           <span style="font-size:13px;color:var(--ink-soft);">${rec.locked ? ('This month is locked - figures can\'t be edited until it\'s unlocked'+((state.monthLockPasswordHash||state.lockPasswordHash)?' with the password':'')+'.') : 'Once a month is finalized, lock it to prevent accidental edits.'}</span>
         </div>
         <button class="${rec.locked?'danger':'secondary'} small" type="button" data-action="${rec.locked?'ml-unlock-month':'ml-lock-month'}">${rec.locked?'Unlock this month':'Lock this month'}</button>
+        <button class="secondary small" type="button" data-action="toggle-monthlock-password-form">&#128273; ${state.monthLockPasswordHash?'Change':'Set'} month-lock password</button>
       </div>
 
       <div class="${rec.locked?'locked-day':''}">
@@ -3657,12 +3884,12 @@ function renderMonthlyLedgerCard(){
       <h3 style="font-size:14px;">Expenditure</h3>
       <div class="row">
         <div class="field">
-          <label>Salary by Account <span class="tag" title="Set at the bottom of the page, in Manual Bank Items">see below</span></label>
-          <input type="text" inputmode="decimal" value="${formatAsianAmount(rec.salaryByAccount)}" readonly style="background:var(--paper);${!rec.salaryByAccount?'border-color:var(--danger);':''}">
+          <label>Salary by Account <span class="tag" title="Auto-summed from the Daily Ledger's Bank section for this month, unless overridden below in Manual Bank Items">see below</span></label>
+          <input type="text" inputmode="decimal" value="${formatAsianAmount(effectiveSalaryByAccount(key))}" readonly style="background:var(--paper);${!effectiveSalaryByAccount(key)?'border-color:var(--danger);':''}">
         </div>
         <div class="field">
-          <label>Salary by Cash <span class="tag" title="Set at the bottom of the page, in Manual Bank Items">see below</span></label>
-          <input type="text" inputmode="decimal" value="${formatAsianAmount(rec.salaryByCash)}" readonly style="background:var(--paper);${!rec.salaryByCash?'border-color:var(--danger);':''}">
+          <label>Salary by Cash <span class="tag" title="Auto-summed from the Daily Ledger's Bank section for this month, unless overridden below in Manual Bank Items">see below</span></label>
+          <input type="text" inputmode="decimal" value="${formatAsianAmount(effectiveSalaryByCash(key))}" readonly style="background:var(--paper);${!effectiveSalaryByCash(key)?'border-color:var(--danger);':''}">
         </div>
       </div>
       <div id="ml-expenditure-list"></div>
@@ -3837,11 +4064,12 @@ function renderMlManualBankItemsCard(){
   const bankOptions = (selected)=> `<option value="">&mdash; Select bank &mdash;</option>` +
     state.banks.map(b=>`<option value="${b.id}" ${selected===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('');
 
-  const item = (labelText, amtVal, amtId, dateVal, dateId, bankVal, bankId)=>`
+  const itemWithBank = (labelText, amtVal, amtId, dateVal, dateId, bankVal, bankId, autoNote, warnVal)=>`
     <div class="line-item" style="align-items:flex-end;flex-wrap:wrap;">
       <div class="field" style="min-width:150px;margin-bottom:0;">
         <label>${labelText} <span style="color:var(--danger);">*</span></label>
-        <input type="text" inputmode="decimal" id="${amtId}" value="${formatAsianAmount(amtVal)}" style="${!amtVal?'border-color:var(--danger);':''}">
+        <input type="text" inputmode="decimal" id="${amtId}" value="${formatAsianAmount(amtVal)}" style="${!(warnVal!==undefined?warnVal:amtVal)?'border-color:var(--danger);':''}">
+        ${autoNote}
       </div>
       <div class="field" style="min-width:150px;margin-bottom:0;">
         <label>Date</label>
@@ -3854,14 +4082,25 @@ function renderMlManualBankItemsCard(){
     </div>
   `;
 
+  const autoSalaryAccount = sumDailyBankFieldForMonth(key, 'salaryAccount');
+  const autoSalaryCash = sumDailyBankFieldForMonth(key, 'salaryCash');
+  const salaryAccountOverridden = (Number(rec.salaryByAccount)||0)!==0;
+  const salaryCashOverridden = (Number(rec.salaryByCash)||0)!==0;
+  const salaryAccountNote = salaryAccountOverridden
+    ? `<p class="subnote" style="margin:2px 0 0;">Manually overridden &mdash; already entered in the Daily Ledger this month: ${money(autoSalaryAccount)}. Clear this box to go back to that auto figure.</p>`
+    : (autoSalaryAccount>0 ? `<p class="subnote" style="margin:2px 0 0;">Auto-summed from the Daily Ledger's Bank section this month.</p>` : '');
+  const salaryCashNote = salaryCashOverridden
+    ? `<p class="subnote" style="margin:2px 0 0;">Manually overridden &mdash; already entered in the Daily Ledger this month: ${money(autoSalaryCash)}. Clear this box to go back to that auto figure.</p>`
+    : (autoSalaryCash>0 ? `<p class="subnote" style="margin:2px 0 0;">Auto-summed from the Daily Ledger's Bank section this month.</p>` : '');
+
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128181;</span> Manual Bank Items</h3>
-      <p class="subnote">House Rent Deposit and Salary payments are entered by hand each month, since they don't pass through the day-to-day vouchers. Pick which bank each one moves through &mdash; that bank's figure in the Bank Balance breakdown further up adjusts automatically.</p>
+      <p class="subnote">House Rent Deposit is entered by hand each month, since it doesn't pass through the day-to-day vouchers. Salary by Account/Cash instead fill in automatically from whatever's been entered in each day's Bank section this month &mdash; only type a number here if you need to override that. Pick which bank each one moves through &mdash; that bank's figure in the Bank Balance breakdown further up adjusts automatically. For Salary by Account/Cash, the date is also what decides which month's Monthly Ledger an override is recorded against &mdash; change the date to a different month and the override moves there automatically.</p>
       ${state.banks.length===0 ? `<p class="empty">Add at least one bank account (in the Cash &amp; Bank Ledger) first, to link these to a bank.</p>` : ''}
-      ${item('House Rent Deposit', rec.houseRentDeposit, 'ml2-house-rent-deposit', rec.houseRentDepositDate, 'ml2-house-rent-deposit-date', rec.houseRentDepositBankId, 'ml2-house-rent-deposit-bank')}
-      ${item('Salary by Account', rec.salaryByAccount, 'ml2-salary-account', rec.salaryByAccountDate, 'ml2-salary-account-date', rec.salaryByAccountBankId, 'ml2-salary-account-bank')}
-      ${item('Salary by Cash', rec.salaryByCash, 'ml2-salary-cash', rec.salaryByCashDate, 'ml2-salary-cash-date', rec.salaryByCashBankId, 'ml2-salary-cash-bank')}
+      ${itemWithBank('House Rent Deposit', rec.houseRentDeposit, 'ml2-house-rent-deposit', rec.houseRentDepositDate, 'ml2-house-rent-deposit-date', rec.houseRentDepositBankId, 'ml2-house-rent-deposit-bank', '')}
+      ${itemWithBank('Salary by Account', rec.salaryByAccount, 'ml2-salary-account', rec.salaryByAccountDate, 'ml2-salary-account-date', rec.salaryByAccountBankId, 'ml2-salary-account-bank', salaryAccountNote, salaryAccountOverridden?rec.salaryByAccount:autoSalaryAccount)}
+      ${itemWithBank('Salary by Cash', rec.salaryByCash, 'ml2-salary-cash', rec.salaryByCashDate, 'ml2-salary-cash-date', rec.salaryByCashBankId, 'ml2-salary-cash-bank', salaryCashNote, salaryCashOverridden?rec.salaryByCash:autoSalaryCash)}
     </div>
   `);
 
@@ -3870,8 +4109,30 @@ function renderMlManualBankItemsCard(){
   wireAmountInput(card.querySelector('#ml2-salary-cash'), (num)=>{ rec.salaryByCash = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
 
   card.querySelector('#ml2-house-rent-deposit-date').onchange = (e)=>{ rec.houseRentDepositDate = e.target.value; saveState(); };
-  card.querySelector('#ml2-salary-account-date').onchange = (e)=>{ rec.salaryByAccountDate = e.target.value; saveState(); };
-  card.querySelector('#ml2-salary-cash-date').onchange = (e)=>{ rec.salaryByCashDate = e.target.value; saveState(); };
+
+  /* Moves a salary figure to whichever month record its date now falls
+     in, if that's different from the month currently being viewed - so
+     the amount always lives in the Monthly Ledger month matching its
+     own date, not whichever tab happened to be open when it was typed.
+     The chosen bank moves along with it. */
+  function moveSalaryIfMonthChanged(amountField, dateField, bankField, newDate){
+    const newKey = newDate ? newDate.slice(0,7) : null;
+    if(!newKey || newKey===key){ rec[dateField] = newDate; saveState(); refreshMonthlyLedgerComputedOnly(); return; }
+    const amount = rec[amountField];
+    const bankId = rec[bankField];
+    const targetRec = getMonthlyLedgerMonth(newKey);
+    targetRec[amountField] = amount;
+    targetRec[dateField] = newDate;
+    targetRec[bankField] = bankId;
+    rec[amountField] = 0;
+    rec[dateField] = null;
+    rec[bankField] = null;
+    monthlyLedgerViewKey = newKey;
+    saveState();
+    renderMonthlyLedgerWindowInPlace();
+  }
+  card.querySelector('#ml2-salary-account-date').onchange = (e)=>{ moveSalaryIfMonthChanged('salaryByAccount', 'salaryByAccountDate', 'salaryByAccountBankId', e.target.value); };
+  card.querySelector('#ml2-salary-cash-date').onchange = (e)=>{ moveSalaryIfMonthChanged('salaryByCash', 'salaryByCashDate', 'salaryByCashBankId', e.target.value); };
 
   card.querySelector('#ml2-house-rent-deposit-bank').onchange = (e)=>{ rec.houseRentDepositBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
   card.querySelector('#ml2-salary-account-bank').onchange = (e)=>{ rec.salaryByAccountBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
@@ -4776,10 +5037,10 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
   const salaryAccountRow = expDataRow+1;
   expSummaryLabel(salaryAccountRow, 'Salary by Account'); exp.getCell(salaryAccountRow,1).font = FONT;
-  exp.getCell(salaryAccountRow,3).value = Number(rec.salaryByAccount)||0;
+  exp.getCell(salaryAccountRow,3).value = effectiveSalaryByAccount(key);
   const salaryCashRow = salaryAccountRow+1;
   expSummaryLabel(salaryCashRow, 'Salary by Cash'); exp.getCell(salaryCashRow,1).font = FONT;
-  exp.getCell(salaryCashRow,3).value = Number(rec.salaryByCash)||0;
+  exp.getCell(salaryCashRow,3).value = effectiveSalaryByCash(key);
   const expTotalRow = salaryCashRow+1;
   expSummaryLabel(expTotalRow, 'Total Expenditure:'); exp.getCell(expTotalRow,1).font = BOLD;
   for(let i=0;i<=rec.expenditureColumns.length;i++){
@@ -6537,6 +6798,7 @@ function wireDelegation(){
     if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
     if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
     if(action==='toggle-monthlock-password-form'){ monthLockPasswordFormOpen = !monthLockPasswordFormOpen; render(); return; }
+    if(action==='toggle-security-form'){ securityFormOpen = !securityFormOpen; render(); return; }
     if(action==='lock-now'){
       if(!state.lockPasswordHash){ showAlert('Set a password first.'); return; }
       locked = true; lockError = ''; render();
