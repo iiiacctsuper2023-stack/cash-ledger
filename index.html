@@ -130,6 +130,11 @@
 
   .section-nav{position:fixed;right:10px;top:50%;transform:translateY(-50%);z-index:420;display:flex;flex-direction:column;gap:12px;align-items:flex-end;}
   .desc-input.input-missing{border-color:var(--danger,#B3261E);box-shadow:0 0 0 1px var(--danger,#B3261E) inset;}
+  .flash-highlight{animation:flashHighlight 2.2s ease-out;}
+  @keyframes flashHighlight{
+    0%{box-shadow:0 0 0 3px var(--danger,#B3261E); border-color:var(--danger,#B3261E);}
+    100%{box-shadow:0 0 0 0px transparent;}
+  }
   .pw-wrap{position:relative;display:block;}
   .pw-wrap input{width:100%;padding-right:34px;box-sizing:border-box;}
   .pw-toggle-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px 6px;font-size:15px;line-height:1;color:var(--ink-soft,#666);}
@@ -706,8 +711,9 @@ function newDay(dateStr){
   };
 }
 function ensureBankDaily(day, bankId){
-  if(!day.banksDaily[bankId]) day.banksDaily[bankId] = {sslDeposit:0, fees:0, salaryAccount:0, salaryCash:0, reconciledBalance:null, reconcileNote:''};
+  if(!day.banksDaily[bankId]) day.banksDaily[bankId] = {sslDeposit:0, houseRentDeposit:0, fees:0, salaryAccount:0, salaryCash:0, reconciledBalance:null, reconcileNote:''};
   const bd = day.banksDaily[bankId];
+  if(bd.houseRentDeposit===undefined) bd.houseRentDeposit = 0;
   if(bd.reconciledBalance===undefined) bd.reconciledBalance = null;
   if(bd.reconcileNote===undefined) bd.reconcileNote = '';
   return bd;
@@ -1577,17 +1583,17 @@ function computeAll(){
 
     const banks = {};
     state.banks.forEach(b=>{
-      const bd = day.banksDaily[b.id] || {sslDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
+      const bd = day.banksDaily[b.id] || {sslDeposit:0,houseRentDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
       const opening = prevBankClose[b.id];
       const transferIn = day.deposits.filter(d=>d.bankId===b.id).reduce((s,d)=>s+(Number(d.amount)||0),0);
       const transferOut = day.withdrawals.filter(w=>w.bankId===b.id).reduce((s,w)=>s+(Number(w.amount)||0),0);
       const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
       const bankXferIn = bankXfers.filter(t=>t.toBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
       const bankXferOut = bankXfers.filter(t=>t.fromBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
-      const totalIn = opening + (Number(bd.sslDeposit)||0) + transferIn + bankXferIn;
+      const totalIn = opening + (Number(bd.sslDeposit)||0) + (Number(bd.houseRentDeposit)||0) + transferIn + bankXferIn;
       const totalOut = (Number(bd.fees)||0) + (Number(bd.salaryAccount)||0) + (Number(bd.salaryCash)||0) + transferOut + bankXferOut;
       const closing = totalIn - totalOut;
-      banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, transferIn, bankXferIn, totalIn,
+      banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, houseRentDeposit:Number(bd.houseRentDeposit)||0, transferIn, bankXferIn, totalIn,
                       fees:Number(bd.fees)||0, salaryAccount:Number(bd.salaryAccount)||0, salaryCash:Number(bd.salaryCash)||0,
                       transferOut, bankXferOut, totalOut, closing};
       prevBankClose[b.id] = closing;
@@ -2199,6 +2205,8 @@ function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToChec
    ====================================================================== */
 function render(){
   const scrollY = window.scrollY;
+  const mlBody = document.getElementById('ml-floating-body');
+  const mlScrollTop = mlBody ? mlBody.scrollTop : null;
   renderApp();
   /* Restore scroll position after the rebuild, instantly - the page has
      html{scroll-behavior:smooth}, which would otherwise animate this
@@ -2208,7 +2216,16 @@ function render(){
      re-layout happens after paint) - without fighting any deliberate
      scrollIntoView a caller does right after render(). */
   if(window.scrollY !== scrollY) window.scrollTo({top:scrollY, left:0, behavior:'instant'});
-  requestAnimationFrame(()=>{ if(window.scrollY !== scrollY) window.scrollTo({top:scrollY, left:0, behavior:'instant'}); });
+  const restoreMlScroll = ()=>{
+    if(mlScrollTop===null) return;
+    const freshBody = document.getElementById('ml-floating-body');
+    if(freshBody && freshBody.scrollTop !== mlScrollTop) freshBody.scrollTop = mlScrollTop;
+  };
+  restoreMlScroll();
+  requestAnimationFrame(()=>{
+    if(window.scrollY !== scrollY) window.scrollTo({top:scrollY, left:0, behavior:'instant'});
+    restoreMlScroll();
+  });
 }
 function renderApp(){
   /* Build into a detached fragment and swap it in with ONE DOM mutation
@@ -3071,6 +3088,10 @@ function renderDayPanel(dayId, computed){
             <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.sslDeposit)}" data-field="sslDeposit" data-bank="${b.id}">
           </div>
           <div class="field">
+            <label>Other deposit / House Rent</label>
+            <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.houseRentDeposit)}" data-field="houseRentDeposit" data-bank="${b.id}">
+          </div>
+          <div class="field">
             <label>Bank fees</label>
             <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(bd.fees)}" data-field="fees" data-bank="${b.id}">
           </div>
@@ -3117,6 +3138,7 @@ function renderDayPanel(dayId, computed){
           const rows = [
             ['Opening balance', bc.opening],
             ['+ Other deposit / SSL Commerz', bc.sslDeposit],
+            ['+ Other deposit / House Rent', bc.houseRentDeposit],
             ['+ Deposits transferred into this bank', bc.transferIn],
             ['+ Bank-to-bank transfer in', bc.bankXferIn],
             ['&minus; Bank fees', -bc.fees],
@@ -3154,6 +3176,7 @@ function renderDayPanel(dayId, computed){
     `);
     bankCard.querySelectorAll('input[data-field]').forEach(inp=>{
       wireAmountInput(inp, (num)=>{ bd[inp.dataset.field] = num; refreshComputedOnly(); });
+      inp.addEventListener('blur', ()=>{ saveState(); });
     });
     const reconInput = bankCard.querySelector('#recon-bal-'+b.id);
     wireAmountInput(reconInput, (num)=>{ bd.reconciledBalance = (reconInput.value.trim()==='') ? null : num; refreshComputedOnly(); });
@@ -3413,11 +3436,11 @@ function sumDailyBankFieldForMonth(key, field){
   });
   return total;
 }
-/* Effective Salary by Account/Cash for the Monthly Ledger: the manual
-   figure in "Manual Bank Items" if one was typed in (kept for cases
-   where the salary wasn't routed through a day's Bank section, or needs
-   a different total), otherwise the sum of what's already been entered
-   day by day in the Daily Ledger's Bank section for that month. */
+/* Effective Salary by Account/Cash and House Rent Deposit for the
+   Monthly Ledger: the old manual figure if this month still has one
+   from before Manual Bank Items was removed, otherwise the sum of
+   what's been entered day by day in the Daily Ledger's Bank section -
+   which is now the only place these are entered. */
 function effectiveSalaryByAccount(key){
   const rec = getMonthlyLedgerMonth(key);
   const manual = Number(rec.salaryByAccount)||0;
@@ -3427,6 +3450,11 @@ function effectiveSalaryByCash(key){
   const rec = getMonthlyLedgerMonth(key);
   const manual = Number(rec.salaryByCash)||0;
   return manual!==0 ? manual : sumDailyBankFieldForMonth(key, 'salaryCash');
+}
+function effectiveHouseRentDeposit(key){
+  const rec = getMonthlyLedgerMonth(key);
+  const manual = Number(rec.houseRentDeposit)||0;
+  return manual!==0 ? manual : sumDailyBankFieldForMonth(key, 'houseRentDeposit');
 }
 
 function computeMonthlyLedgerFigures(key){
@@ -3457,7 +3485,7 @@ function computeMonthlyLedgerFigures(key){
   const yrtNew = {};
   REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + effectiveRevenueTransfer(rec, c.key); });
   const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
-  const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome + (Number(rec.houseRentDeposit)||0);
+  const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome + effectiveHouseRentDeposit(key);
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
   if(seedActive){
@@ -3562,7 +3590,7 @@ function computeMonthlyLedgerFigures(key){
   // Mandatory manual figures - must be filled in (non-zero) by hand each
   // month; flagged in the UI and checked before export.
   const mandatoryIssues = [];
-  if(!rec.houseRentDeposit) mandatoryIssues.push('House Rent Deposit (Revenue)');
+  if(!effectiveHouseRentDeposit(key)) mandatoryIssues.push('House Rent Deposit (Revenue)');
   if(!effectiveSalaryByAccount(key)) mandatoryIssues.push('Salary by Account (Expenditure)');
   if(!effectiveSalaryByCash(key)) mandatoryIssues.push('Salary by Cash (Expenditure)');
 
@@ -3720,8 +3748,10 @@ function renderMonthlyLedgerWindowInPlace(){
   if(!monthlyLedgerOpen || monthlyLedgerMinimized) return;
   const body = document.getElementById('ml-floating-body');
   if(!body) return;
+  const scrollTop = body.scrollTop;
   body.innerHTML = '';
   body.appendChild(renderMonthlyLedgerCard());
+  body.scrollTop = scrollTop;
 }
 
 function renderMonthlyLedgerWindow(){
@@ -3849,8 +3879,8 @@ function renderMonthlyLedgerCard(){
           <input type="text" inputmode="decimal" id="ml-beginning-balance" value="${formatAsianAmount(rec.beginningBankBalance)}">
         </div>
         <div class="field">
-          <label>House Rent Deposit <span class="tag" title="Set at the bottom of the page, in Manual Bank Items">see below</span></label>
-          <input type="text" inputmode="decimal" value="${formatAsianAmount(rec.houseRentDeposit)}" readonly style="background:var(--paper);${!rec.houseRentDeposit?'border-color:var(--danger);':''}">
+          <label>House Rent Deposit <span class="tag" title="Entered in the Daily Ledger's Bank section (Other deposit / House Rent) - auto-summed here">auto</span></label>
+          <input type="text" inputmode="decimal" value="${formatAsianAmount(effectiveHouseRentDeposit(key))}" readonly style="background:var(--paper);${!effectiveHouseRentDeposit(key)?'border-color:var(--danger);':''}">
         </div>
       </div>
       <p class="subnote" style="margin-top:-4px;">Yearly running total carried in from ${monthKeyLabel(key).split(' ')[1]===  (state.monthlyLedger.seed?state.monthlyLedger.seed.year:'') ? 'the imported seed' : 'earlier tracked months'} this year (read-only, derived automatically):</p>
@@ -3884,11 +3914,11 @@ function renderMonthlyLedgerCard(){
       <h3 style="font-size:14px;">Expenditure</h3>
       <div class="row">
         <div class="field">
-          <label>Salary by Account <span class="tag" title="Auto-summed from the Daily Ledger's Bank section for this month, unless overridden below in Manual Bank Items">see below</span></label>
+          <label>Salary by Account <span class="tag" title="Entered in the Daily Ledger's Bank section (Salary payment - by account) - auto-summed here">auto</span></label>
           <input type="text" inputmode="decimal" value="${formatAsianAmount(effectiveSalaryByAccount(key))}" readonly style="background:var(--paper);${!effectiveSalaryByAccount(key)?'border-color:var(--danger);':''}">
         </div>
         <div class="field">
-          <label>Salary by Cash <span class="tag" title="Auto-summed from the Daily Ledger's Bank section for this month, unless overridden below in Manual Bank Items">see below</span></label>
+          <label>Salary by Cash <span class="tag" title="Entered in the Daily Ledger's Bank section (Salary payment - by cash) - auto-summed here">auto</span></label>
           <input type="text" inputmode="decimal" value="${formatAsianAmount(effectiveSalaryByCash(key))}" readonly style="background:var(--paper);${!effectiveSalaryByCash(key)?'border-color:var(--danger);':''}">
         </div>
       </div>
@@ -4046,99 +4076,7 @@ function renderMonthlyLedgerCard(){
   wrap.appendChild(renderOnlinePaymentCard());
   wrap.appendChild(renderDueRegisterCard());
   wrap.appendChild(renderBankStatementCard());
-  wrap.appendChild(renderMlManualBankItemsCard());
   return wrap;
-}
-
-/* Manual Bank Items: House Rent Deposit / Salary by Account / Salary by
-   Cash - money movements that skip the day-to-day voucher flow, entered
-   once per month by hand. Kept at the very bottom of the Monthly Ledger
-   window (with Due Register / Bank Statement etc.) instead of inline in
-   the Revenue/Expenditure sections above, each tagged with a date and
-   which bank it moves in/out of, so that bank's figure in the Bank
-   Balance breakdown further up shifts to match automatically. */
-function renderMlManualBankItemsCard(){
-  const key = monthlyLedgerViewKey || monthKeyFor(state.month, state.year) || monthKeyFor(MONTHS[new Date().getMonth()], String(new Date().getFullYear()));
-  const rec = getMonthlyLedgerMonth(key);
-
-  const bankOptions = (selected)=> `<option value="">&mdash; Select bank &mdash;</option>` +
-    state.banks.map(b=>`<option value="${b.id}" ${selected===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('');
-
-  const itemWithBank = (labelText, amtVal, amtId, dateVal, dateId, bankVal, bankId, autoNote, warnVal)=>`
-    <div class="line-item" style="align-items:flex-end;flex-wrap:wrap;">
-      <div class="field" style="min-width:150px;margin-bottom:0;">
-        <label>${labelText} <span style="color:var(--danger);">*</span></label>
-        <input type="text" inputmode="decimal" id="${amtId}" value="${formatAsianAmount(amtVal)}" style="${!(warnVal!==undefined?warnVal:amtVal)?'border-color:var(--danger);':''}">
-        ${autoNote}
-      </div>
-      <div class="field" style="min-width:150px;margin-bottom:0;">
-        <label>Date</label>
-        <input type="date" id="${dateId}" value="${dateVal||''}">
-      </div>
-      <div class="field" style="min-width:170px;margin-bottom:0;">
-        <label>Bank</label>
-        <select id="${bankId}">${bankOptions(bankVal)}</select>
-      </div>
-    </div>
-  `;
-
-  const autoSalaryAccount = sumDailyBankFieldForMonth(key, 'salaryAccount');
-  const autoSalaryCash = sumDailyBankFieldForMonth(key, 'salaryCash');
-  const salaryAccountOverridden = (Number(rec.salaryByAccount)||0)!==0;
-  const salaryCashOverridden = (Number(rec.salaryByCash)||0)!==0;
-  const salaryAccountNote = salaryAccountOverridden
-    ? `<p class="subnote" style="margin:2px 0 0;">Manually overridden &mdash; already entered in the Daily Ledger this month: ${money(autoSalaryAccount)}. Clear this box to go back to that auto figure.</p>`
-    : (autoSalaryAccount>0 ? `<p class="subnote" style="margin:2px 0 0;">Auto-summed from the Daily Ledger's Bank section this month.</p>` : '');
-  const salaryCashNote = salaryCashOverridden
-    ? `<p class="subnote" style="margin:2px 0 0;">Manually overridden &mdash; already entered in the Daily Ledger this month: ${money(autoSalaryCash)}. Clear this box to go back to that auto figure.</p>`
-    : (autoSalaryCash>0 ? `<p class="subnote" style="margin:2px 0 0;">Auto-summed from the Daily Ledger's Bank section this month.</p>` : '');
-
-  const card = el(`
-    <div class="card">
-      <h3><span class="num">&#128181;</span> Manual Bank Items</h3>
-      <p class="subnote">House Rent Deposit is entered by hand each month, since it doesn't pass through the day-to-day vouchers. Salary by Account/Cash instead fill in automatically from whatever's been entered in each day's Bank section this month &mdash; only type a number here if you need to override that. Pick which bank each one moves through &mdash; that bank's figure in the Bank Balance breakdown further up adjusts automatically. For Salary by Account/Cash, the date is also what decides which month's Monthly Ledger an override is recorded against &mdash; change the date to a different month and the override moves there automatically.</p>
-      ${state.banks.length===0 ? `<p class="empty">Add at least one bank account (in the Cash &amp; Bank Ledger) first, to link these to a bank.</p>` : ''}
-      ${itemWithBank('House Rent Deposit', rec.houseRentDeposit, 'ml2-house-rent-deposit', rec.houseRentDepositDate, 'ml2-house-rent-deposit-date', rec.houseRentDepositBankId, 'ml2-house-rent-deposit-bank', '')}
-      ${itemWithBank('Salary by Account', rec.salaryByAccount, 'ml2-salary-account', rec.salaryByAccountDate, 'ml2-salary-account-date', rec.salaryByAccountBankId, 'ml2-salary-account-bank', salaryAccountNote, salaryAccountOverridden?rec.salaryByAccount:autoSalaryAccount)}
-      ${itemWithBank('Salary by Cash', rec.salaryByCash, 'ml2-salary-cash', rec.salaryByCashDate, 'ml2-salary-cash-date', rec.salaryByCashBankId, 'ml2-salary-cash-bank', salaryCashNote, salaryCashOverridden?rec.salaryByCash:autoSalaryCash)}
-    </div>
-  `);
-
-  wireAmountInput(card.querySelector('#ml2-house-rent-deposit'), (num)=>{ rec.houseRentDeposit = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
-  wireAmountInput(card.querySelector('#ml2-salary-account'), (num)=>{ rec.salaryByAccount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
-  wireAmountInput(card.querySelector('#ml2-salary-cash'), (num)=>{ rec.salaryByCash = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
-
-  card.querySelector('#ml2-house-rent-deposit-date').onchange = (e)=>{ rec.houseRentDepositDate = e.target.value; saveState(); };
-
-  /* Moves a salary figure to whichever month record its date now falls
-     in, if that's different from the month currently being viewed - so
-     the amount always lives in the Monthly Ledger month matching its
-     own date, not whichever tab happened to be open when it was typed.
-     The chosen bank moves along with it. */
-  function moveSalaryIfMonthChanged(amountField, dateField, bankField, newDate){
-    const newKey = newDate ? newDate.slice(0,7) : null;
-    if(!newKey || newKey===key){ rec[dateField] = newDate; saveState(); refreshMonthlyLedgerComputedOnly(); return; }
-    const amount = rec[amountField];
-    const bankId = rec[bankField];
-    const targetRec = getMonthlyLedgerMonth(newKey);
-    targetRec[amountField] = amount;
-    targetRec[dateField] = newDate;
-    targetRec[bankField] = bankId;
-    rec[amountField] = 0;
-    rec[dateField] = null;
-    rec[bankField] = null;
-    monthlyLedgerViewKey = newKey;
-    saveState();
-    renderMonthlyLedgerWindowInPlace();
-  }
-  card.querySelector('#ml2-salary-account-date').onchange = (e)=>{ moveSalaryIfMonthChanged('salaryByAccount', 'salaryByAccountDate', 'salaryByAccountBankId', e.target.value); };
-  card.querySelector('#ml2-salary-cash-date').onchange = (e)=>{ moveSalaryIfMonthChanged('salaryByCash', 'salaryByCashDate', 'salaryByCashBankId', e.target.value); };
-
-  card.querySelector('#ml2-house-rent-deposit-bank').onchange = (e)=>{ rec.houseRentDepositBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
-  card.querySelector('#ml2-salary-account-bank').onchange = (e)=>{ rec.salaryByAccountBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
-  card.querySelector('#ml2-salary-cash-bank').onchange = (e)=>{ rec.salaryByCashBankId = e.target.value||null; saveState(); refreshMonthlyLedgerComputedOnly(); };
-
-  return card;
 }
 
 function drawMlGrid(container, dataObj, kind){
@@ -4905,7 +4843,7 @@ async function exportMonthlyLedger(key, previewOnly){
   rev.getCell(r,1).value = '-';
   rev.getCell(r,2).value = 'House Rent Deposit';
   rev.getCell(r,3).value = 'House Rent Deposit';
-  rev.getCell(r,4).value = Number(rec.houseRentDeposit)||0;
+  rev.getCell(r,4).value = effectiveHouseRentDeposit(key);
   r++;
   const yrtBeforeRow = r;
   rev.getCell(r,3).value = 'Yearly Running Total from Previous Month';
@@ -8160,7 +8098,7 @@ function writeDaySheet(ws, day, cmp, beginRefs){
 
   const bankClosingAddr = {};
   state.banks.forEach(b=>{
-    const bd = day.banksDaily[b.id] || {sslDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
+    const bd = day.banksDaily[b.id] || {sslDeposit:0,houseRentDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
     const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
     const beginBankRow = r;
     const ref = beginRefs.banks[b.id] || {value:0};
@@ -8172,6 +8110,7 @@ function writeDaySheet(ws, day, cmp, beginRefs){
       r++;
     });
     if(bd.sslDeposit){ writeRow(ws, r, {label:'Other deposit / SSL Commerz', value:Number(bd.sslDeposit)||0}); r++; }
+    if(bd.houseRentDeposit){ writeRow(ws, r, {label:'Other deposit / House Rent', value:Number(bd.houseRentDeposit)||0}); r++; }
     day.deposits.filter(d=>d.bankId===b.id).forEach(d=>{
       writeRow(ws, r, {label:'Cash deposited from ledger'+(d.note?' - '+d.note:''), value:Number(d.amount)||0});
       r++;
@@ -8705,10 +8644,67 @@ async function viewStoredWorkbook(base64, filename, title){
   }
 }
 
+/* Mandatory fields for a single day, checked before it's allowed into an
+   Excel export: every cash-received/cash-disbursed line with a nonzero
+   amount needs a description, and TBL needs its daily reconciliation
+   done. Each issue carries the card id to scroll to so the person can be
+   taken straight there instead of having to go hunting. */
+function findDayMandatoryIssues(day){
+  const issues = [];
+  (day.miscCollectionSections||[]).forEach(sec=>{
+    if((Number(sec.amount)||0)!==0 && !(sec.desc||'').trim()){
+      issues.push({label:`Cash received \u2014 description missing (${dayLabel(day.date)})`, dayId:day.id, sectionId:'section-cash-received'});
+    }
+  });
+  COA.forEach(cat=>{
+    (day.coa[cat.key]||[]).forEach(item=>{
+      const secs = (item.sections && item.sections.length) ? item.sections : [{desc:item.desc, amount:item.amount}];
+      secs.forEach(sec=>{
+        if((Number(sec.amount)||0)!==0 && !(sec.desc||'').trim()){
+          issues.push({label:`${cat.label} voucher \u2014 description missing (${dayLabel(day.date)})`, dayId:day.id, sectionId:'section-cash-disbursed'});
+        }
+      });
+    });
+  });
+  state.banks.forEach(b=>{
+    if(/tbl/i.test(b.name)){
+      const bd = day.banksDaily ? day.banksDaily[b.id] : null;
+      if(!bd || bd.reconciledBalance==null){
+        issues.push({label:`TBL reconciliation missing (${dayLabel(day.date)})`, dayId:day.id, sectionId:`section-bank-${b.id}`});
+      }
+    }
+  });
+  return issues;
+}
+/* Switches to the day the issue is on (if needed), re-renders, then
+   scrolls the relevant card into view and briefly highlights it. */
+function goToMandatoryIssue(issue){
+  if(monthlyLedgerOpen){ monthlyLedgerOpen = false; }
+  selectedDayId = issue.dayId;
+  render();
+  setTimeout(()=>{
+    const target = document.getElementById(issue.sectionId);
+    if(target){
+      target.scrollIntoView({behavior:'smooth', block:'start'});
+      target.classList.add('flash-highlight');
+      setTimeout(()=>target.classList.remove('flash-highlight'), 2200);
+    }
+  }, 60);
+}
+function showMandatoryIssuesModal(issues){
+  const first = issues[0];
+  const message = issues.length===1
+    ? `Excel export is blocked until this is filled in: ${first.label}.`
+    : `Excel export is blocked until ${issues.length} required fields are filled in. First: ${first.label}.`;
+  showModal({message, confirmText:'Take me there', cancelText:'Cancel', onConfirm:()=>goToMandatoryIssue(first)});
+}
+
 async function exportDay(dayId){
   if(!dayId){ showAlert('No day selected.'); return; }
-  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
   const day = findDay(dayId);
+  const issues = findDayMandatoryIssues(day);
+  if(issues.length){ showMandatoryIssuesModal(issues); return; }
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
   const computed = computeAll();
   const c = computed[dayId];
   const wb = new ExcelJS.Workbook();
@@ -8725,6 +8721,9 @@ async function exportDay(dayId){
 
 async function exportMonth(){
   if(state.days.length===0){ showAlert('No days recorded yet.'); return; }
+  const allIssues = [];
+  state.days.forEach(day=>{ allIssues.push(...findDayMandatoryIssues(day)); });
+  if(allIssues.length){ showMandatoryIssuesModal(allIssues); return; }
   try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
   const computed = computeAll();
   const wb = new ExcelJS.Workbook();
