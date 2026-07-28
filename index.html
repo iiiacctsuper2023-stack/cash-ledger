@@ -135,6 +135,13 @@
     0%{box-shadow:0 0 0 3px var(--danger,#B3261E); border-color:var(--danger,#B3261E);}
     100%{box-shadow:0 0 0 0px transparent;}
   }
+  .section-nav-target{
+    background:var(--danger-soft,#FBE4E1);
+    outline:2px solid var(--danger,#B3261E);
+    outline-offset:3px;
+    border-radius:8px;
+    transition:background 1.2s ease 3.2s, outline-color 1.2s ease 3.2s;
+  }
   .pw-wrap{position:relative;display:block;}
   .pw-wrap input{width:100%;padding-right:34px;box-sizing:border-box;}
   .pw-toggle-btn{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px 6px;font-size:15px;line-height:1;color:var(--ink-soft,#666);}
@@ -213,6 +220,23 @@
     .section-nav-dot{height:56px;min-width:56px;font-size:13px;padding:0 16px;}
     .section-nav-dot .num{font-size:13px;}
     .section-nav{right:6px;gap:10px;}
+  }
+  .corner-nav-home{position:fixed;right:10px;top:14px;z-index:430;}
+  .corner-nav-end{position:fixed;right:10px;bottom:14px;z-index:430;}
+  .corner-nav-btn{
+    height:56px;min-width:56px;border-radius:28px;
+    background:var(--primary-dark);color:#fff;border:3px solid #fff;
+    font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:600;
+    display:flex;align-items:center;justify-content:center;gap:5px;
+    box-shadow:var(--shadow-md,0 2px 8px rgba(0,0,0,.18));
+    cursor:pointer;opacity:.88;transition:opacity .15s var(--ease),transform .12s var(--ease);
+    padding:0 14px;white-space:nowrap;
+  }
+  .corner-nav-btn:hover{opacity:1;transform:scale(1.04);}
+  @media (max-width: 480px){
+    .corner-nav-home{right:6px;top:8px;}
+    .corner-nav-end{right:6px;bottom:8px;}
+    .corner-nav-btn{height:48px;min-width:48px;font-size:12px;padding:0 10px;}
   }
   .day-panel.locked{position:relative;}
   .day-panel.locked::after{
@@ -3206,9 +3230,28 @@ function renderDayPanel(dayId, computed){
   `);
   wrap.appendChild(summary);
   wrap.appendChild(renderSectionNav(day));
+  wrap.appendChild(renderHomeEndNav());
 
   return wrap;
 }
+
+/* Right-side quick-scroll buttons: Home jumps to the very top of the
+   page, End jumps to the very bottom - fixed independently (Home at the
+   very top, End at the very bottom), same idea as Ctrl+Home/Ctrl+End in
+   MS Word, for the common case of just wanting either end of a long
+   day's page rather than a specific section. */
+function renderHomeEndNav(){
+  const frag = document.createDocumentFragment();
+  const homeNav = el(`<nav class="corner-nav-home" aria-label="Scroll to top"><button type="button" class="corner-nav-btn" title="Go to the top of the page (Ctrl+Home)">&#8962; Home</button></nav>`);
+  const endNav = el(`<nav class="corner-nav-end" aria-label="Scroll to bottom"><button type="button" class="corner-nav-btn" title="Go to the bottom of the page (Ctrl+End)">End &#8964;</button></nav>`);
+  homeNav.querySelector('button').onclick = scrollPageToTop;
+  endNav.querySelector('button').onclick = scrollPageToBottom;
+  frag.appendChild(homeNav);
+  frag.appendChild(endNav);
+  return frag;
+}
+function scrollPageToTop(){ window.scrollTo({top:0, left:0, behavior:'smooth'}); }
+function scrollPageToBottom(){ window.scrollTo({top:document.documentElement.scrollHeight, left:0, behavior:'smooth'}); }
 
 /* Floating section-jump nav for the day panel. Numbered dots for the
    day's 5(ish) top-level sections (Cash received / Cash disbursed /
@@ -3234,8 +3277,25 @@ function renderSectionNav(day){
   ];
   const nav = el(`<nav class="section-nav" aria-label="Jump to section"></nav>`);
   const scrollToId = (id)=>{
-    const target = document.getElementById(id);
-    if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+    /* Wait a frame (twice, to survive a re-render that's still settling -
+       e.g. right after opening the Monthly Ledger window) so the target
+       is measured/scrolled against its final layout, not a mid-reflow
+       one - that's what was landing a bit off from the real position.
+       scrollIntoView (not a manual window.scrollTo) is what correctly
+       finds whichever scroll container actually needs to move - the
+       main page, or the Monthly Ledger window's own inner scroll area -
+       so it keeps working for both. */
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      const target = document.getElementById(id);
+      if(!target) return;
+      target.scrollIntoView({behavior:'smooth', block:'start'});
+      document.querySelectorAll('.section-nav-target').forEach(x=>{
+        if(x!==target) x.classList.remove('section-nav-target');
+      });
+      target.classList.add('section-nav-target');
+      clearTimeout(target._navHighlightTimer);
+      target._navHighlightTimer = setTimeout(()=>target.classList.remove('section-nav-target'), 4500);
+    }));
   };
   sections.forEach(sec=>{
     const dot = el(`
@@ -8821,6 +8881,21 @@ if(typeof window!=='undefined' && typeof window.addEventListener==='function'){
     e.preventDefault();
     deferredInstallPrompt = e;
     if(state) render();
+  });
+  /* Ctrl+Home / Ctrl+End - same as MS Word: jump to the very top/bottom
+     of the page. Left alone while typing in a field (input/textarea/
+     select/contenteditable) so it doesn't override that field's own
+     native Home/End cursor behavior - only fires when nothing text-
+     editable has focus. Tab already moves between fields natively in
+     the browser, so no extra wiring is needed for that. */
+  window.addEventListener('keydown', (e)=>{
+    if(!e.ctrlKey || e.metaKey || e.altKey) return;
+    if(e.key!=='Home' && e.key!=='End') return;
+    const ae = document.activeElement;
+    const isEditable = ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT' || ae.isContentEditable);
+    if(isEditable) return;
+    e.preventDefault();
+    if(e.key==='Home') scrollPageToTop(); else scrollPageToBottom();
   });
 }
 if(typeof navigator!=='undefined' && 'serviceWorker' in navigator && typeof location!=='undefined' && (location.protocol==='https:' || location.hostname==='localhost')){
