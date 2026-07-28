@@ -7156,13 +7156,31 @@ function wireDelegation(){
 
     if(action==='select-day'){ selectedDayId = t.dataset.day; render(); return; }
     if(action==='add-day'){
-      const lastDate = state.days.length ? state.days[state.days.length-1].date : null;
-      let next = new Date();
-      if(lastDate){ next = new Date(lastDate+'T00:00:00'); next.setDate(next.getDate()+1); }
+      const validDates = state.days.map(d=>d.date).filter(ds=>ds && !isNaN(new Date(ds+'T00:00:00').getTime()));
+      let next;
+      if(validDates.length){
+        const maxDate = validDates.reduce((a,b)=> a>b ? a : b); // "YYYY-MM-DD" strings compare correctly
+        next = new Date(maxDate+'T00:00:00');
+        next.setDate(next.getDate()+1);
+      } else {
+        next = new Date();
+      }
       const d = newDay(next.toISOString().slice(0,10));
       state.days.push(d);
       selectedDayId = d.id;
       saveState(); render();
+      // Scroll straight to the new day and highlight it, so it's obvious
+      // a fresh day with the next date was created - not just the same
+      // last day being shown again.
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        const target = document.getElementById('section-cash-received');
+        if(target){
+          target.scrollIntoView({behavior:'smooth', block:'start'});
+          target.classList.add('section-nav-target');
+          clearTimeout(target._navHighlightTimer);
+          target._navHighlightTimer = setTimeout(()=>target.classList.remove('section-nav-target'), 4500);
+        }
+      }));
       return;
     }
     if(action==='delete-day'){
