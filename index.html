@@ -2041,12 +2041,10 @@ function showSettleIouModal(day, item){
           <option value="" selected>-- Select a category --</option>
           ${catOptions}
         </select>
-
-        <label style="font-size:12.5px;color:var(--ink-soft);">Description</label>
-        <input type="text" id="settle-desc-input" list="settle-desc-suggest" value="${escapeHtml(item.desc||'')}" style="margin:2px 0 10px;">
         <datalist id="settle-desc-suggest"></datalist>
-        <label style="font-size:12.5px;color:var(--ink-soft);">Receipt / amount actually spent</label>
-        <input type="text" inputmode="decimal" id="settle-amt-input" placeholder="e.g. 930 or 1000-70" style="margin:2px 0 4px;">
+
+        <div id="settle-sections"></div>
+        <button class="secondary small" type="button" id="settle-add-section" style="margin:2px 0 10px;">+ Add section</button>
         <div id="settle-error" style="color:var(--danger); font-size:12.5px; margin:-2px 0 8px; min-height:1em;"></div>
 
         <div id="settle-return-wrap" style="display:none;">
@@ -2064,14 +2062,12 @@ function showSettleIouModal(day, item){
   `);
   document.body.appendChild(overlay);
   const catSelect = overlay.querySelector('#settle-cat-select');
-  const descInput = overlay.querySelector('#settle-desc-input');
-  wireLockableTextInput(descInput);
-  const input = overlay.querySelector('#settle-amt-input');
   const returnWrap = overlay.querySelector('#settle-return-wrap');
   const returnInput = overlay.querySelector('#settle-return-input');
   const errBox = overlay.querySelector('#settle-error');
   const preview = overlay.querySelector('#settle-preview');
   const descSuggestList = overlay.querySelector('#settle-desc-suggest');
+  const sectionsBox = overlay.querySelector('#settle-sections');
   const refreshDescSuggestions = ()=>{
     const opts = catSelect.value ? descriptionSuggestions(catSelect.value) : [];
     descSuggestList.innerHTML = opts.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('');
@@ -2081,14 +2077,47 @@ function showSettleIouModal(day, item){
   const buttons = overlay.querySelectorAll('.modal-actions button');
   const cancelBtn = buttons[0], confirmBtn = buttons[1];
 
-  /* Calculator-style amount boxes, same as everywhere else in the app:
-     you can type "1500-500" and it resolves to 1000 on blur/Enter. */
-  let spentVal = 0, returnedVal = 0;
-  wireAmountInput(input, (num)=>{ spentVal = num; updatePreview(); });
+  /* Multiple sections (description + amount), all recorded into ONE
+     voucher under whichever category is picked - same "one voucher,
+     several line items" pattern used for regular vouchers. Section 1
+     starts pre-filled with the IOU's own description as a starting
+     point. */
+  let sections = [{desc:item.desc||'', amount:0}];
+  let returnedVal = 0;
+  const totalSpent = ()=> sections.reduce((s,sec)=>s+(Number(sec.amount)||0), 0);
+
+  function renderSections(){
+    sectionsBox.innerHTML = '';
+    sections.forEach((sec, idx)=>{
+      const row = el(`
+        <div class="line-item" style="align-items:flex-end;">
+          ${sections.length>1?`<span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${idx+1}.</span>`:''}
+          <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="settle-sec-desc" list="settle-desc-suggest" autocomplete="off" value="${escapeHtml(sec.desc)}"></div>
+          <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="settle-sec-amt" placeholder="e.g. 930 or 1000-70" value="${sec.amount?formatAsianAmount(sec.amount):''}"></div>
+          ${sections.length>1?`<button class="danger small" type="button" title="Remove">&times;</button>`:''}
+        </div>
+      `);
+      const descInp = row.querySelector('.settle-sec-desc');
+      wireLockableTextInput(descInp);
+      descInp.oninput = ()=>{ sec.desc = descInp.value; };
+      wireAmountInput(row.querySelector('.settle-sec-amt'), (num)=>{ sec.amount = num; updatePreview(); });
+      const removeBtn = row.querySelector('button.danger');
+      if(removeBtn) removeBtn.onclick = ()=>{ sections = sections.filter(x=>x!==sec); renderSections(); updatePreview(); };
+      sectionsBox.appendChild(row);
+    });
+  }
+  renderSections();
+  overlay.querySelector('#settle-add-section').onclick = ()=>{
+    sections.push({desc:'', amount:0});
+    renderSections();
+    const lastDesc = sectionsBox.querySelectorAll('.settle-sec-desc');
+    lastDesc[lastDesc.length-1].focus();
+  };
+
   wireAmountInput(returnInput, (num)=>{ returnedVal = num; updatePreview(); });
 
   function updatePreview(){
-    const spent = spentVal;
+    const spent = totalSpent();
     const returned = returnedVal;
     if(!spent || spent<=0){ preview.textContent=''; returnWrap.style.display='none'; return; }
     if(!catSelect.value){ preview.textContent = 'Pick a category to see what this will record.'; returnWrap.style.display='none'; return; }
@@ -2147,21 +2176,23 @@ function showSettleIouModal(day, item){
   const doSettle = ()=>{
     const catKey = catSelect.value;
     if(!catKey){ errBox.textContent = 'Select an expense category first - settling needs to know where this money was actually spent.'; catSelect.focus(); return; }
-    const spent = spentVal;
-    if(!spent || spent<=0){ errBox.textContent = 'Enter a positive amount.'; return; }
+    const validSections = sections.filter(s=>(Number(s.amount)||0)>0);
+    if(validSections.length===0){ errBox.textContent = 'Enter a positive amount in at least one section.'; return; }
+    if(validSections.some(s=>!s.desc.trim())){ errBox.textContent = 'Every section with an amount needs a description.'; return; }
+    const spent = validSections.reduce((s,sec)=>s+(Number(sec.amount)||0), 0);
     const returned = Math.max(0, returnedVal);
-    const desc = descInput.value.trim();
     const overage = Math.max(0, spent - item.amount);
 
     const voucher = addCoaVoucher(day, catKey);
-    voucher.desc = desc;
-    voucher.amount = spent;
+    voucher.sections = validSections.map(s=>({id:uid(), desc:s.desc.trim(), amount:Number(s.amount)||0}));
+    syncCoaItemFromSections(voucher);
     const prevRevenue = day.serviceRevenue;
     if(returned>0) day.serviceRevenue = (Number(day.serviceRevenue)||0) + returned;
     const undoIou = reduceIou(spent + returned);
 
     let newPayable = null;
     if(overage>0){
+      const desc = validSections.map(s=>s.desc.trim()).join(', ');
       newPayable = {id:uid(), desc, amount:overage, fromDate:day.date, toDate:null};
       state.payableRegistry.push(newPayable);
     }
@@ -2178,10 +2209,9 @@ function showSettleIouModal(day, item){
   };
   confirmBtn.onclick = doSettle;
   cancelBtn.onclick = ()=> overlay.remove();
-  input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); returnInput.focus(); } };
   returnInput.onkeydown = (e)=>{ if(e.key==='Enter') doSettle(); };
   wireBackdropClose(overlay);
-  setTimeout(()=>input.focus(), 30);
+  setTimeout(()=>{ const first = sectionsBox.querySelector('.settle-sec-amt'); if(first) first.focus(); }, 30);
 }
 
 function showPasswordPrompt(message, onConfirm, confirmText='Unlock', hashToCheck){
@@ -6523,9 +6553,38 @@ function descriptionSuggestions(catKey){
   });
   return Array.from(seen).sort((a,b)=>a.localeCompare(b));
 }
+/* Same comma-aware suggestion logic as descriptionSuggestions(), but
+   sourced from every "Collected from (head)" ever typed under Misc
+   Collection, across every day - this box had no suggestions at all
+   before. */
+function miscCollectionDescSuggestions(){
+  const seen = new Set();
+  allDaysEverywhere().forEach(d=>{
+    (d.miscCollectionSections||[]).forEach(sec=>{
+      if(sec.desc && sec.desc.trim()){
+        const raw = sec.desc.trim();
+        if(raw.includes(',')){
+          raw.split(',').forEach(part=>{ const t = part.trim(); if(t) seen.add(t); });
+        } else {
+          seen.add(raw);
+        }
+      }
+    });
+  });
+  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
 function iouDescSuggestions(){
   const seen = new Set();
-  (state.iouRegistry||[]).forEach(i=>{ if(i.desc && i.desc.trim()) seen.add(i.desc.trim()); });
+  (state.iouRegistry||[]).forEach(i=>{
+    if(i.desc && i.desc.trim()){
+      const raw = i.desc.trim();
+      if(raw.includes(',')){
+        raw.split(',').forEach(part=>{ const t = part.trim(); if(t) seen.add(t); });
+      } else {
+        seen.add(raw);
+      }
+    }
+  });
   return Array.from(seen).sort((a,b)=>a.localeCompare(b));
 }
 function transferNoteSuggestions(field){
@@ -6606,11 +6665,14 @@ function drawMiscCollectionList(container, day){
   container.innerHTML = '';
   const sections = ensureMiscCollectionSections(day);
   if(sections.length===0){ container.appendChild(el(`<p class="empty" style="margin:2px 0 6px;">No miscellaneous collection today.</p>`)); return; }
+  const miscSuggestions = miscCollectionDescSuggestions();
+  const miscDatalistId = 'desc-suggest-misc-collection';
+  container.appendChild(el(`<datalist id="${miscDatalistId}">${miscSuggestions.map(s=>`<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>`));
   sections.forEach((sec, sIdx)=>{
     const row = el(`
       <div class="line-item"${sections.length>1?' style="margin-left:0;"':''}>
         ${sections.length>1?`<span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+1}.</span>`:''}
-        <div class="field desc" style="margin-bottom:0;"><label>Collected from (head) <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" value="${escapeHtml(sec.desc)}" placeholder="e.g. Tailor fees collected in cash today" required></div>
+        <div class="field desc" style="margin-bottom:0;"><label>Collected from (head) <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${miscDatalistId}" autocomplete="off" value="${escapeHtml(sec.desc)}" placeholder="e.g. Tailor fees collected in cash today" required></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
         <button class="danger small" type="button" data-action="remove-misc-collection-section" data-day="${day.id}" data-section="${sec.id}" title="Remove">&times;</button>
       </div>
@@ -6639,7 +6701,7 @@ function drawCoaList(container, day, catKey, arr){
       <div class="line-item">
         <div class="voucher-badge mono">${item.voucher}</div>
         <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
-        <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(sec0.desc)}" placeholder="What was this voucher for?" required></div>
+        <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" autocomplete="off" value="${escapeHtml(sec0.desc)}" placeholder="What was this voucher for?" required></div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec0.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-move-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Move to a different category" ${day.locked?'disabled':''}>&#8646; Move</button>
         <button class="secondary small" type="button" data-action="print-coa-voucher" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Print this voucher">&#128424; Print</button>
@@ -6651,12 +6713,15 @@ function drawCoaList(container, day, catKey, arr){
       const secRow = el(`
         <div class="line-item" style="margin-left:22px;">
           <span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+2}.</span>
-          <div class="field desc" style="margin-bottom:0;"><label>Section description</label><input type="text" class="desc-input" list="${datalistId}" value="${escapeHtml(sec.desc)}" placeholder="Second item under this same voucher"></div>
+          <div class="field desc" style="margin-bottom:0;"><label>Section description</label><input type="text" class="desc-input" list="${datalistId}" autocomplete="off" value="${escapeHtml(sec.desc)}" placeholder="Second item under this same voucher"></div>
           <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
           <button class="danger small" type="button" data-action="remove-coa-section" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" data-section="${sec.id}" title="Remove this section">&times;</button>
         </div>
       `);
-      secRow.querySelector('.desc-input').oninput = (e)=>{ sec.desc = e.target.value; syncCoaItemFromSections(item); saveState(); };
+      const secDescInp = secRow.querySelector('.desc-input');
+      secDescInp.setAttribute('list', datalistId);
+      secDescInp.oninput = (e)=>{ sec.desc = e.target.value; syncCoaItemFromSections(item); saveState(); };
+      wireLockableTextInput(secDescInp);
       wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); });
       extraWrap.appendChild(secRow);
     });
@@ -6669,6 +6734,7 @@ function drawCoaList(container, day, catKey, arr){
     `);
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
+    descInp.setAttribute('list', datalistId);
     descInp.oninput = ()=>{ sec0.desc = descInp.value; syncCoaItemFromSections(item); saveState(); };
     wireLockableTextInput(descInp);
     wireAmountInput(amtInp, (num)=>{ sec0.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); }, ()=>{
@@ -6721,7 +6787,7 @@ function drawIouList(container, day){
       <div class="line-item">
         <div class="field desc" style="margin-bottom:0;">
           <label>Description <span style="color:var(--danger);">*</span> ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
-          <input type="text" class="desc-input" list="iou-desc-suggest" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load" required>
+          <input type="text" class="desc-input" list="iou-desc-suggest" autocomplete="off" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load" required>
         </div>
         <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-settle-iou" data-day="${day.id}" data-item="${item.id}" title="Record a receipt/repayment against this IOU">Settle</button>
