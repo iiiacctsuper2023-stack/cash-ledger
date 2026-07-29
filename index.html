@@ -8000,10 +8000,11 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
    so the source template's exact formatting is preserved. */
 function cloneTemplateSheet(destWb, srcWs, name){
   const ws = destWb.addWorksheet(name);
-  for(let c=1;c<=srcWs.columnCount;c++){ ws.getColumn(c).width = srcWs.getColumn(c).width; }
+  const lastCol = 9; // column I - matches the template's own print area (A2:I37); nothing past I is part of the actual voucher
+  for(let c=1;c<=lastCol;c++){ ws.getColumn(c).width = srcWs.getColumn(c).width; }
   for(let r=1;r<=srcWs.rowCount;r++){
     ws.getRow(r).height = srcWs.getRow(r).height;
-    for(let c=1;c<=srcWs.columnCount;c++){
+    for(let c=1;c<=lastCol;c++){
       const sCell = srcWs.getCell(r,c);
       const dCell = ws.getCell(r,c);
       dCell.value = sCell.value;
@@ -8167,7 +8168,7 @@ function writeRow(ws, r, {voucher='', label='', size=11, bold=false, valueCol='C
 }
 
 function writeDaySheet(ws, day, cmp, beginRefs){
-  ws.pageSetup = { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }; // paperSize 9 = A4
+  ws.pageSetup = { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 1 }; // paperSize 9 = A4, fit all rows on one page
   ws.getColumn(1).width = 13;
   ws.getColumn(2).width = 58;
   ws.getColumn(3).width = 18;
