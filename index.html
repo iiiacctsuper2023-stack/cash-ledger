@@ -339,6 +339,12 @@ const COA = [
 ];
 /* Order categories appear in on the Withdraw Summary sheet & notesheet generation pass */
 const SUMMARY_ORDER = ['Misc','Trans','Tailor','Utility','BooksSty','Hons','EduAssist','PayAllce','Loan','Event'];
+/* Mandatory Monthly Ledger fields (House Rent Deposit, Salary by
+   Account/Cash) only apply from this month onward - January-June was
+   imported wholesale from an existing Excel workbook and predates
+   day-by-day Daily Ledger use, so it can't be held to the same
+   fill-it-in-by-hand standard. */
+const MANDATORY_FIELDS_START_KEY = '2026-07';
 
 /* ======================================================================
    Monthly Ledger (Revenue / Expenditure / Balance Sheet workbook)
@@ -612,7 +618,7 @@ let voucherCounterSettingsOpen = false;
 let searchOpen = false;
 let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
 let summaryOpen = false;
-let summaryFilters = { catKey:'', mode:'month', year:'', fromDate:'', toDate:'' };
+let summaryFilters = { catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false;
@@ -974,6 +980,42 @@ function allDaysEverywhere(){
 /* Flattens every Cash Disbursed (CoA) voucher across every recorded day
    into one list of {date, cat, voucher, desc, amount}, for Search and
    Category Summary to filter and group. */
+/* Category labels from imported Monthly Ledger expenditure columns don't
+   always match a COA category's label exactly (spacing, punctuation,
+   case) - normalize both sides the same way before comparing. */
+function normalizeCatLabel(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' ').replace(/[&/]/g,'and'); }
+/* Expenditure entries imported straight into the Monthly Ledger (via
+   "Import a previous month's workbook") for months that predate day-by-
+   day Daily Ledger use - these never went through day.coa, so
+   allVouchers() couldn't see them for Category Summary/Search/Annual
+   Summary. Skipped for any month that DOES have real day-level data,
+   since that's the more granular, authoritative source once it exists. */
+function monthlyLedgerImportedVouchers(){
+  const out = [];
+  const months = (state.monthlyLedger && state.monthlyLedger.months) || {};
+  const monthsWithDayData = new Set(allDaysEverywhere().map(d=>d.date.slice(0,7)));
+  Object.keys(months).forEach(key=>{
+    const rec = months[key];
+    if(!rec || !rec.expenditureEntries || !rec.expenditureEntries.length) return;
+    if(monthsWithDayData.has(key)) return;
+    const colToCat = {};
+    (rec.expenditureColumns||[]).forEach(col=>{
+      const match = COA.find(c=>normalizeCatLabel(c.label)===normalizeCatLabel(col.label));
+      if(match) colToCat[col.id] = match;
+    });
+    rec.expenditureEntries.forEach(entry=>{
+      if(!entry.date) return;
+      Object.keys(entry.amounts||{}).forEach(colId=>{
+        const cat = colToCat[colId];
+        if(!cat) return;
+        const amt = Number(entry.amounts[colId])||0;
+        if(amt<=0) return;
+        out.push({date:entry.date, cat, catKey:cat.key, voucher:'', desc:entry.desc||'', note:'', amount:amt});
+      });
+    });
+  });
+  return out;
+}
 function allVouchers(){
   const out = [];
   allDaysEverywhere().forEach(day=>{
@@ -984,6 +1026,7 @@ function allVouchers(){
       });
     });
   });
+  out.push(...monthlyLedgerImportedVouchers());
   out.sort((a,b)=>a.date.localeCompare(b.date));
   return out;
 }
@@ -993,6 +1036,7 @@ function voucherYearsPresent(){
 }
 function filteredVouchers(f){
   return allVouchers().filter(v=>{
+    if(f.catKeys && f.catKeys.length && !f.catKeys.includes(v.catKey)) return false;
     if(f.catKey && v.catKey!==f.catKey) return false;
     if(f.year && v.date.slice(0,4)!==f.year) return false;
     if(f.month && v.date.slice(5,7)!==f.month) return false;
@@ -3678,11 +3722,17 @@ function computeMonthlyLedgerFigures(key){
   });
 
   // Mandatory manual figures - must be filled in (non-zero) by hand each
-  // month; flagged in the UI and checked before export.
+  // month; flagged in the UI and checked before export. Only enforced
+  // from July 2026 onward - that's when day-by-day Daily Ledger use (and
+  // therefore these auto-summed figures) actually started; the earlier
+  // months were imported wholesale from an existing Excel workbook and
+  // can't be retrofitted the same way.
   const mandatoryIssues = [];
-  if(!effectiveHouseRentDeposit(key)) mandatoryIssues.push('House Rent Deposit (Revenue)');
-  if(!effectiveSalaryByAccount(key)) mandatoryIssues.push('Salary by Account (Expenditure)');
-  if(!effectiveSalaryByCash(key)) mandatoryIssues.push('Salary by Cash (Expenditure)');
+  if(key>=MANDATORY_FIELDS_START_KEY){
+    if(!effectiveHouseRentDeposit(key)) mandatoryIssues.push('House Rent Deposit (Revenue)');
+    if(!effectiveSalaryByAccount(key)) mandatoryIssues.push('Salary by Account (Expenditure)');
+    if(!effectiveSalaryByCash(key)) mandatoryIssues.push('Salary by Cash (Expenditure)');
+  }
 
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
@@ -5309,18 +5359,24 @@ function renderSearchCard(){
 /* --- Category-wise Summary: pick a category and see totals by month,
    by year, or for a custom date range (e.g. 1st-15th). --- */
 function renderCategorySummaryCard(){
-  if(!summaryFilters.catKey) summaryFilters.catKey = COA[0].key;
+  if(!summaryFilters.catKeys || summaryFilters.catKeys.length===0) summaryFilters.catKeys = [COA[0].key];
   const years = voucherYearsPresent();
+  const selectedLabel = ()=> summaryFilters.catKeys.map(k=>COA.find(c=>c.key===k).label).join(' + ');
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128202;</span> Category-wise Summary</h3>
-      <p class="subnote">Pick a category to see how much was spent, grouped by month or year, or totalled over any custom date range.</p>
-      <div class="row" style="flex-wrap:wrap;">
-        <div class="field" style="min-width:180px;">
-          <label>Category</label>
-          <select id="sum-cat">
-            ${COA.map(c=>`<option value="${c.key}" ${summaryFilters.catKey===c.key?'selected':''}>${c.label}</option>`).join('')}
-          </select>
+      <p class="subnote">Tick one category to see it alone, or several to see their combined total &mdash; grouped by month or year, or totalled over any custom date range.</p>
+      <div class="row" style="flex-wrap:wrap; align-items:flex-start;">
+        <div class="field" style="min-width:220px;">
+          <label>Categories</label>
+          <div id="sum-cat-checks" style="display:flex; flex-wrap:wrap; gap:4px 14px; border:1px solid var(--line-soft); border-radius:8px; padding:8px 10px; background:#fff;">
+            ${COA.map(c=>`
+              <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; font-weight:normal; margin:0;">
+                <input type="checkbox" class="sum-cat-check" value="${c.key}" ${summaryFilters.catKeys.includes(c.key)?'checked':''}>
+                ${escapeHtml(c.label)}
+              </label>
+            `).join('')}
+          </div>
         </div>
         <div class="field" style="min-width:220px;">
           <label>View</label>
@@ -5349,7 +5405,11 @@ function renderCategorySummaryCard(){
   function drawResults(){
     const box = card.querySelector('#sum-results');
     box.innerHTML = '';
-    const catFilter = { catKey: summaryFilters.catKey };
+    if(summaryFilters.catKeys.length===0){
+      box.appendChild(el(`<p class="empty">Tick at least one category above.</p>`));
+      return;
+    }
+    const catFilter = { catKeys: summaryFilters.catKeys };
     if(summaryFilters.mode==='month'){
       const f = Object.assign({}, catFilter, summaryFilters.year ? {year:summaryFilters.year} : {});
       const rows = groupSum(filteredVouchers(f), v=>v.date.slice(0,7), k=>{
@@ -5364,19 +5424,19 @@ function renderCategorySummaryCard(){
       const f = Object.assign({}, catFilter, {fromDate:summaryFilters.fromDate, toDate:summaryFilters.toDate});
       const results = filteredVouchers(f);
       const total = results.reduce((s,v)=>s+v.amount,0);
-      box.appendChild(el(`<div class="computed total"><span class="lbl">${escapeHtml(COA.find(c=>c.key===summaryFilters.catKey).label)} total for this range</span><span>${money(total)}</span></div>`));
+      box.appendChild(el(`<div class="computed total"><span class="lbl">${escapeHtml(selectedLabel())} total for this range</span><span>${money(total)}</span></div>`));
       if(results.length===0){
         box.appendChild(el(`<p class="empty">No vouchers in this range.</p>`));
       } else {
         box.appendChild(el(`<p class="subnote" style="margin-top:8px;">${results.length} voucher${results.length===1?'':'s'}:</p>`));
         results.forEach(v=>{
-          box.appendChild(el(`<div class="computed"><span class="lbl">${dayLabelFull(v.date)} ${v.date.slice(0,4)} &middot; ${escapeHtml(v.voucher)}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span><span>${money(v.amount)}</span></div>`));
+          box.appendChild(el(`<div class="computed"><span class="lbl">${dayLabelFull(v.date)} ${v.date.slice(0,4)} &middot; ${escapeHtml(v.cat.label)}${v.voucher?' &middot; '+escapeHtml(v.voucher):''}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span><span>${money(v.amount)}</span></div>`));
         });
       }
     }
   }
   function renderSummaryTable(box, rows, groupLabel){
-    if(rows.length===0){ box.appendChild(el(`<p class="empty">No data for this category yet.</p>`)); return; }
+    if(rows.length===0){ box.appendChild(el(`<p class="empty">No data for ${escapeHtml(selectedLabel())} yet.</p>`)); return; }
     const grand = rows.reduce((s,r)=>s+r.total,0);
     const table = el(`
       <div style="overflow-x:auto; margin-top:10px;">
@@ -5394,10 +5454,16 @@ function renderCategorySummaryCard(){
       tbody.appendChild(el(`<tr style="border-bottom:1px solid var(--line-soft);"><td style="padding:6px 8px;">${escapeHtml(r.label)}</td><td style="padding:6px 8px; text-align:right;" class="mono">${money(r.total)}</td></tr>`));
     });
     box.appendChild(table);
-    box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">Grand total</span><span>${money(grand)}</span></div>`));
+    box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">${escapeHtml(selectedLabel())} grand total</span><span>${money(grand)}</span></div>`));
   }
   drawResults();
-  card.querySelector('#sum-cat').onchange = (e)=>{ summaryFilters.catKey = e.target.value; drawResults(); };
+  card.querySelectorAll('.sum-cat-check').forEach(chk=>{
+    chk.onchange = ()=>{
+      const checked = Array.from(card.querySelectorAll('.sum-cat-check:checked')).map(x=>x.value);
+      summaryFilters.catKeys = checked;
+      drawResults();
+    };
+  });
   card.querySelector('#sum-mode').onchange = (e)=>{ summaryFilters.mode = e.target.value; render(); };
   const yearSel = card.querySelector('#sum-year');
   if(yearSel) yearSel.onchange = (e)=>{ summaryFilters.year = e.target.value; drawResults(); };
