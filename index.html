@@ -7872,6 +7872,137 @@ function depositFormatISODateRangeText(startISO, endISO){
   return `${fmt(startISO)}- ${fmt(endISO)}`;
 }
 
+/* Writes the category S/no + Description + Amount lines into a cloned
+   Deposit Notesheet template sheet, growing the sheet past its 6
+   pre-formatted rows (by shifting everything below down) when there are
+   more lines than that. Shared by the main Deposit Notesheet and the
+   per-line-item Miscellaneous breakdown sheet so both go through the same
+   tested row-shifting logic. Returns the row numbers the caller needs to
+   apply formatting (borders, page setup, signature month) afterwards. */
+function writeDepositCategoryLines(ws, lines){
+  const firstRow = 11;
+  const fixedLastCatRow = 16; // template's 6 pre-formatted category-line rows
+  const fixedTotalRow = 17;   // template's merged "Total collected amount" row (fixed, do not shift)
+  const fixedWordsRow = 18;   // template's merged amount-in-words row (fixed, do not shift)
+
+  for(let r = firstRow; r <= fixedLastCatRow; r++){
+    ws.getCell(r, 3).value = null;
+    ws.getCell(r, 4).value = null;
+    ws.getCell(r, 10).value = null;
+  }
+
+  let extra = 0;
+  if(lines.length > (fixedLastCatRow - firstRow + 1)){
+    extra = lines.length - (fixedLastCatRow - firstRow + 1);
+    const shiftPoint = fixedLastCatRow;
+
+    const parseRange = (rng)=>{
+      const m = rng.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+      return {c1:m[1], r1:+m[2], c2:m[3], r2:+m[4]};
+    };
+    const belowMerges = (ws.model.merges||[]).filter(rng=>parseRange(rng).r1 > shiftPoint);
+    belowMerges.forEach(rng=>{ try{ ws.unMergeCells(rng); }catch(e){ /* ignore */ } });
+
+    let lastRow = ws.rowCount || shiftPoint;
+    belowMerges.forEach(rng=>{ const {r2} = parseRange(rng); if(r2>lastRow) lastRow = r2; });
+
+    for(let r = lastRow; r > shiftPoint; r--){
+      const srcRow = ws.getRow(r);
+      const dstRow = ws.getRow(r + extra);
+      dstRow.height = srcRow.height;
+      srcRow.eachCell({includeEmpty:true}, (cell, colNumber)=>{
+        const dstCell = dstRow.getCell(colNumber);
+        dstCell.value = cell.value;
+        dstCell.style = JSON.parse(JSON.stringify(cell.style));
+      });
+    }
+    for(let i=0;i<extra;i++){
+      ws.getRow(shiftPoint+1+i).eachCell({includeEmpty:true}, cell=>{ cell.value = null; });
+    }
+    belowMerges.forEach(rng=>{
+      const {c1,r1,c2,r2} = parseRange(rng);
+      try{ ws.mergeCells(`${c1}${r1+extra}:${c2}${r2+extra}`); }catch(e){ /* ignore */ }
+    });
+
+    const templateStyles = [3,4,10].map(c=>({...ws.getCell(fixedLastCatRow,c).style}));
+    const templateHeight = ws.getRow(fixedLastCatRow).height;
+    for(let i=0;i<extra;i++){
+      const r = shiftPoint+1+i;
+      if(templateHeight) ws.getRow(r).height = templateHeight;
+      [3,4,10].forEach((c,idx)=>{ ws.getCell(r,c).style = {...templateStyles[idx]}; });
+      try{ ws.mergeCells(`D${r}:I${r}`); }catch(e){ /* ignore */ }
+    }
+  }
+  const lastCatRow = fixedLastCatRow + extra;
+  const totalRow = fixedTotalRow + extra;
+  const wordsRow = fixedWordsRow + extra;
+
+  lines.forEach(([desc, amt], i)=>{
+    const r = firstRow + i;
+    ws.getCell(r, 3).value = String(i+1).padStart(2,'0');
+    ws.getCell(r, 4).value = desc;
+    ws.getCell(r, 10).value = amt;
+    ws.getCell(r, 10).numFmt = ASIAN_NUMFMT; // template ships with Western (#,##0.00) grouping - override to Asian
+  });
+  const lastRow = firstRow + lines.length - 1;
+  ws.getCell(totalRow, 3).value = 'Total collected amount';
+  ws.getCell(totalRow, 10).value = {formula: `SUM(J${firstRow}:J${lastRow})`};
+  ws.getCell(totalRow, 10).numFmt = ASIAN_NUMFMT;
+  const words = depositNumberToWordsIndian(Math.round(lines.reduce((s,[,amt])=>s+amt,0)));
+  ws.getCell(wordsRow, 3).value = `${words.charAt(0).toUpperCase()+words.slice(1)} taka only.`;
+
+  return {firstRow, lastRow, lastCatRow, totalRow, wordsRow, extra};
+}
+
+/* Formatting corrections applied on top of whatever writeDepositCategoryLines()
+   just wrote, for a Deposit Notesheet (or Miscellaneous breakdown) sheet:
+    - full (4-side) border on the S/no, Description and Amount cells of
+      every category line, instead of relying on the template's own
+      per-row styling (which cloneTemplateSheet was silently dropping past
+      column I until it was widened to also carry columns J/K through)
+    - a complete outside border around the right-margin "Attach" strip in
+      column K, from the header row down to the RV No/Date row at the very
+      bottom - that row moves when extra category lines are inserted,
+      hence computing it from rows.extra rather than a fixed 47
+    - forces A4 portrait with fit-to-one-page
+    - appends the generation/selected month under every signatory's name,
+      and grows those rows a bit so the extra line isn't cramped */
+function applyDepositNotesheetFormatting(ws, rows){
+  const ALL = {top:THIN, left:THIN, bottom:THIN, right:THIN};
+  for(let r = rows.firstRow; r <= rows.lastRow; r++){
+    for(let c = 3; c <= 10; c++){ ws.getCell(r,c).border = ALL; }
+  }
+
+  const finalRow = 47 + rows.extra; // template's fixed RV No/Date row, shifted down by any extra category lines
+  for(let r = 3; r <= finalRow; r++){
+    const cell = ws.getCell(`K${r}`);
+    const b = {...(cell.border||{}), left:THIN, right:THIN};
+    if(r===3) b.top = THIN;
+    if(r===finalRow) b.bottom = THIN;
+    cell.border = b;
+  }
+
+  ws.pageSetup = {...(ws.pageSetup||{}), paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:1};
+  delete ws.pageSetup.scale;
+
+  const my = monthYearAbbr();
+  const shift = n => n + rows.extra;
+  [24,33].forEach(rowNum=>{
+    const c = ws.getCell(`H${shift(rowNum)}`);
+    if(c.value) c.value = `${c.value}\n${my}`;
+    c.alignment = {...(c.alignment||{}), wrapText:true};
+    const row = ws.getRow(shift(rowNum));
+    if((row.height||0) < 45) row.height = 45;
+  });
+  {
+    const c = ws.getCell(`H${shift(45)}`);
+    if(c.value) c.value = `${c.value}\n${my}`;
+    c.alignment = {...(c.alignment||{}), wrapText:true};
+    const row = ws.getRow(shift(45));
+    if((row.height||0) < 45) row.height = 45;
+  }
+}
+
 async function generateDepositNotesheet(file, startISO, endISO, shouldSave, previewOnly){
   if(shouldSave===undefined) shouldSave = true;
   try{
@@ -7910,101 +8041,39 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   const noteNum = state.nextDepositNotesheetNo || 117;
   const srcWs = await loadDepositNotesheetTemplate();
   const wb = new ExcelJS.Workbook();
-  const ws = cloneTemplateSheet(wb, srcWs, String(noteNum - 1));
+  const ws = cloneTemplateSheet(wb, srcWs, String(noteNum - 1), 11);
 
   ws.getCell('B3').value = `III/Acct/Madrasa/revenue/${noteNum}`;
   ws.getCell('B7').value = dateText
     ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
     : `Following amount of cash collected may be deposited to madrasa account`;
 
-  const firstRow = 11;
-  const fixedLastCatRow = 16; // template's 6 pre-formatted category-line rows
-  const fixedTotalRow = 17;   // template's merged "Total collected amount" row (fixed, do not shift)
-  const fixedWordsRow = 18;   // template's merged amount-in-words row (fixed, do not shift)
+  const rows = writeDepositCategoryLines(ws, lines);
+  applyDepositNotesheetFormatting(ws, rows);
 
-  // Clear all 6 category slots first so nothing from the template (or a
-  // shorter previous run) leaks through when this run has fewer lines.
-  for(let r = firstRow; r <= fixedLastCatRow; r++){
-    ws.getCell(r, 3).value = null;
-    ws.getCell(r, 4).value = null;
-    ws.getCell(r, 10).value = null;
-  }
-
-  if(lines.length > (fixedLastCatRow - firstRow + 1)){
-    // More non-zero categories (e.g. a Miscellaneous Collection line pushing
-    // past the template's 6 pre-formatted rows) than the template has rows
-    // for. ws.spliceRows() looks like the right tool here, but ExcelJS has
-    // a bug where inserting rows above a block of merged cells duplicates
-    // those merges instead of shifting them - that's what was causing
-    // "Total collected amount", the amount-in-words line and the signatory
-    // block to each repeat several times in the exported file. Instead,
-    // shift everything below the category block down by hand: unmerge ->
-    // copy cell-by-cell from the bottom row up -> re-merge at the new row
-    // numbers. This never touches ExcelJS's merge-splicing code at all, so
-    // every one of those blocks ends up shifted down exactly once, still a
-    // single merged range each - and nothing is ever added below the
-    // amount-in-words line, only the existing signature block shifts down
-    // to make room.
-    const extra = lines.length - (fixedLastCatRow - firstRow + 1);
-    const shiftPoint = fixedLastCatRow;
-
-    const parseRange = (rng)=>{
-      const m = rng.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
-      return {c1:m[1], r1:+m[2], c2:m[3], r2:+m[4]};
-    };
-    const belowMerges = (ws.model.merges||[]).filter(rng=>parseRange(rng).r1 > shiftPoint);
-    belowMerges.forEach(rng=>{ try{ ws.unMergeCells(rng); }catch(e){ /* ignore */ } });
-
-    let lastRow = ws.rowCount || shiftPoint;
-    belowMerges.forEach(rng=>{ const {r2} = parseRange(rng); if(r2>lastRow) lastRow = r2; });
-
-    for(let r = lastRow; r > shiftPoint; r--){
-      const srcRow = ws.getRow(r);
-      const dstRow = ws.getRow(r + extra);
-      dstRow.height = srcRow.height;
-      srcRow.eachCell({includeEmpty:true}, (cell, colNumber)=>{
-        const dstCell = dstRow.getCell(colNumber);
-        dstCell.value = cell.value;
-        dstCell.style = JSON.parse(JSON.stringify(cell.style));
-      });
-    }
-    // The rows just vacated become the new blank category slots - clear
-    // out whatever used to live there (now duplicated one row down) before
-    // filling them in with the extra category lines below.
-    for(let i=0;i<extra;i++){
-      ws.getRow(shiftPoint+1+i).eachCell({includeEmpty:true}, cell=>{ cell.value = null; });
-    }
-    belowMerges.forEach(rng=>{
-      const {c1,r1,c2,r2} = parseRange(rng);
-      try{ ws.mergeCells(`${c1}${r1+extra}:${c2}${r2+extra}`); }catch(e){ /* ignore */ }
+  // Miscellaneous breakdown sheet: when the range contains individual
+  // Miscellaneous Collection entries (each with its own description text),
+  // add a second sheet listing every one of them separately - numbered,
+  // each with its own actual description (never the word "Miscellaneous"
+  // itself) and amount, with its own total - instead of just the single
+  // combined "Miscellaneous collection" line on the main sheet above.
+  const miscLines = [];
+  (state.days||[]).forEach(day=>{
+    if(!day.date || day.date < startISO || day.date > endISO) return;
+    (day.miscCollectionSections||[]).forEach(sec=>{
+      const amt = Number(sec.amount)||0;
+      if(amt>0) miscLines.push([sec.desc||'', amt]);
     });
-
-    const templateStyles = [3,4,10].map(c=>({...ws.getCell(fixedLastCatRow,c).style}));
-    const templateHeight = ws.getRow(fixedLastCatRow).height;
-    for(let i=0;i<extra;i++){
-      const r = shiftPoint+1+i;
-      if(templateHeight) ws.getRow(r).height = templateHeight;
-      [3,4,10].forEach((c,idx)=>{ ws.getCell(r,c).style = {...templateStyles[idx]}; });
-      try{ ws.mergeCells(`D${r}:I${r}`); }catch(e){ /* ignore */ }
-    }
-  }
-  const lastCatRow = fixedLastCatRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
-  const totalRow = fixedTotalRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
-  const wordsRow = fixedWordsRow + Math.max(0, lines.length - (fixedLastCatRow - firstRow + 1));
-
-  lines.forEach(([desc, amt], i)=>{
-    const r = firstRow + i;
-    ws.getCell(r, 3).value = String(i+1).padStart(2,'0');
-    ws.getCell(r, 4).value = desc;
-    ws.getCell(r, 10).value = amt;
-    ws.getCell(r, 10).numFmt = ASIAN_NUMFMT; // template ships with Western (#,##0.00) grouping - override to Asian
   });
-  const lastRow = firstRow + lines.length - 1;
-  ws.getCell(totalRow, 3).value = 'Total collected amount';
-  ws.getCell(totalRow, 10).value = {formula: `SUM(J${firstRow}:J${lastRow})`};
-  ws.getCell(totalRow, 10).numFmt = ASIAN_NUMFMT;
-  const words = depositNumberToWordsIndian(Math.round(lines.reduce((s,[,amt])=>s+amt,0)));
-  ws.getCell(wordsRow, 3).value = `${words.charAt(0).toUpperCase()+words.slice(1)} taka only.`;
+  if(miscLines.length){
+    const miscWs = cloneTemplateSheet(wb, srcWs, 'Miscellaneous', 11);
+    miscWs.getCell('B3').value = `III/Acct/Madrasa/revenue/${noteNum}`;
+    miscWs.getCell('B7').value = dateText
+      ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
+      : `Following amount of cash collected may be deposited to madrasa account`;
+    const miscRows = writeDepositCategoryLines(miscWs, miscLines);
+    applyDepositNotesheetFormatting(miscWs, miscRows);
+  }
 
   if(previewOnly){
     showWorkbookPreview(wb, {
@@ -8064,9 +8133,14 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 /* Clones a worksheet cell-for-cell (values, styles, merges, column widths,
    row heights, page setup/margins/print area) into destWb under a new name,
    so the source template's exact formatting is preserved. */
-function cloneTemplateSheet(destWb, srcWs, name){
+function cloneTemplateSheet(destWb, srcWs, name, lastCol=9){
   const ws = destWb.addWorksheet(name);
-  const lastCol = 9; // column I - matches the template's own print area (A2:I37); nothing past I is part of the actual voucher
+  // lastCol defaults to 9 (column I) - matches the debit voucher template's
+  // own print area (A2:I37); nothing past I is part of that voucher. Callers
+  // with a wider template (e.g. the Deposit Notesheet template, which uses
+  // column J for Amount and column K as an outside-bordered "Attach" strip
+  // down the right margin) pass a higher lastCol so those columns' values
+  // and styles actually get cloned instead of silently dropped.
   for(let c=1;c<=lastCol;c++){ ws.getColumn(c).width = srcWs.getColumn(c).width; }
   for(let r=1;r<=srcWs.rowCount;r++){
     ws.getRow(r).height = srcWs.getRow(r).height;
@@ -8439,6 +8513,8 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   ws.getColumn(3).width = 13; ws.getColumn(4).width = 47; ws.getColumn(5).width = 20;
   ws.getColumn(6).width = 7;
 
+  ws.pageSetup = {paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:1}; // A4 portrait, fit all rows on one page
+
   const thin = {top:THIN,left:THIN,bottom:THIN,right:THIN};
   function put(addr, value, {size=12, bold=false, name=FONT, center=false, border=true, wrap=false, numFmt}={}){
     const c = ws.getCell(addr);
@@ -8502,9 +8578,35 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   ws.getCell('F4').border = {...(ws.getCell('F4').border||{}), right:THIN};
   ws.getCell('F5').border = {...(ws.getCell('F5').border||{}), right:THIN};
 
+  const fmt = (state.settings && state.settings.exportFormat) || {};
+  const sigIndent = ' '.repeat(Number(fmt.sigIndentSpaces)>=0 ? Number(fmt.sigIndentSpaces) : 60);
+  const sigRowH = Number(fmt.sigRowHeight) || 50;
+  let rr = wordsRow+4;
+  ws.mergeCells(`D${rr}:E${rr}`);
+  put(`E${rr}`, `${sigIndent}${s.accountant}\n${sigIndent}${s.accountantRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = sigRowH;
+  rr = wordsRow+5;
+  ws.mergeCells(`B${rr}:C${rr}`);
+  put(`B${rr}`, 'Admin Manager', {size:13, border:false});
+  ws.getCell(`B${rr}`).border = {left:THIN, bottom:THIN};
+  ws.getCell(`C${rr}`).border = {bottom:THIN};
+  rr = wordsRow+9; // extra room before the name so it isn't cramped against the "Admin Manager" label
+  ws.mergeCells(`D${rr}:E${rr}`);
+  put(`E${rr}`, `${sigIndent}${s.adminManager}\n${sigIndent}${s.adminManagerRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = sigRowH;
+  rr = wordsRow+11;
+  put(`C${rr}`, 'Principal', {size:13, border:false});
+  ws.getCell(`B${rr}`).border = {left:THIN, bottom:THIN};
+  ws.getCell(`C${rr}`).border = {bottom:THIN};
+  rr = wordsRow+15; // extra room before the name so it isn't cramped against the "Principal" label
+  ws.mergeCells(`D${rr}:E${rr}`);
+  put(`E${rr}`, `${sigIndent}${s.principal}\n${sigIndent}${s.principalRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  ws.getRow(rr).height = sigRowH;
+
   // Bordered box (left, right, bottom) around the blank gap between the
-  // taka-in-words line and the first signature block.
-  const gapStart = wordsRow+1, gapEnd = wordsRow+11;
+  // taka-in-words line and the whole signature block below it - bottom
+  // edge now lines up with the Principal name row, the last content row.
+  const gapStart = wordsRow+1, gapEnd = wordsRow+15;
   for(let row=gapStart; row<=gapEnd; row++){
     const leftCell = ws.getCell(`B${row}`);
     leftCell.border = {...(leftCell.border||{}), left:THIN};
@@ -8515,34 +8617,11 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
     const c = ws.getCell(gapEnd, col);
     c.border = {...(c.border||{}), bottom:THIN};
   }
-
-  const fmt = (state.settings && state.settings.exportFormat) || {};
-  const sigIndent = ' '.repeat(Number(fmt.sigIndentSpaces)>=0 ? Number(fmt.sigIndentSpaces) : 60);
-  const sigRowH = Number(fmt.sigRowHeight) || 50;
-  let rr = wordsRow+4;
-  ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${sigIndent}${s.accountant}\n${sigIndent}${s.accountantRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
-  ws.getRow(rr).height = sigRowH;
-  rr = wordsRow+5;
-  put(`C${rr}`, 'Admin Manager', {size:13, border:false});
-  ws.getCell(`B${rr}`).border = {bottom:THIN};
-  ws.getCell(`C${rr}`).border = {bottom:THIN};
-  rr = wordsRow+8;
-  ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${sigIndent}${s.adminManager}\n${sigIndent}${s.adminManagerRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
-  ws.getRow(rr).height = sigRowH;
-  rr = wordsRow+10;
-  put(`C${rr}`, 'Principal', {size:13, border:false});
-  ws.getCell(`B${rr}`).border = {bottom:THIN};
-  ws.getCell(`C${rr}`).border = {bottom:THIN};
-  rr = wordsRow+11;
-  ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${sigIndent}${s.principal}\n${sigIndent}${s.principalRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
-  ws.getRow(rr).height = sigRowH;
 }
 
 /* --- Consolidated Withdraw Summary sheet --- */
 function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
+  ws.pageSetup = {paperSize:9, orientation:'landscape', fitToPage:true, fitToWidth:1, fitToHeight:1}; // A4 landscape
   ws.getColumn(2).width = 4; ws.getColumn(3).width = 12;
   for(let i=4;i<=8;i++) ws.getColumn(i).width = 10;
   ws.getColumn(9).width = 18;
@@ -8586,8 +8665,13 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
     }
   }
 
-  put(`B${totalRow+4}`, 'Accountant', {size:14, bold:true, name:'Calibri'});
-  put(`I${totalRow+4}`, 'Principal', {size:14, bold:true, name:'Calibri'});
+  const s = state.signatories;
+  const my = monthYearAbbr();
+  const sigCell1 = put(`B${totalRow+4}`, `${s.accountant}\n${s.accountantRole}\n${my}`, {size:14, bold:true, name:'Calibri'});
+  sigCell1.alignment = {wrapText:true};
+  const sigCell2 = put(`I${totalRow+4}`, `${s.principal}\n${s.principalRole}\n${my}`, {size:14, bold:true, name:'Calibri'});
+  sigCell2.alignment = {wrapText:true};
+  ws.getRow(totalRow+4).height = 50;
 }
 
 async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, incrementNumbering){
