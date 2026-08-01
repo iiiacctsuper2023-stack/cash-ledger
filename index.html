@@ -1248,6 +1248,21 @@ function takaInWords(amount){
 function monthYearAbbr(){
   return (state.month||'').slice(0,3)+' '+String(state.year||'').slice(-2);
 }
+/* A real Date value (1st of the selected month) to store in a hidden
+   reference cell on each notesheet, so the "month" line under every
+   signatory can be a formula that reads this cell (TEXT(...,"mmm-yy"))
+   instead of a typed-in string with no traceable source. The date itself
+   is never displayed - only its formatted month/year. */
+function monthRefDate(){
+  const idx = MONTHS.indexOf(state.month);
+  return new Date(Number(state.year)||new Date().getFullYear(), idx>=0?idx:0, 1);
+}
+/* Third signature line under Name/Designation on notesheets: a bare
+   "Jul 26" with no label reads like a stray date, so it's always prefixed
+   "Ref: " - and there's deliberately no separate "Date" line/label at all. */
+function monthRefLine(){
+  return `Ref: ${monthYearAbbr()}`;
+}
 
 /* ======================================================================
    Notesheet / Withdraw Summary generation
@@ -5611,6 +5626,7 @@ function renderNotesheetCard(){
     if(genBtn) genBtn.disabled = cats.length===0;
   }
   drawPreview();
+  drawSettings();
 
   card.querySelector('#ns-start').onchange = (e)=>{ notesheetRange.start = e.target.value; drawPreview(); };
   card.querySelector('#ns-end').onchange = (e)=>{ notesheetRange.end = e.target.value; drawPreview(); };
@@ -5627,7 +5643,7 @@ function renderNotesheetCard(){
           <input type="number" value="${(state.notesheetCounters[cat.key]||0)+1}" data-ns-cat="${cat.key}">
         </div>
       `);
-      field.querySelector('input').oninput = (e)=>{ state.notesheetCounters[cat.key] = (parseFloat(e.target.value)||1)-1; saveState(); };
+      field.querySelector('input').oninput = (e)=>{ state.notesheetCounters[cat.key] = (parseFloat(e.target.value)||1)-1; saveState(); drawPreview(); };
       grid.appendChild(field);
     });
     settings.appendChild(grid);
@@ -7985,19 +8001,38 @@ function applyDepositNotesheetFormatting(ws, rows){
   ws.pageSetup = {...(ws.pageSetup||{}), paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:1};
   delete ws.pageSetup.scale;
 
-  const my = monthYearAbbr();
+  // Hidden reference cell holding the selected month as a real Date value.
+  // Every signature block's 3rd line is a formula that reads this cell via
+  // TEXT(...,"mmm-yy") - so the month shown always traces back to an actual
+  // date, never a typed-in string - while the date itself stays off the
+  // printed sheet (hidden column + explicit print area excluding it).
+  const refCol = 13; // column M, past the K "Attach" box
+  ws.getColumn(refCol).hidden = true;
+  const refAddr = 'M3';
+  const refCell = ws.getCell(refAddr);
+  refCell.value = monthRefDate();
+  refCell.numFmt = 'mmm-yy';
+  refCell.font = {color:{argb:'FFFFFFFF'}};
+  ws.pageSetup.printArea = `A1:K${finalRow}`;
+
+  const esc = s => String(s||'').replace(/"/g,'""');
   const shift = n => n + rows.extra;
-  [24,33].forEach(rowNum=>{
-    const c = ws.getCell(`H${shift(rowNum)}`);
-    if(c.value) c.value = `${c.value}\n${my}`;
+  const setSignatureLines = (addr)=>{
+    const c = ws.getCell(addr);
+    const lines = String(c.value||'').split('\n');
+    const literal = lines.map(l=>`"${esc(l)}"`).join('&CHAR(10)&');
+    c.value = {formula: `${literal}&CHAR(10)&TEXT(${refAddr},"mmm-yy")`, result: `${lines.join('\n')}\n${monthYearAbbr()}`};
     c.alignment = {...(c.alignment||{}), wrapText:true};
+  };
+  [24,33].forEach(rowNum=>{
+    const addr = `H${shift(rowNum)}`;
+    setSignatureLines(addr);
     const row = ws.getRow(shift(rowNum));
     if((row.height||0) < 45) row.height = 45;
   });
   {
-    const c = ws.getCell(`H${shift(45)}`);
-    if(c.value) c.value = `${c.value}\n${my}`;
-    c.alignment = {...(c.alignment||{}), wrapText:true};
+    const addr = `H${shift(45)}`;
+    setSignatureLines(addr);
     const row = ws.getRow(shift(45));
     if((row.height||0) < 45) row.height = 45;
   }
@@ -8562,8 +8597,24 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   put(`C${r}`, takaInWords(total), {size:12, bold:true});
   const wordsRow = r;
 
-  const my = monthYearAbbr();
   const s = state.signatories;
+
+  // Hidden reference cell holding the selected month as a real Date value
+  // (see monthRefDate()) - each signature's 3rd line reads it via a
+  // TEXT(...,"mmm-yy") formula, so the month always has a traceable source
+  // instead of being typed in directly, and the date itself never prints.
+  const refCol = 8; // column H, past the F "Attach" column
+  ws.getColumn(refCol).hidden = true;
+  const refAddr = 'H1';
+  const refCell = ws.getCell(refAddr);
+  refCell.value = monthRefDate();
+  refCell.numFmt = 'mmm-yy';
+  refCell.font = {color:{argb:'FFFFFFFF'}};
+  const esc = t => String(t||'').replace(/"/g,'""');
+  const sigValue = (name, role)=>({
+    formula: `"${esc(sigIndent+name)}"&CHAR(10)&"${esc(sigIndent+role)}"&CHAR(10)&"${esc(sigIndent)}"&TEXT(${refAddr},"mmm-yy")`,
+    result: `${sigIndent}${name}\n${sigIndent}${role}\n${sigIndent}${monthYearAbbr()}`
+  });
 
   // Left/right border down the notesheet body from row 6 through the
   // taka-in-words line (no bottom border there anymore - that moved to
@@ -8583,7 +8634,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   const sigRowH = Number(fmt.sigRowHeight) || 50;
   let rr = wordsRow+4;
   ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${sigIndent}${s.accountant}\n${sigIndent}${s.accountantRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  put(`E${rr}`, sigValue(s.accountant, s.accountantRole), {size:13, border:false, wrap:true});
   ws.getRow(rr).height = sigRowH;
   rr = wordsRow+5;
   ws.mergeCells(`B${rr}:C${rr}`);
@@ -8592,7 +8643,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   ws.getCell(`C${rr}`).border = {bottom:THIN};
   rr = wordsRow+9; // extra room before the name so it isn't cramped against the "Admin Manager" label
   ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${sigIndent}${s.adminManager}\n${sigIndent}${s.adminManagerRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  put(`E${rr}`, sigValue(s.adminManager, s.adminManagerRole), {size:13, border:false, wrap:true});
   ws.getRow(rr).height = sigRowH;
   rr = wordsRow+11;
   put(`C${rr}`, 'Principal', {size:13, border:false});
@@ -8600,7 +8651,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   ws.getCell(`C${rr}`).border = {bottom:THIN};
   rr = wordsRow+15; // extra room before the name so it isn't cramped against the "Principal" label
   ws.mergeCells(`D${rr}:E${rr}`);
-  put(`E${rr}`, `${sigIndent}${s.principal}\n${sigIndent}${s.principalRole}\n${sigIndent}${my}`, {size:13, border:false, wrap:true});
+  put(`E${rr}`, sigValue(s.principal, s.principalRole), {size:13, border:false, wrap:true});
   ws.getRow(rr).height = sigRowH;
 
   // Bordered box (left, right, bottom) around the blank gap between the
@@ -8617,6 +8668,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
     const c = ws.getCell(gapEnd, col);
     c.border = {...(c.border||{}), bottom:THIN};
   }
+  ws.pageSetup.printArea = `A1:F${gapEnd}`;
 }
 
 /* --- Consolidated Withdraw Summary sheet --- */
@@ -8665,13 +8717,11 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
     }
   }
 
-  const s = state.signatories;
-  const my = monthYearAbbr();
-  const sigCell1 = put(`B${totalRow+4}`, `${s.accountant}\n${s.accountantRole}\n${my}`, {size:14, bold:true, name:'Calibri'});
-  sigCell1.alignment = {wrapText:true};
-  const sigCell2 = put(`I${totalRow+4}`, `${s.principal}\n${s.principalRole}\n${my}`, {size:14, bold:true, name:'Calibri'});
-  sigCell2.alignment = {wrapText:true};
-  ws.getRow(totalRow+4).height = 50;
+  const sigRow = totalRow+4;
+  const sigCell1 = put(`B${sigRow}`, 'Accountant', {size:14, bold:true, name:'Calibri'});
+  sigCell1.border = {top:thin};
+  const sigCell2 = put(`I${sigRow}`, 'Principal', {size:14, bold:true, name:'Calibri'});
+  sigCell2.border = {top:thin};
 }
 
 async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, incrementNumbering){
@@ -8744,7 +8794,8 @@ function previewCellText(ws, cell){
   if(v instanceof Date) return v.toLocaleDateString('en-GB');
   if(typeof v === 'object' && v.formula) {
     const evald = evalPreviewFormula(ws, v.formula);
-    return evald===null ? '' : moneyPlain(evald);
+    if(evald!==null) return moneyPlain(evald);
+    return typeof v.result === 'string' ? v.result : '';
   }
   if(typeof v === 'object' && v.richText) return v.richText.map(t=>t.text).join('');
   if(typeof v === 'number') return moneyPlain(v);
