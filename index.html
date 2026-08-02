@@ -8548,7 +8548,10 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   ws.getColumn(3).width = 13; ws.getColumn(4).width = 47; ws.getColumn(5).width = 20;
   ws.getColumn(6).width = 7;
 
-  ws.pageSetup = {paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:1}; // A4 portrait, fit all rows on one page
+  ws.pageSetup = {
+    paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:1, // A4 portrait, fit all rows on one page
+    margins:{left:1, right:0.5, top:1, bottom:0.5, header:0, footer:0} // 1" left/top, 0.5" right/bottom - print fills right up to these
+  };
 
   const thin = {top:THIN,left:THIN,bottom:THIN,right:THIN};
   function put(addr, value, {size=12, bold=false, name=FONT, center=false, border=true, wrap=false, numFmt}={}){
@@ -8641,15 +8644,16 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   put(`B${rr}`, 'Admin Manager', {size:13, border:false});
   ws.getCell(`B${rr}`).border = {left:THIN, bottom:THIN};
   ws.getCell(`C${rr}`).border = {bottom:THIN};
-  rr = wordsRow+9; // extra room before the name so it isn't cramped against the "Admin Manager" label
+  rr = wordsRow+11; // extra room before the name so there's more space to sign above it
   ws.mergeCells(`D${rr}:E${rr}`);
   put(`E${rr}`, sigValue(s.adminManager, s.adminManagerRole), {size:13, border:false, wrap:true});
   ws.getRow(rr).height = sigRowH;
-  rr = wordsRow+11;
-  put(`C${rr}`, 'Principal', {size:13, border:false});
+  rr = wordsRow+13;
+  ws.mergeCells(`B${rr}:C${rr}`);
+  put(`B${rr}`, 'Principal', {size:13, border:false});
   ws.getCell(`B${rr}`).border = {left:THIN, bottom:THIN};
   ws.getCell(`C${rr}`).border = {bottom:THIN};
-  rr = wordsRow+15; // extra room before the name so it isn't cramped against the "Principal" label
+  rr = wordsRow+19; // extra room before the name so there's more space to sign above it
   ws.mergeCells(`D${rr}:E${rr}`);
   put(`E${rr}`, sigValue(s.principal, s.principalRole), {size:13, border:false, wrap:true});
   ws.getRow(rr).height = sigRowH;
@@ -8657,7 +8661,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   // Bordered box (left, right, bottom) around the blank gap between the
   // taka-in-words line and the whole signature block below it - bottom
   // edge now lines up with the Principal name row, the last content row.
-  const gapStart = wordsRow+1, gapEnd = wordsRow+15;
+  const gapStart = wordsRow+1, gapEnd = wordsRow+19;
   for(let row=gapStart; row<=gapEnd; row++){
     const leftCell = ws.getCell(`B${row}`);
     leftCell.border = {...(leftCell.border||{}), left:THIN};
@@ -8668,7 +8672,14 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
     const c = ws.getCell(gapEnd, col);
     c.border = {...(c.border||{}), bottom:THIN};
   }
-  ws.pageSetup.printArea = `A1:F${gapEnd}`;
+  // If there isn't much content, pad the print area with blank rows below
+  // so the notesheet still fills the whole page - "fit to 1 page tall"
+  // then scales the content+padding block together to fill the page,
+  // instead of a short notesheet sitting small at the top of a mostly
+  // blank page.
+  const MIN_PRINT_ROWS = 45; // roughly a full A4 portrait page at these row heights
+  const printEndRow = Math.max(gapEnd, MIN_PRINT_ROWS);
+  ws.pageSetup.printArea = `A1:F${printEndRow}`;
 }
 
 /* --- Consolidated Withdraw Summary sheet --- */
@@ -8718,9 +8729,10 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   }
 
   const sigRow = totalRow+4;
-  const sigCell1 = put(`B${sigRow}`, 'Accountant', {size:14, bold:true, name:'Calibri'});
-  sigCell1.border = {top:thin};
-  const sigCell2 = put(`I${sigRow}`, 'Principal', {size:14, bold:true, name:'Calibri'});
+  ws.getCell(`B${sigRow-1}`).border = {bottom:thin};
+  ws.getCell(`C${sigRow-1}`).border = {bottom:thin};
+  put(`B${sigRow}`, 'Accountant', {size:14, bold:true, name:'Calibri'});
+  const sigCell2 = put(`I${sigRow}`, 'Principal', {size:14, bold:true, name:'Calibri', center:true});
   sigCell2.border = {top:thin};
 }
 
@@ -9067,6 +9079,14 @@ async function exportDay(dayId){
 
 async function exportMonth(){
   if(state.days.length===0){ showAlert('No days recorded yet.'); return; }
+  const targetKey = monthKeyFor(state.month, state.year);
+  if(targetKey){
+    const stray = state.days.filter(d => d.date && d.date.slice(0,7) !== targetKey);
+    if(stray.length){
+      showAlert(`${stray.length} day(s) have a date outside the selected month (${state.month} ${state.year}): ${stray.map(d=>dayLabel(d.date)).join(', ')}. Fix the date${stray.length>1?'s':''} before downloading, so the file matches the selected month.`);
+      return;
+    }
+  }
   const allIssues = [];
   state.days.forEach(day=>{ allIssues.push(...findDayMandatoryIssues(day)); });
   if(allIssues.length){ showMandatoryIssuesModal(allIssues); return; }
