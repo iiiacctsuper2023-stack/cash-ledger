@@ -9079,26 +9079,32 @@ async function exportDay(dayId){
 
 async function exportMonth(){
   if(state.days.length===0){ showAlert('No days recorded yet.'); return; }
-  const targetKey = monthKeyFor(state.month, state.year);
-  if(targetKey){
-    const stray = state.days.filter(d => d.date && d.date.slice(0,7) !== targetKey);
-    if(stray.length){
-      showAlert(`${stray.length} day(s) have a date outside the selected month (${state.month} ${state.year}): ${stray.map(d=>dayLabel(d.date)).join(', ')}. Fix the date${stray.length>1?'s':''} before downloading, so the file matches the selected month.`);
-      return;
-    }
-  }
+
+  // "Whole month" downloads the month of whichever day tab is currently
+  // open, not necessarily the app's active Month/Year setting - so having
+  // started entering a new month doesn't block downloading a previous
+  // month that's still sitting in state.days (not yet archived), and vice
+  // versa. Falls back to the active Month/Year if no day is selected.
+  const activeDay = findDay(selectedDayId);
+  const targetKey = (activeDay && activeDay.date) ? activeDay.date.slice(0,7) : monthKeyFor(state.month, state.year);
+  const days = targetKey ? state.days.filter(d => d.date && d.date.slice(0,7) === targetKey) : state.days.slice();
+  if(days.length===0){ showAlert('No days recorded for that month yet.'); return; }
+
+  // Mandatory-field checks only apply to the month being downloaded - an
+  // incomplete day in a different month shouldn't block this download.
   const allIssues = [];
-  state.days.forEach(day=>{ allIssues.push(...findDayMandatoryIssues(day)); });
+  days.forEach(day=>{ allIssues.push(...findDayMandatoryIssues(day)); });
   if(allIssues.length){ showMandatoryIssuesModal(allIssues); return; }
+
   try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
-  const computed = computeAll();
+  const computed = computeAll(); // computed over the FULL day history, so the target month's opening balances are still correct even though only that month gets exported
   const wb = new ExcelJS.Workbook();
   const used = new Set(['Overview']);
 
   const wsOverview = wb.addWorksheet('Overview');
 
   const dayRefs = {}; // dayId -> {sheetName, cashInHandAddr, bankClosingAddr, grandTotalAddr}
-  state.days.forEach((day, idx)=>{
+  days.forEach((day, idx)=>{
     const c = computed[day.id];
     const sheetName = sheetNameFor(day, used);
     const ws = wb.addWorksheet(sheetName);
@@ -9109,7 +9115,7 @@ async function exportMonth(){
         banks: Object.fromEntries(state.banks.map(b=>[b.id, {value:c.banks[b.id].opening}]))
       };
     } else {
-      const prevDay = state.days[idx-1];
+      const prevDay = days[idx-1];
       const prevRef = dayRefs[prevDay.id];
       beginRefs = {
         cash: {formula: `'${prevRef.sheetName}'!${prevRef.closingAmountAddr}`},
@@ -9128,7 +9134,7 @@ async function exportMonth(){
   for(let i=2;i<=state.banks.length+3;i++) wsOverview.getColumn(i).width = 18;
   let r=1;
   wsOverview.mergeCells(`A${r}:${String.fromCharCode(65+2+state.banks.length)}${r}`);
-  setCell(wsOverview, `A${r}`, {value:`Month Overview - ${state.month} ${state.year}`, size:16, bold:true, align:'center'});
+  setCell(wsOverview, `A${r}`, {value:`Month Overview - ${monthKeyLabel(targetKey)}`, size:16, bold:true, align:'center'});
   r++;
   const headerRow = r;
   setCell(wsOverview, `A${r}`, {value:'Date', size:11, bold:true});
@@ -9136,7 +9142,7 @@ async function exportMonth(){
   state.banks.forEach((b,i)=>{ setCell(wsOverview, `${String.fromCharCode(67+i)}${r}`, {value:b.name+' Closing', size:11, bold:true}); });
   setCell(wsOverview, `${String.fromCharCode(67+state.banks.length)}${r}`, {value:'Grand Total', size:11, bold:true});
   r++;
-  state.days.forEach(day=>{
+  days.forEach(day=>{
     const ref = dayRefs[day.id];
     setCell(wsOverview, `A${r}`, {value:dayLabel(day.date)});
     setCell(wsOverview, `B${r}`, {formula:`'${ref.sheetName}'!${ref.cashInHandAddr}`, numFmt:ASIAN_NUMFMT});
@@ -9152,14 +9158,14 @@ async function exportMonth(){
   r++;
   COA.forEach(cat=>{
     let total = 0;
-    state.days.forEach(day=>{ total += computed[day.id].coaTotals[cat.key]||0; });
+    days.forEach(day=>{ total += computed[day.id].coaTotals[cat.key]||0; });
     setCell(wsOverview, `A${r}`, {value:cat.label});
     setCell(wsOverview, `B${r}`, {value:cat.short});
     setCell(wsOverview, `C${r}`, {value:total, numFmt:ASIAN_NUMFMT});
     r++;
   });
 
-  await downloadWorkbook(wb, `${state.month}${state.year}_Full_Ledger.xlsx`);
+  await downloadWorkbook(wb, `${monthKeyLabel(targetKey).replace(/\s+/g,'_')}_Full_Ledger.xlsx`);
 }
 
 /* ======================================================================
