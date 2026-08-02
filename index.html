@@ -619,7 +619,7 @@ let voucherCounterSettingsOpen = false;
 let searchOpen = false;
 let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
 let summaryOpen = false;
-let summaryFilters = { catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
+let summaryFilters = { type:'expenditure', catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false;
@@ -997,24 +997,51 @@ function monthlyLedgerImportedVouchers(){
   const monthsWithDayData = new Set(allDaysEverywhere().map(d=>d.date.slice(0,7)));
   Object.keys(months).forEach(key=>{
     const rec = months[key];
-    if(!rec || !rec.expenditureEntries || !rec.expenditureEntries.length) return;
+    if(!rec) return;
     if(monthsWithDayData.has(key)) return;
-    const colToCat = {};
     (rec.expenditureColumns||[]).forEach(col=>{
-      const match = COA.find(c=>normalizeCatLabel(c.label)===normalizeCatLabel(col.label));
-      if(match) colToCat[col.id] = match;
+      const coaKey = resolveColCoaKey(col);
+      const cat = coaKey ? COA.find(c=>c.key===coaKey) : null;
+      if(!cat) return;
+      if(col.source==='entries'){
+        (rec.expenditureEntries||[]).forEach(entry=>{
+          if(!entry.date) return;
+          const amt = Number((entry.amounts||{})[col.id])||0;
+          if(amt<=0) return;
+          out.push({date:entry.date, cat, catKey:coaKey, voucher:'', desc:entry.desc||'', note:'', amount:amt});
+        });
+      } else {
+        // 'coa' columns with no day-level data behind them are a single
+        // manually-entered monthly total (col.override), not itemised
+        // entries - represent that as one dated voucher for the month.
+        const amt = monthExpenditureColTotalForCoa(key, coaKey);
+        if(amt>0) out.push({date:`${key}-01`, cat, catKey:coaKey, voucher:'', desc:'', note:'', amount:amt});
+      }
     });
-    rec.expenditureEntries.forEach(entry=>{
+  });
+  return out;
+}
+/* Same idea as monthlyLedgerImportedVouchers(), but for the Revenue side -
+   revenueEntries are keyed directly by REVENUE_CATS key (no column/label
+   matching needed), and are the single source of truth for revenue
+   whether the month was entered live or imported, so this covers every
+   tracked month. */
+function allRevenueVouchers(){
+  const out = [];
+  const months = (state.monthlyLedger && state.monthlyLedger.months) || {};
+  Object.keys(months).forEach(key=>{
+    const rec = months[key];
+    if(!rec || !rec.revenueEntries) return;
+    rec.revenueEntries.forEach(entry=>{
       if(!entry.date) return;
-      Object.keys(entry.amounts||{}).forEach(colId=>{
-        const cat = colToCat[colId];
-        if(!cat) return;
-        const amt = Number(entry.amounts[colId])||0;
+      REVENUE_CATS.forEach(cat=>{
+        const amt = Number(entry[cat.key])||0;
         if(amt<=0) return;
         out.push({date:entry.date, cat, catKey:cat.key, voucher:'', desc:entry.desc||'', note:'', amount:amt});
       });
     });
   });
+  out.sort((a,b)=>a.date.localeCompare(b.date));
   return out;
 }
 function allVouchers(){
@@ -1031,12 +1058,12 @@ function allVouchers(){
   out.sort((a,b)=>a.date.localeCompare(b.date));
   return out;
 }
-function voucherYearsPresent(){
-  const years = new Set(allVouchers().map(v=>v.date.slice(0,4)));
+function voucherYearsPresent(list){
+  const years = new Set((list || allVouchers()).map(v=>v.date.slice(0,4)));
   return Array.from(years).sort().reverse();
 }
-function filteredVouchers(f){
-  return allVouchers().filter(v=>{
+function filteredVouchers(f, list){
+  return (list || allVouchers()).filter(v=>{
     if(f.catKeys && f.catKeys.length && !f.catKeys.includes(v.catKey)) return false;
     if(f.catKey && v.catKey!==f.catKey) return false;
     if(f.year && v.date.slice(0,4)!==f.year) return false;
@@ -5375,18 +5402,29 @@ function renderSearchCard(){
 /* --- Category-wise Summary: pick a category and see totals by month,
    by year, or for a custom date range (e.g. 1st-15th). --- */
 function renderCategorySummaryCard(){
-  if(!summaryFilters.catKeys || summaryFilters.catKeys.length===0) summaryFilters.catKeys = [COA[0].key];
-  const years = voucherYearsPresent();
-  const selectedLabel = ()=> summaryFilters.catKeys.map(k=>COA.find(c=>c.key===k).label).join(' + ');
+  const catList = summaryFilters.type==='income' ? REVENUE_CATS : COA;
+  if(!summaryFilters.catKeys || summaryFilters.catKeys.length===0 || !summaryFilters.catKeys.every(k=>catList.some(c=>c.key===k))){
+    summaryFilters.catKeys = [catList[0].key];
+  }
+  const voucherList = summaryFilters.type==='income' ? allRevenueVouchers() : allVouchers();
+  const years = voucherYearsPresent(voucherList);
+  const selectedLabel = ()=> summaryFilters.catKeys.map(k=>catList.find(c=>c.key===k).label).join(' + ');
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128202;</span> Category-wise Summary</h3>
       <p class="subnote">Tick one category to see it alone, or several to see their combined total &mdash; grouped by month or year, or totalled over any custom date range.</p>
       <div class="row" style="flex-wrap:wrap; align-items:flex-start;">
+        <div class="field" style="min-width:160px;">
+          <label>Type</label>
+          <select id="sum-type">
+            <option value="expenditure" ${summaryFilters.type==='income'?'':'selected'}>Expenditure</option>
+            <option value="income" ${summaryFilters.type==='income'?'selected':''}>Income</option>
+          </select>
+        </div>
         <div class="field" style="min-width:220px;">
           <label>Categories</label>
           <div id="sum-cat-checks" style="display:flex; flex-wrap:wrap; gap:4px 14px; border:1px solid var(--line-soft); border-radius:8px; padding:8px 10px; background:#fff;">
-            ${COA.map(c=>`
+            ${catList.map(c=>`
               <label style="display:flex; align-items:center; gap:5px; font-size:12.5px; font-weight:normal; margin:0;">
                 <input type="checkbox" class="sum-cat-check" value="${c.key}" ${summaryFilters.catKeys.includes(c.key)?'checked':''}>
                 ${escapeHtml(c.label)}
@@ -5428,17 +5466,17 @@ function renderCategorySummaryCard(){
     const catFilter = { catKeys: summaryFilters.catKeys };
     if(summaryFilters.mode==='month'){
       const f = Object.assign({}, catFilter, summaryFilters.year ? {year:summaryFilters.year} : {});
-      const rows = groupSum(filteredVouchers(f), v=>v.date.slice(0,7), k=>{
+      const rows = groupSum(filteredVouchers(f, voucherList), v=>v.date.slice(0,7), k=>{
         const [y,m] = k.split('-');
         return `${MONTHS[parseInt(m,10)-1]} ${y}`;
       });
       renderSummaryTable(box, rows, 'Month');
     } else if(summaryFilters.mode==='year'){
-      const rows = groupSum(filteredVouchers(catFilter), v=>v.date.slice(0,4));
+      const rows = groupSum(filteredVouchers(catFilter, voucherList), v=>v.date.slice(0,4));
       renderSummaryTable(box, rows, 'Year');
     } else {
       const f = Object.assign({}, catFilter, {fromDate:summaryFilters.fromDate, toDate:summaryFilters.toDate});
-      const results = filteredVouchers(f);
+      const results = filteredVouchers(f, voucherList);
       const total = results.reduce((s,v)=>s+v.amount,0);
       box.appendChild(el(`<div class="computed total"><span class="lbl">${escapeHtml(selectedLabel())} total for this range</span><span>${money(total)}</span></div>`));
       if(results.length===0){
@@ -5473,6 +5511,11 @@ function renderCategorySummaryCard(){
     box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">${escapeHtml(selectedLabel())} grand total</span><span>${money(grand)}</span></div>`));
   }
   drawResults();
+  card.querySelector('#sum-type').onchange = (e)=>{
+    summaryFilters.type = e.target.value;
+    summaryFilters.catKeys = []; // reset - the other side uses a different category set
+    render();
+  };
   card.querySelectorAll('.sum-cat-check').forEach(chk=>{
     chk.onchange = ()=>{
       const checked = Array.from(card.querySelectorAll('.sum-cat-check:checked')).map(x=>x.value);
@@ -5553,12 +5596,12 @@ function renderTemplatesCard(){
 
 /* --- Annual Summary Export card --- */
 function renderAnnualSummaryCard(){
-  let years = voucherYearsPresent();
+  let years = Array.from(new Set([...voucherYearsPresent(), ...voucherYearsPresent(allRevenueVouchers())])).sort().reverse();
   if(years.length===0) years = [state.year];
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128197;</span> Annual Summary</h3>
-      <p class="subnote">A full year's expenses in one grid &mdash; every category down the side, every month across the top &mdash; across this month and everything archived.</p>
+      <p class="subnote">A full year's income and expenditure in one grid each &mdash; every category down the side, every month across the top &mdash; across this month and everything archived.</p>
       <div class="row">
         <div class="field" style="max-width:160px;">
           <label>Year</label>
@@ -8497,57 +8540,65 @@ function sheetNameFor(day, used){
    both the current month and everything archived. --- */
 async function exportAnnualSummary(year){
   try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
-  const vouchers = allVouchers().filter(v=>v.date.slice(0,4)===year);
-  if(vouchers.length===0){ showAlert('No expenses recorded for '+year+' yet.'); return; }
+  const expVouchers = allVouchers().filter(v=>v.date.slice(0,4)===year);
+  const incVouchers = allRevenueVouchers().filter(v=>v.date.slice(0,4)===year);
+  if(expVouchers.length===0 && incVouchers.length===0){ showAlert('No income or expenditure recorded for '+year+' yet.'); return; }
 
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(`Annual ${year}`);
-  ws.getColumn(1).width = 26;
-  for(let m=2;m<=13;m++) ws.getColumn(m).width = 12;
-  ws.getColumn(14).width = 14;
 
-  function put(addr, value, {size=11, bold=false, numFmt}={}){
-    const c = ws.getCell(addr);
-    c.value = (value===''||value===undefined) ? '' : value;
-    c.font = {name:FONT, size, bold};
-    c.border = BORDER_ALL;
-    c.alignment = {horizontal:'center', vertical:'center'};
-    if(numFmt) c.numFmt = numFmt;
-    return c;
-  }
+  function writeGrid(ws, title, vouchers, catKeys, catLookup){
+    ws.getColumn(1).width = 26;
+    for(let m=2;m<=13;m++) ws.getColumn(m).width = 12;
+    ws.getColumn(14).width = 14;
 
-  ws.mergeCells('A1:N1');
-  put('A1', `Annual Category Summary - ${year}`, {size:16, bold:true});
-  ws.getRow(1).height = 24;
-
-  let r = 3;
-  put(`A${r}`, 'Category', {bold:true});
-  for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, MONTHS[m].slice(0,3), {bold:true}); }
-  put('N'+r, 'Total', {bold:true});
-  r++;
-
-  const monthColTotals = new Array(12).fill(0);
-  const catRowNums = [];
-  SUMMARY_ORDER.forEach(catKey=>{
-    const cat = COA.find(c=>c.key===catKey);
-    put(`A${r}`, cat.label);
-    for(let m=0;m<12;m++){
-      const mm = String(m+1).padStart(2,'0');
-      const total = vouchers.filter(v=>v.catKey===catKey && v.date.slice(5,7)===mm).reduce((s,v)=>s+v.amount,0);
-      put(String.fromCharCode(66+m)+r, total||'', {numFmt:ASIAN_NUMFMT});
-      monthColTotals[m] += total;
+    function put(addr, value, {size=11, bold=false, numFmt}={}){
+      const c = ws.getCell(addr);
+      c.value = (value===''||value===undefined) ? '' : value;
+      c.font = {name:FONT, size, bold};
+      c.border = BORDER_ALL;
+      c.alignment = {horizontal:'center', vertical:'center'};
+      if(numFmt) c.numFmt = numFmt;
+      return c;
     }
-    put('N'+r, {formula:`SUM(B${r}:M${r})`}, {bold:true, numFmt:ASIAN_NUMFMT});
-    catRowNums.push(r);
+
+    ws.mergeCells('A1:N1');
+    put('A1', title, {size:16, bold:true});
+    ws.getRow(1).height = 24;
+
+    let r = 3;
+    put(`A${r}`, 'Category', {bold:true});
+    for(let m=0;m<12;m++){ put(String.fromCharCode(66+m)+r, MONTHS[m].slice(0,3), {bold:true}); }
+    put('N'+r, 'Total', {bold:true});
     r++;
-  });
-  put(`A${r}`, 'Total', {bold:true});
-  const firstCatRow = catRowNums[0], lastCatRow = catRowNums[catRowNums.length-1];
-  for(let m=0;m<12;m++){
-    const colLetter = String.fromCharCode(66+m);
-    put(colLetter+r, catRowNums.length ? {formula:`SUM(${colLetter}${firstCatRow}:${colLetter}${lastCatRow})`} : 0, {bold:true, numFmt:ASIAN_NUMFMT});
+
+    const catRowNums = [];
+    catKeys.forEach(catKey=>{
+      const cat = catLookup(catKey);
+      if(!cat) return;
+      put(`A${r}`, cat.label);
+      for(let m=0;m<12;m++){
+        const mm = String(m+1).padStart(2,'0');
+        const total = vouchers.filter(v=>v.catKey===catKey && v.date.slice(5,7)===mm).reduce((s,v)=>s+v.amount,0);
+        put(String.fromCharCode(66+m)+r, total||'', {numFmt:ASIAN_NUMFMT});
+      }
+      put('N'+r, {formula:`SUM(B${r}:M${r})`}, {bold:true, numFmt:ASIAN_NUMFMT});
+      catRowNums.push(r);
+      r++;
+    });
+    put(`A${r}`, 'Total', {bold:true});
+    const firstCatRow = catRowNums[0], lastCatRow = catRowNums[catRowNums.length-1];
+    for(let m=0;m<12;m++){
+      const colLetter = String.fromCharCode(66+m);
+      put(colLetter+r, catRowNums.length ? {formula:`SUM(${colLetter}${firstCatRow}:${colLetter}${lastCatRow})`} : 0, {bold:true, numFmt:ASIAN_NUMFMT});
+    }
+    put('N'+r, catRowNums.length ? {formula:`SUM(N${firstCatRow}:N${lastCatRow})`} : 0, {bold:true, numFmt:ASIAN_NUMFMT});
   }
-  put('N'+r, catRowNums.length ? {formula:`SUM(N${firstCatRow}:N${lastCatRow})`} : 0, {bold:true, numFmt:ASIAN_NUMFMT});
+
+  const wsExp = wb.addWorksheet(`Expenditure ${year}`);
+  writeGrid(wsExp, `Annual Expenditure Summary - ${year}`, expVouchers, SUMMARY_ORDER, key=>COA.find(c=>c.key===key));
+
+  const wsInc = wb.addWorksheet(`Income ${year}`);
+  writeGrid(wsInc, `Annual Income Summary - ${year}`, incVouchers, REVENUE_CATS.map(c=>c.key), key=>REVENUE_CATS.find(c=>c.key===key));
 
   await downloadWorkbook(wb, `Annual_Summary_${year}.xlsx`);
 }
