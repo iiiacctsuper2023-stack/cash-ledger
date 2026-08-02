@@ -611,6 +611,7 @@ const MONTHS = ['January','February','March','April','May','June','July','August
    ====================================================================== */
 let state = null;
 let selectedDayId = null;
+let dlMonthKey = null; // "YYYY-MM" chosen in the footer's "Download whole month" selector - defaults to the selected day's month
 let notesheetRange = null; // {start, end} - lazily defaulted to the full recorded month
 let notesheetSettingsOpen = false;
 let reconDetailOpen = {};
@@ -6918,14 +6919,31 @@ function drawPayableList(container, day){
   });
 }
 
+function distinctDayMonthKeys(){
+  const keys = new Set();
+  state.days.forEach(d=>{ if(d.date) keys.add(d.date.slice(0,7)); }); // "YYYY-MM" sorts correctly as a plain string
+  return Array.from(keys).sort();
+}
 function renderFooter(){
-  return el(`
+  const keys = distinctDayMonthKeys();
+  if(keys.length && (!dlMonthKey || !keys.includes(dlMonthKey))){
+    const activeDay = findDay(selectedDayId);
+    const preferred = (activeDay && activeDay.date) ? activeDay.date.slice(0,7) : null;
+    dlMonthKey = (preferred && keys.includes(preferred)) ? preferred : keys[keys.length-1];
+  }
+  const wrap = el(`
     <footer class="dl">
       <button class="secondary" data-action="dl-day">Download this day (Excel)</button>
+      ${keys.length>1 ? `<select id="dl-month-select" title="Month to download">
+        ${keys.map(k=>`<option value="${k}" ${k===dlMonthKey?'selected':''}>${monthKeyLabel(k)}</option>`).join('')}
+      </select>` : ''}
       <button data-action="dl-month">Download whole month (Excel)</button>
       <div style="width:100%;text-align:center;font-size:10.5px;color:var(--ink-soft);opacity:.6;margin-top:6px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</div>
     </footer>
   `);
+  const sel = wrap.querySelector('#dl-month-select');
+  if(sel) sel.onchange = (e)=>{ dlMonthKey = e.target.value; };
+  return wrap;
 }
 
 /* ======================================================================
@@ -9080,13 +9098,13 @@ async function exportDay(dayId){
 async function exportMonth(){
   if(state.days.length===0){ showAlert('No days recorded yet.'); return; }
 
-  // "Whole month" downloads the month of whichever day tab is currently
-  // open, not necessarily the app's active Month/Year setting - so having
-  // started entering a new month doesn't block downloading a previous
-  // month that's still sitting in state.days (not yet archived), and vice
-  // versa. Falls back to the active Month/Year if no day is selected.
+  // "Whole month" downloads whichever month is chosen in the footer's
+  // month selector (dlMonthKey), so it's an explicit pick rather than
+  // depending on which day tab happens to be open - having started
+  // entering a new month doesn't block downloading a previous month
+  // that's still sitting in state.days (not yet archived), and vice versa.
   const activeDay = findDay(selectedDayId);
-  const targetKey = (activeDay && activeDay.date) ? activeDay.date.slice(0,7) : monthKeyFor(state.month, state.year);
+  const targetKey = dlMonthKey || ((activeDay && activeDay.date) ? activeDay.date.slice(0,7) : monthKeyFor(state.month, state.year));
   const days = targetKey ? state.days.filter(d => d.date && d.date.slice(0,7) === targetKey) : state.days.slice();
   if(days.length===0){ showAlert('No days recorded for that month yet.'); return; }
 
