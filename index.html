@@ -628,17 +628,13 @@ function currentDailyLedgerCoaTotals(){
 function monthWithdrawCoaTotals(key){
   const totals = {};
   COA.forEach(c=>{ totals[c.key] = 0; });
-  (state.withdrawNotesheetLog||[]).forEach(log=>{
-    const attribDate = log.generatedDate || log.endDate; // the date chosen (or defaulted to endDate) when the notesheet was generated - editable via "Post to Monthly Ledger as of"; older logs fall back to endDate
-    if(!attribDate) return;
-    const [y, m] = attribDate.split('-');
-    const monthName = MONTHS[parseInt(m,10)-1];
-    if(monthKeyFor(monthName, y) !== key) return;
-    (log.categories||[]).forEach(cat=>{
-      const coa = COA.find(c=>coaText(c,'summaryLabel')===cat.label || c.summaryLabel===cat.label);
-      if(coa) totals[coa.key] += Number(cat.total)||0;
+  const rec = state.monthlyLedger.months[key];
+  if(rec){
+    (rec.expenditureColumns||[]).forEach(col=>{
+      if(col.source!=='coa') return;
+      totals[col.coaKey] = (totals[col.coaKey]||0) + expenditureEntryColTotal(rec, col.id);
     });
-  });
+  }
   return totals;
 }
 
@@ -1558,6 +1554,26 @@ async function saveState(){
 function migrateState(){
   const d = defaultState();
   if(state.days && state.days.length) state.days.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  if(Array.isArray(state.withdrawNotesheetLog)){
+    state.withdrawNotesheetLog.forEach(log=>{
+      if(log.migratedToML) return;
+      log.migratedToML = true;
+      const attribDate = log.generatedDate || log.endDate;
+      if(!attribDate || !Array.isArray(log.categories) || log.categories.length===0) return;
+      const [y, m] = attribDate.split('-');
+      const mlKey = monthKeyFor(MONTHS[parseInt(m,10)-1], y);
+      const mlRec = getMonthlyLedgerMonth(mlKey);
+      const amounts = {};
+      log.categories.forEach(cat=>{
+        const coaCat = COA.find(c=>coaText(c,'summaryLabel')===cat.label || c.summaryLabel===cat.label);
+        if(!coaCat) return;
+        let col = mlRec.expenditureColumns.find(c=>c.source==='coa' && c.coaKey===coaCat.key);
+        if(!col){ col = {id:uid(), label:coaCat.label, source:'coa', coaKey:coaCat.key}; mlRec.expenditureColumns.push(col); }
+        amounts[col.id] = (amounts[col.id]||0) + (Number(cat.total)||0);
+      });
+      if(Object.keys(amounts).length) mlRec.expenditureEntries.push({id:uid(), date:attribDate, desc:`Withdraw Notesheet ${log.summaryLabel||''}`, amounts});
+    });
+  }
   if(!state.notesheetCounters) state.notesheetCounters = d.notesheetCounters;
   else COA.forEach(c=>{ if(!(c.key in state.notesheetCounters)) state.notesheetCounters[c.key] = 0; });
   if(state.summaryCounterYear===undefined) state.summaryCounterYear = d.summaryCounterYear;
@@ -4510,8 +4526,8 @@ function drawMlCustomRowsList(container, rec, f){
 
 function drawMlExpenditureEntryList(container, rec){
   container.innerHTML = '';
-  const entryCols = rec.expenditureColumns.filter(c=>c.source==='entries');
-  if(entryCols.length===0){ container.appendChild(el(`<p class="empty">No day-by-day expenditure entries this month (this month's columns are either auto from Withdraw Notesheets, or a single manual total).</p>`)); return; }
+  const entryCols = rec.expenditureColumns.filter(c=>c.source==='entries' || c.source==='coa');
+  if(entryCols.length===0 && rec.expenditureEntries.length===0){ container.appendChild(el(`<p class="empty">No day-by-day expenditure entries this month yet - generating a Withdraw Notesheet adds one automatically, or add one by hand below.</p>`)); return; }
   if(rec.expenditureEntries.length===0){ container.appendChild(el(`<p class="empty">No expenditure entries yet this month.</p>`)); }
   rec.expenditureEntries.forEach(entry=>{
     if(!entry.amounts) entry.amounts = {};
@@ -8959,12 +8975,33 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   if(shouldSave && incrementNumbering){
     if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
     const fileName = `Notesheets_${startDate}_to_${endDate}.xlsx`;
+    const finalAttribDate = attribDate || endDate;
     state.withdrawNotesheetLog.push({
-      id:uid(), generatedAt:new Date().toISOString(), generatedDate: attribDate || endDate, startDate, endDate,
+      id:uid(), generatedAt:new Date().toISOString(), generatedDate: finalAttribDate, startDate, endDate,
       summaryLabel:`${state.summaryCounterYear}-${summaryNum}`,
       categories: summaryRows.map(r=>({label:r.label, total:r.total})),
       grandTotal, fileName, fileBase64: await workbookToBase64(wb)
     });
+
+    // Also post a dated, category-broken-down entry into Monthly Ledger's
+    // Expenditure entries - same as how a generated Deposit Notesheet
+    // posts a dated Revenue entry - so these withdrawals show up in
+    // Monthly Ledger automatically, with date and category, not just
+    // inside the saved notesheet log.
+    const [attribY, attribM] = finalAttribDate.split('-');
+    const mlKey = monthKeyFor(MONTHS[parseInt(attribM,10)-1], attribY);
+    const mlRec = getMonthlyLedgerMonth(mlKey);
+    const amounts = {};
+    cats.forEach(({key:coaKey, total})=>{
+      let col = mlRec.expenditureColumns.find(c=>c.source==='coa' && c.coaKey===coaKey);
+      if(!col){
+        const coaCat = COA.find(c=>c.key===coaKey);
+        col = {id:uid(), label: coaCat ? coaCat.label : coaKey, source:'coa', coaKey};
+        mlRec.expenditureColumns.push(col);
+      }
+      amounts[col.id] = total;
+    });
+    mlRec.expenditureEntries.push({id:uid(), date:finalAttribDate, desc:`Withdraw Notesheet ${state.summaryCounterYear}-${summaryNum}`, amounts});
   }
 
   await saveState();
