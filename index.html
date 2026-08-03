@@ -436,6 +436,44 @@ function earliestTrackedMonthKey(){
   if(keys.length===0) return null;
   return keys.sort()[0];
 }
+function prevMonthKey(key){
+  const [y,m] = key.split('-').map(Number);
+  const d = new Date(y, m-2, 1); // m-1 is this month 0-indexed, minus 1 more = previous month
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+/* Beginning Balance (Bank): the manually-typed figure if one has been
+   entered, otherwise carried in automatically from the previous tracked
+   month's own closing Bank Balance (computeMonthlyLedgerFigures'
+   bankBalanceShown, which already respects that month's own override if
+   any) - so a new month doesn't start at a blank/zero balance just
+   because nobody re-typed last month's closing figure by hand. Only
+   carries from a month that's actually been tracked (has its own record
+   already) - never silently creates one. */
+function effectiveBeginningBankBalance(key){
+  const rec = getMonthlyLedgerMonth(key);
+  const manual = Number(rec.beginningBankBalance)||0;
+  if(manual!==0) return manual;
+  const pk = prevMonthKey(key);
+  if(!state.monthlyLedger.months[pk]) return 0;
+  return computeMonthlyLedgerFigures(pk).bankBalanceShown;
+}
+/* Opening Cash for the very first day ever recorded in the Daily Ledger:
+   the manually-typed figure if one has been entered, otherwise carried in
+   automatically from the previous tracked month's Monthly Ledger Cash in
+   Hand (Balance Sheet), the same way Beginning Balance (Bank) carries in
+   above - so day one of July doesn't start at a blank/zero cash balance
+   just because nobody re-typed June's closing Cash in Hand by hand. Only
+   carries from a month that's actually been tracked. Safe to call from
+   inside computeAll(): the previous month, by definition of this being
+   day zero, can never itself have day-level data, so
+   computeMonthlyLedgerFigures never recurses back into computeAll() here. */
+function effectiveOpeningCashManual(day){
+  const manual = Number(day.openingCashManual)||0;
+  if(manual!==0) return manual;
+  const pk = prevMonthKey(day.date.slice(0,7));
+  if(!state.monthlyLedger.months[pk]) return 0;
+  return Number(computeMonthlyLedgerFigures(pk).cashInHandShown)||0;
+}
 /* Gets (creating if needed) the persistent record for one month - never
    deleted by Daily Ledger month switches, unlike state.days. */
 function getMonthlyLedgerMonth(key){
@@ -591,7 +629,7 @@ function monthWithdrawCoaTotals(key){
   const totals = {};
   COA.forEach(c=>{ totals[c.key] = 0; });
   (state.withdrawNotesheetLog||[]).forEach(log=>{
-    const attribDate = log.generatedDate || log.endDate; // generation date, not End Date, is now the rule; older logs fall back to endDate
+    const attribDate = log.generatedDate || log.endDate; // the date chosen (or defaulted to endDate) when the notesheet was generated - editable via "Post to Monthly Ledger as of"; older logs fall back to endDate
     if(!attribDate) return;
     const [y, m] = attribDate.split('-');
     const monthName = MONTHS[parseInt(m,10)-1];
@@ -1519,6 +1557,7 @@ async function saveState(){
 }
 function migrateState(){
   const d = defaultState();
+  if(state.days && state.days.length) state.days.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   if(!state.notesheetCounters) state.notesheetCounters = d.notesheetCounters;
   else COA.forEach(c=>{ if(!(c.key in state.notesheetCounters)) state.notesheetCounters[c.key] = 0; });
   if(state.summaryCounterYear===undefined) state.summaryCounterYear = d.summaryCounterYear;
@@ -1675,7 +1714,7 @@ function computeAll(){
   state.banks.forEach(b=>{ prevBankClose[b.id] = b.opening||0; });
 
   state.days.forEach((day, idx)=>{
-    const openingCash = idx===0 ? (Number(day.openingCashManual)||0) : prevCash;
+    const openingCash = idx===0 ? effectiveOpeningCashManual(day) : prevCash;
     const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
     const cashCollected = (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0) + withdrawTotal;
     const totalAmountCash = openingCash + cashCollected;
@@ -3086,8 +3125,8 @@ function renderDayPanel(dayId, computed){
         </div>
         ${idx===0 ? `
         <div class="field">
-          <label>Opening cash balance (manual &mdash; first day only)</label>
-          <input type="text" inputmode="decimal" id="opening-cash-manual" value="${formatAsianAmount(day.openingCashManual)}">
+          <label>Opening cash balance (manual &mdash; first day only) ${(!day.openingCashManual && effectiveOpeningCashManual(day)) ? '<span class="tag" title="Carried in from the previous tracked month\'s Cash in Hand (Balance Sheet) - edit to override">auto</span>' : ''}</label>
+          <input type="text" inputmode="decimal" id="opening-cash-manual" value="${formatAsianAmount(effectiveOpeningCashManual(day))}">
         </div>` : `
         <div class="field">
           <label>Beginning balance cash <span class="tag">auto</span></label>
@@ -3115,7 +3154,7 @@ function renderDayPanel(dayId, computed){
   if(idx===0){
     wireAmountInput(cashCard.querySelector('#opening-cash-manual'), (num)=>{ day.openingCashManual = num; refreshComputedOnly(); });
   }
-  cashCard.querySelector('#day-date').oninput = (e)=>{ day.date = e.target.value; refreshComputedOnly(); render(); };
+  cashCard.querySelector('#day-date').oninput = (e)=>{ day.date = e.target.value; state.days.sort((a,b)=>(a.date||'').localeCompare(b.date||'')); refreshComputedOnly(); render(); };
   wireAmountInput(cashCard.querySelector('#service-revenue'), (num)=>{ day.serviceRevenue = num; refreshComputedOnly(); });
   drawMiscCollectionList(cashCard.querySelector('#misc-collection-list'), day);
   drawTransferList(cashCard.querySelector('#withdraw-list'), day, 'withdrawals', 'No withdrawals today.');
@@ -3613,6 +3652,35 @@ function sumDailyBankFieldForMonth(key, field){
   });
   return total;
 }
+/* House Rent Deposit / Salary by Cash / Salary by Account each happen only
+   once a month, on the last banking day - so unlike a true aggregate,
+   there IS one real date to show. Returns that day's date, or null if
+   nothing was entered for this field in this month (or, in the unusual
+   case of more than one non-zero day, the latest one). */
+function dayDateForBankField(key, field){
+  let foundDate = null;
+  state.days.forEach(day=>{
+    if(day.date.slice(0,7)!==key) return;
+    let dayTotal = 0;
+    Object.values(day.banksDaily||{}).forEach(bd=>{ dayTotal += Number(bd && bd[field])||0; });
+    if(dayTotal>0) foundDate = day.date;
+  });
+  return foundDate;
+}
+/* Same idea, but returns every non-zero day (not just the last one) - so
+   if House Rent/Salary is ever mistakenly entered on more than one date
+   in the same month, each shows up on its own dated row in the export
+   instead of being silently merged into a single total. */
+function dailyBankFieldEntries(key, field){
+  const out = [];
+  state.days.forEach(day=>{
+    if(day.date.slice(0,7)!==key) return;
+    let dayTotal = 0;
+    Object.values(day.banksDaily||{}).forEach(bd=>{ dayTotal += Number(bd && bd[field])||0; });
+    if(dayTotal>0) out.push({date:day.date, amount:dayTotal});
+  });
+  return out;
+}
 /* Effective Salary by Account/Cash and House Rent Deposit for the
    Monthly Ledger: the old manual figure if this month still has one
    from before Manual Bank Items was removed, otherwise the sum of
@@ -3662,7 +3730,7 @@ function computeMonthlyLedgerFigures(key){
   const yrtNew = {};
   REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + effectiveRevenueTransfer(rec, c.key); });
   const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
-  const totalAmount = (Number(rec.beginningBankBalance)||0) + revTotalIncome + effectiveHouseRentDeposit(key);
+  const totalAmount = effectiveBeginningBankBalance(key) + revTotalIncome + effectiveHouseRentDeposit(key);
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
   if(seedActive){
@@ -4058,8 +4126,8 @@ function renderMonthlyLedgerCard(){
       <h3 style="font-size:14px;">Revenue</h3>
       <div class="row">
         <div class="field">
-          <label>Beginning Balance (Bank)</label>
-          <input type="text" inputmode="decimal" id="ml-beginning-balance" value="${formatAsianAmount(rec.beginningBankBalance)}">
+          <label>Beginning Balance (Bank) ${(!rec.beginningBankBalance && effectiveBeginningBankBalance(key)) ? '<span class="tag" title="Carried in from the previous tracked month\'s closing Bank Balance - edit to override">auto</span>' : ''}</label>
+          <input type="text" inputmode="decimal" id="ml-beginning-balance" value="${formatAsianAmount(effectiveBeginningBankBalance(key))}">
         </div>
         <div class="field">
           <label>House Rent Deposit <span class="tag" title="Entered in the Daily Ledger's Bank section (Other deposit / House Rent) - auto-summed here">auto</span></label>
@@ -5017,17 +5085,26 @@ async function exportMonthlyLedger(key, previewOnly){
 
   let r = headerRowNum+1;
   const beginningBalanceRow = r;
-  rev.getCell(r,1).value = '-';
-  rev.getCell(r,2).value = 'Beginning Balance Bank';
-  rev.getCell(r,3).value = 'Beginning Balance Bank';
-  rev.getCell(r,4).value = Number(rec.beginningBankBalance)||0;
+  revSummaryLabel(r, 'Beginning Balance Bank');
+  rev.getCell(r,4).value = effectiveBeginningBankBalance(key);
   r++;
-  const houseRentDepositRow = r;
-  rev.getCell(r,1).value = '-';
-  rev.getCell(r,2).value = 'House Rent Deposit';
-  rev.getCell(r,3).value = 'House Rent Deposit';
-  rev.getCell(r,4).value = effectiveHouseRentDeposit(key);
-  r++;
+  const houseRentDepositStartRow = r;
+  const houseRentManual = Number(rec.houseRentDeposit)||0;
+  const houseRentEntries = houseRentManual===0 ? dailyBankFieldEntries(key, 'houseRentDeposit') : [];
+  if(houseRentEntries.length){
+    houseRentEntries.forEach(en=>{
+      rev.getCell(r,2).value = new Date(en.date);
+      rev.getCell(r,2).numFmt = 'd/m/yyyy';
+      rev.getCell(r,3).value = 'House Rent Deposit';
+      rev.getCell(r,4).value = en.amount;
+      r++;
+    });
+  } else {
+    revSummaryLabel(r, 'House Rent Deposit');
+    rev.getCell(r,4).value = houseRentManual;
+    r++;
+  }
+  const houseRentDepositEndRow = r-1;
   const yrtBeforeRow = r;
   rev.getCell(r,3).value = 'Yearly Running Total from Previous Month';
   const yrtBefore = yearlyRunningTotalBefore(key);
@@ -5091,7 +5168,7 @@ async function exportMonthlyLedger(key, previewOnly){
   r++;
   const totalAmountRow = r;
   revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
-  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+D${houseRentDepositRow}`};
+  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+SUM(D${houseRentDepositStartRow}:D${houseRentDepositEndRow})`};
   rev.getCell(r,4).font = BOLD;
 
   // All-border across the whole used block, first line through last line -
@@ -5156,13 +5233,40 @@ async function exportMonthlyLedger(key, previewOnly){
     exp.getCell(expDataRow, 4+i).value = amt;
   });
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
-  const salaryAccountRow = expDataRow+1;
-  expSummaryLabel(salaryAccountRow, 'Salary by Account'); exp.getCell(salaryAccountRow,1).font = FONT;
-  exp.getCell(salaryAccountRow,3).value = effectiveSalaryByAccount(key);
-  const salaryCashRow = salaryAccountRow+1;
-  expSummaryLabel(salaryCashRow, 'Salary by Cash'); exp.getCell(salaryCashRow,1).font = FONT;
-  exp.getCell(salaryCashRow,3).value = effectiveSalaryByCash(key);
-  const expTotalRow = salaryCashRow+1;
+  const salaryAccountStartRow = expDataRow+1;
+  let sr = salaryAccountStartRow;
+  const salaryAccountManual = Number(rec.salaryByAccount)||0;
+  const salaryAccountEntries = salaryAccountManual===0 ? dailyBankFieldEntries(key, 'salaryAccount') : [];
+  if(salaryAccountEntries.length){
+    salaryAccountEntries.forEach(en=>{
+      exp.getCell(sr,1).value = new Date(en.date);
+      exp.getCell(sr,1).numFmt = 'd/m/yyyy';
+      exp.getCell(sr,2).value = 'Salary by Account';
+      exp.getCell(sr,3).value = en.amount;
+      sr++;
+    });
+  } else {
+    expSummaryLabel(sr, 'Salary by Account'); exp.getCell(sr,1).font = FONT;
+    exp.getCell(sr,3).value = salaryAccountManual;
+    sr++;
+  }
+  const salaryCashManual = Number(rec.salaryByCash)||0;
+  const salaryCashEntries = salaryCashManual===0 ? dailyBankFieldEntries(key, 'salaryCash') : [];
+  if(salaryCashEntries.length){
+    salaryCashEntries.forEach(en=>{
+      exp.getCell(sr,1).value = new Date(en.date);
+      exp.getCell(sr,1).numFmt = 'd/m/yyyy';
+      exp.getCell(sr,2).value = 'Salary by Cash';
+      exp.getCell(sr,3).value = en.amount;
+      sr++;
+    });
+  } else {
+    expSummaryLabel(sr, 'Salary by Cash'); exp.getCell(sr,1).font = FONT;
+    exp.getCell(sr,3).value = salaryCashManual;
+    sr++;
+  }
+  const salaryCashRow = sr-1; // last salary row written - the range-sum formulas below run through this row, so they naturally cover however many dated rows ended up here
+  const expTotalRow = sr;
   expSummaryLabel(expTotalRow, 'Total Expenditure:'); exp.getCell(expTotalRow,1).font = BOLD;
   for(let i=0;i<=rec.expenditureColumns.length;i++){
     const colLetter = exp.getColumn(3+i).letter;
@@ -5197,12 +5301,8 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(bs,10).value = 'Liabilities'; exp.getCell(bs,10).font = BOLD;
   const balanceSheetHeaderRow = bs;
   const assetStartRow = bs+1;
-  const computedNow = key===monthKeyFor(state.month,state.year) ? computeAll() : null;
-  const latestDay = state.days.length ? state.days[state.days.length-1] : null;
-  const autoCash = computedNow && latestDay ? computedNow[latestDay.id].cashInHand : 0;
-  const cashInHand = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCash;
-  const autoBankTotalExp = computedNow && latestDay ? state.banks.reduce((s,b)=>s+computedNow[latestDay.id].banks[b.id].closing,0) : 0;
-  const bankBalanceVal = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : autoBankTotalExp;
+  const cashInHand = mlFig.cashInHandShown;
+  const bankBalanceVal = mlFig.bankBalanceShown;
   const otherAsset = rec.balanceSheet.otherAsset || {label:'Debt to III Assets Ltd', amount:250000};
 
   exp.getCell(assetStartRow,5).value = 1; exp.getCell(assetStartRow,6).value = 'Cash in Hand'; exp.getCell(assetStartRow,9).value = Number(cashInHand)||0;
@@ -5623,6 +5723,7 @@ function renderNotesheetCard(){
   if(!notesheetRange) notesheetRange = {start:minDate, end:maxDate};
   if(notesheetRange.start < minDate) notesheetRange.start = minDate;
   if(notesheetRange.end > maxDate) notesheetRange.end = maxDate;
+  if(!notesheetRange.attrib) notesheetRange.attrib = notesheetRange.end;
 
   const {cats, grandTotal} = collectNotesheetRange(notesheetRange.start, notesheetRange.end);
 
@@ -5638,6 +5739,10 @@ function renderNotesheetCard(){
         <div class="field">
           <label>To date</label>
           <input type="date" id="ns-end" min="${minDate}" max="${maxDate}" value="${notesheetRange.end}">
+        </div>
+        <div class="field">
+          <label>Post to Monthly Ledger as of <span class="tag" title="Which month this counts toward in Monthly Ledger - defaults to the To date, but you can pick any date">editable</span></label>
+          <input type="date" id="ns-attrib" value="${notesheetRange.attrib}">
         </div>
       </div>
       <div id="ns-preview"></div>
@@ -5673,7 +5778,15 @@ function renderNotesheetCard(){
   drawSettings();
 
   card.querySelector('#ns-start').onchange = (e)=>{ notesheetRange.start = e.target.value; drawPreview(); };
-  card.querySelector('#ns-end').onchange = (e)=>{ notesheetRange.end = e.target.value; drawPreview(); };
+  card.querySelector('#ns-end').onchange = (e)=>{
+    const prevEnd = notesheetRange.end;
+    notesheetRange.end = e.target.value;
+    // keep the attribution date following the To-date until the user picks their own
+    if(notesheetRange.attrib === prevEnd) notesheetRange.attrib = notesheetRange.end;
+    card.querySelector('#ns-attrib').value = notesheetRange.attrib;
+    drawPreview();
+  };
+  card.querySelector('#ns-attrib').onchange = (e)=>{ notesheetRange.attrib = e.target.value; };
 
   function drawSettings(){
     const settings = card.querySelector('#ns-settings');
@@ -5766,8 +5879,8 @@ function renderNotesheetCard(){
     showModal({
       message: 'নোটশিট ও সামারির নাম্বার কি এগিয়ে যাবে (পরের সিরিয়াল নাম্বার স্থায়ীভাবে ব্যবহৃত হবে)?',
       confirmText: 'হ্যাঁ', cancelText: 'না',
-      onConfirm: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, false, true),
-      onCancel: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, false, false)
+      onConfirm: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, false, true, notesheetRange.attrib),
+      onCancel: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, false, false, notesheetRange.attrib)
     });
   };
   card.querySelector('#ns-preview-btn').onclick = ()=>{
@@ -5775,8 +5888,8 @@ function renderNotesheetCard(){
     showModal({
       message: 'নোটশিট ও সামারির নাম্বার কি এগিয়ে যাবে (পরের সিরিয়াল নাম্বার স্থায়ীভাবে ব্যবহৃত হবে)?',
       confirmText: 'হ্যাঁ', cancelText: 'না',
-      onConfirm: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true, true),
-      onCancel: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true, false)
+      onConfirm: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true, true, notesheetRange.attrib),
+      onCancel: ()=> exportNotesheets(notesheetRange.start, notesheetRange.end, shouldSave, true, false, notesheetRange.attrib)
     });
   };
 
@@ -5786,7 +5899,11 @@ function renderNotesheetCard(){
         <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.withdrawNotesheetLog.slice(-5).reverse().map(l=>`
+            ${state.withdrawNotesheetLog.slice().sort((a,b)=>{
+              const na = parseInt((a.summaryLabel||'').split('-').pop(),10)||0;
+              const nb = parseInt((b.summaryLabel||'').split('-').pop(),10)||0;
+              return na-nb;
+            }).slice(-5).map(l=>`
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;" class="mono">${l.summaryLabel}</td>
                 <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
@@ -5825,6 +5942,10 @@ function renderDepositNotesheetCard(){
           <label>Collection end date</label>
           <input type="date" id="dns-end-date">
         </div>
+        <div class="field" style="max-width:170px;">
+          <label>Post to Monthly Ledger as of <span class="tag" title="Which month this counts toward in Monthly Ledger - defaults to the collection end date, but you can pick any date">editable</span></label>
+          <input type="date" id="dns-attrib-date">
+        </div>
         <div class="field" style="flex:1 1 260px;">
           <label>Raw Collection Register file (.xlsx)</label>
           <input type="file" id="dns-file-input" accept=".xlsx">
@@ -5842,7 +5963,7 @@ function renderDepositNotesheetCard(){
         <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.depositNotesheetLog.slice(-5).reverse().map(l=>`
+            ${state.depositNotesheetLog.slice().sort((a,b)=>(a.noteNum||0)-(b.noteNum||0)).slice(-5).map(l=>`
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;" class="mono">#${l.noteNum}</td>
                 <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
@@ -5867,7 +5988,11 @@ function renderDepositNotesheetCard(){
   const fileInp = card.querySelector('#dns-file-input');
   const startInp = card.querySelector('#dns-start-date');
   const endInp = card.querySelector('#dns-end-date');
+  const attribInp = card.querySelector('#dns-attrib-date');
   const statusEl = card.querySelector('#dns-status');
+  let attribTouched = false;
+  attribInp.onchange = ()=>{ attribTouched = true; };
+  endInp.onchange = ()=>{ if(!attribTouched) attribInp.value = endInp.value; };
   fileInp.onchange = async ()=>{
     const file = fileInp.files && fileInp.files[0];
     if(!file) return;
@@ -5881,6 +6006,7 @@ function renderDepositNotesheetCard(){
       if(iso){
         if(!startInp.value) startInp.value = iso.start;
         if(!endInp.value) endInp.value = iso.end;
+        if(!attribTouched && !attribInp.value) attribInp.value = iso.end;
       }
     }catch(e){ /* auto-fill is best-effort; user can still type the dates in manually */ }
   };
@@ -5891,7 +6017,7 @@ function renderDepositNotesheetCard(){
     const shouldSave = card.querySelector('#dns-save-toggle').checked;
     statusEl.textContent = 'Generating\u2026';
     try{
-      await generateDepositNotesheet(file, startInp.value, endInp.value, shouldSave);
+      await generateDepositNotesheet(file, startInp.value, endInp.value, shouldSave, false, attribInp.value || endInp.value);
       statusEl.textContent = 'Done \u2014 file downloaded.';
     }catch(e){
       statusEl.textContent = '';
@@ -5905,7 +6031,7 @@ function renderDepositNotesheetCard(){
     const shouldSave = card.querySelector('#dns-save-toggle').checked;
     statusEl.textContent = 'Building preview\u2026';
     try{
-      await generateDepositNotesheet(file, startInp.value, endInp.value, shouldSave, true);
+      await generateDepositNotesheet(file, startInp.value, endInp.value, shouldSave, true, attribInp.value || endInp.value);
       statusEl.textContent = '';
     }catch(e){
       statusEl.textContent = '';
@@ -8099,7 +8225,7 @@ function applyDepositNotesheetFormatting(ws, rows){
   }
 }
 
-async function generateDepositNotesheet(file, startISO, endISO, shouldSave, previewOnly){
+async function generateDepositNotesheet(file, startISO, endISO, shouldSave, previewOnly, attribDate){
   if(shouldSave===undefined) shouldSave = true;
   try{
     await loadExcelJS();
@@ -8199,7 +8325,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   state.nextDepositNotesheetNo = noteNum + 1;
 
-  const genISO = new Date().toISOString().slice(0,10); // date the notesheet is generated - the app now attributes the Monthly Ledger entry to this date, not the range's End Date
+  const genISO = attribDate || endISO; // which month this counts toward in Monthly Ledger - defaults to the collection end date, but editable via the "Post to Monthly Ledger as of" field
   const DEPOSIT_TO_REVENUE_KEY = state.settings.depositRevenueMap;
   const depositLogId = uid();
   const revEntry = {id:depositLogId, date:genISO, desc:`Deposit Notesheet #${noteNum} (${startISO} to ${endISO})`};
@@ -8805,7 +8931,7 @@ function writeWithdrawSummary(ws, rows, grandTotal, yearCode, num){
   sigCell2.border = {top:thin};
 }
 
-async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, incrementNumbering){
+async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, incrementNumbering, attribDate){
   if(incrementNumbering===undefined) incrementNumbering = true;
   if(!startDate || !endDate){ showAlert('Pick a from and to date.'); return; }
   if(startDate > endDate){ showAlert('The "From date" must be before the "To date".'); return; }
@@ -8834,7 +8960,7 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
     if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
     const fileName = `Notesheets_${startDate}_to_${endDate}.xlsx`;
     state.withdrawNotesheetLog.push({
-      id:uid(), generatedAt:new Date().toISOString(), generatedDate:new Date().toISOString().slice(0,10), startDate, endDate,
+      id:uid(), generatedAt:new Date().toISOString(), generatedDate: attribDate || endDate, startDate, endDate,
       summaryLabel:`${state.summaryCounterYear}-${summaryNum}`,
       categories: summaryRows.map(r=>({label:r.label, total:r.total})),
       grandTotal, fileName, fileBase64: await workbookToBase64(wb)
