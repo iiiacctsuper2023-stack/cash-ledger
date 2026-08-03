@@ -1545,11 +1545,19 @@ async function saveState(){
     const res = await window.storage.set('state', toWrite);
     if(res) savedToCloud = true;
   }catch(e){ /* window.storage not available here */ }
+  let savedLocally = false;
   if(!savedToCloud){
-    try{ localStorage.setItem(LOCAL_STORAGE_KEY, toWrite); }
-    catch(e){ /* localStorage blocked too (e.g. private browsing) */ }
+    try{ localStorage.setItem(LOCAL_STORAGE_KEY, toWrite); savedLocally = true; }
+    catch(e){ /* localStorage blocked too (e.g. private browsing, or quota/size exceeded) */ }
   }
   writeStateToConnectedFile(toWrite);
+  if(!savedToCloud && !savedLocally) warnSaveFailed();
+}
+let saveFailWarned = false; // only nag once per session, not on every keystroke while storage stays full
+function warnSaveFailed(){
+  if(saveFailWarned) return;
+  saveFailWarned = true;
+  showAlert("IMPORTANT: your latest change could NOT be saved (storage is full or unavailable - this often happens once the app's data grows very large). Please export a backup right now (Settings \u2192 Export backup) before closing the app, or this and any further changes will be lost.");
 }
 function migrateState(){
   const d = defaultState();
@@ -1574,6 +1582,19 @@ function migrateState(){
       if(Object.keys(amounts).length) mlRec.expenditureEntries.push({id:uid(), date:attribDate, desc:`Withdraw Notesheet ${log.summaryLabel||''}`, amounts});
     });
   }
+  // Every generated notesheet's full Excel file gets embedded (as base64)
+  // in its log entry for later re-download - this grows without bound and
+  // eventually pushes the whole saved state past the storage size limit,
+  // causing saves to silently fail (the in-memory app keeps working, but
+  // nothing persists - data appears to "vanish" on next open). Keep the
+  // re-downloadable file for only the most recent entries; older ones keep
+  // all their real figures (categories, totals, dates) but drop the file
+  // bytes - they can always be regenerated from the underlying data.
+  const KEEP_FILES = 25;
+  [state.depositNotesheetLog, state.withdrawNotesheetLog].forEach(log=>{
+    if(!Array.isArray(log) || log.length<=KEEP_FILES) return;
+    log.slice(0, log.length-KEEP_FILES).forEach(entry=>{ if(entry.fileBase64) delete entry.fileBase64; });
+  });
   if(!state.notesheetCounters) state.notesheetCounters = d.notesheetCounters;
   else COA.forEach(c=>{ if(!(c.key in state.notesheetCounters)) state.notesheetCounters[c.key] = 0; });
   if(state.summaryCounterYear===undefined) state.summaryCounterYear = d.summaryCounterYear;
