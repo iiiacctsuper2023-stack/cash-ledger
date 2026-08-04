@@ -1162,7 +1162,19 @@ async function verifySecurityAnswer(answer){
    there is NO recovery path if the passphrase is lost; that's what makes
    this real encryption rather than a resettable screen lock. */
 const VAULT_ENC_MAGIC = '__ledgerEnc';
-function b64FromBuf(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function b64FromBuf(buf){
+  // NOTE: deliberately NOT String.fromCharCode(...new Uint8Array(buf)) -
+  // spreading a large typed array passes every byte as its own function
+  // argument, and engines cap how many arguments a call can take (tens of
+  // thousands). This buffer is the whole encrypted app state, which easily
+  // exceeds that once notesheet history builds up, so the spread form
+  // throws "Maximum call stack size exceeded" on save. A plain byte-by-byte
+  // loop has no such limit.
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
 function bufFromB64(b64){ const bin=atob(b64); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i); return arr.buffer; }
 async function deriveVaultKey(passphrase, saltBytes){
   const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), {name:'PBKDF2'}, false, ['deriveKey']);
