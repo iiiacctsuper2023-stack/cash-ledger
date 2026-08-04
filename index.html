@@ -391,6 +391,20 @@ const EXPENDITURE_LABEL_ALIASES = {
   Loan:     ['loan','loan paid','loan refunded'],
 };
 const RECURRING_EXAM_COLUMN = {label:'MT (Monthly Test)', aliases:['mt','monthly test','half yearly','half-yearly','yearly exam']};
+/* Named quick-jump targets for the Monthly Ledger window's own internal
+   "Jump to" row - short labels (not the full on-page heading text) so the
+   button row stays compact. */
+const ML_QUICK_NAV_SECTIONS = [
+  {id:'ml-section-revenue', label:'Revenue'},
+  {id:'ml-section-total-due', label:'Total Due'},
+  {id:'ml-section-transfer', label:'Transfer'},
+  {id:'ml-section-expenditure', label:'Expenditure'},
+  {id:'ml-section-balance-sheet', label:'Balance Sheet'},
+  {id:'ml-section-bank-breakdown', label:'Bank Breakdown'},
+  {id:'ml-section-statement-check', label:'Statement Check'},
+  {id:'ml-section-headwise', label:'Head-wise'},
+  {id:'ml-section-custom-rows', label:'Extra Rows'},
+];
 /* Default expenditure columns for a new month - the 8 that map straight
    onto a Daily Ledger CoA category (auto-totalled from that month's
    vouchers) plus Bank Charge, which the Daily Ledger doesn't track as
@@ -495,7 +509,7 @@ function getMonthlyLedgerMonth(key){
       salaryByCashDate:'',
       salaryByCashBankId:null,
       customRows:[],
-      balanceSheet:{ cashInHandOverride:null, advancePayment:0, debtItems:[],
+      balanceSheet:{ cashInHandOverride:null, advancePayment:0,
         bankBalanceOverride:null, bankBreakdown:{},
         otherAsset:{label:'Debt to III Assets Ltd', amount:250000} },
       locked:false,
@@ -508,6 +522,22 @@ function monthRevenueTotals(monthRec){
   const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
   monthRec.revenueEntries.forEach(e=>{ REVENUE_CATS.forEach(c=>{ totals[c.key] += Number(e[c.key])||0; }); });
   return totals;
+}
+/* Sum of the Admission-Fee-only portion (excluding Admission Form) of this
+   month's Deposit Notesheets - see revEntry.admissionFeeOnly above. Older
+   revenue entries (pre-dating this split, or from any other source than a
+   generated Deposit Notesheet) simply have no admissionFeeOnly field and
+   contribute 0, same as if they'd never been through this calculation. */
+function monthAdmissionFeeOnlyTotal(monthRec){
+  return (monthRec.revenueEntries||[]).reduce((s,e)=>s+(Number(e.admissionFeeOnly)||0),0);
+}
+/* Gratuity gets 1/6 and the Education Assistance Fund gets 1/30 of this
+   month's Admission-Fee-only collections (never the Admission Form
+   portion) - transferred automatically out of Admission Fee's own Yearly
+   Running Total via effectiveRevenueTransfer below. */
+function autoGratuityEduAssist(monthRec){
+  const feeOnly = monthAdmissionFeeOnlyTotal(monthRec);
+  return {gratuity: feeOnly/6, eduAssist: feeOnly/30};
 }
 /* "Yearly Running Total from Previous Month": the seed (if any, for
    whatever predates this tool) plus every tracked month of the same
@@ -522,8 +552,13 @@ function monthRevenueTotals(monthRec){
    every later month too - no manual entry needed on the Admission Fee side). */
 function effectiveRevenueTransfer(rec, key){
   if(key==='admissionFee'){
+    return -(effectiveRevenueTransfer(rec, 'gratuity') + effectiveRevenueTransfer(rec, 'eduAssist'));
+  }
+  if(key==='gratuity' || key==='eduAssist'){
     const t = rec.revenueTransfer||{};
-    return -((Number(t.gratuity)||0) + (Number(t.eduAssist)||0));
+    const overrideKey = key+'Override';
+    if(t[overrideKey]!==undefined && t[overrideKey]!==null) return Number(t[overrideKey])||0;
+    return autoGratuityEduAssist(rec)[key];
   }
   return Number((rec.revenueTransfer||{})[key])||0;
 }
@@ -1641,6 +1676,20 @@ function migrateState(){
   (state.days||[]).forEach(day=>{ if(!day.bankTransfers) day.bankTransfers = []; });
   (state.days||[]).forEach(day=>{ ensureMiscCollectionSections(day); });
   (state.archive||[]).forEach(m=>{ (m.days||[]).forEach(day=>{ ensureMiscCollectionSections(day); }); });
+  // Gratuity/Education Assistance Fund transfer used to be a plain manual
+  // number per month (rec.revenueTransfer.gratuity/eduAssist); it's now
+  // auto-computed from that month's Admission-Fee-only Deposit Notesheet
+  // collections, with .gratuityOverride/.eduAssistOverride as the manual
+  // override. One-time carry-over so already-recorded months keep showing
+  // exactly what was typed in for them before, instead of silently
+  // switching to the (likely 0, since old entries predate the
+  // admissionFeeOnly split) auto-computed figure.
+  Object.values(state.monthlyLedger.months||{}).forEach(rec=>{
+    if(!rec.revenueTransfer || rec.revenueTransferMigrated) return;
+    rec.revenueTransferMigrated = true;
+    if(rec.revenueTransfer.gratuityOverride===undefined && Number(rec.revenueTransfer.gratuity)) rec.revenueTransfer.gratuityOverride = Number(rec.revenueTransfer.gratuity);
+    if(rec.revenueTransfer.eduAssistOverride===undefined && Number(rec.revenueTransfer.eduAssist)) rec.revenueTransfer.eduAssistOverride = Number(rec.revenueTransfer.eduAssist);
+  });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
   if(state.monthLockPasswordHash===undefined) state.monthLockPasswordHash = null;
@@ -1657,7 +1706,7 @@ function migrateState(){
   if(!state.templates) state.templates = [];
   if(!state.bankStatements) state.bankStatements = {};
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
-    if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0, debtItems:[] };
+    if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
     if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
@@ -1772,57 +1821,67 @@ function importBackupJson(file){
    ====================================================================== */
 let computeAllInProgress = false;
 let computeAllLastResult = null;
+/* Core per-day computation chain, generic over any ordered day list - used
+   both for the live computeAll() below (state.days, cached) and for
+   looking up a past/archived month's closing figures (e.g. the Balance
+   Sheet's Cash in Hand), which aren't part of state.days once a month has
+   been archived. Kept as one function so both call sites can never drift
+   out of sync with each other. */
+function computeDayChain(days){
+  const results = {};
+  let prevCash = null;
+  let prevBankClose = {};
+  state.banks.forEach(b=>{ prevBankClose[b.id] = b.opening||0; });
+
+  days.forEach((day, idx)=>{
+    const openingCash = idx===0 ? effectiveOpeningCashManual(day) : prevCash;
+    const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
+    const cashCollected = (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0) + withdrawTotal;
+    const totalAmountCash = openingCash + cashCollected;
+
+    let coaTotal = 0;
+    const coaTotals = {};
+    COA.forEach(c=>{
+      const t = (day.coa[c.key]||[]).reduce((s,l)=>s+(Number(l.amount)||0),0);
+      coaTotals[c.key]=t; coaTotal += t;
+    });
+    const depositTotal = day.deposits.reduce((s,d)=>s+(Number(d.amount)||0),0);
+    const totalCashDisbursed = coaTotal + depositTotal;
+    const closingAmount = totalAmountCash - totalCashDisbursed;
+    const iouTotal = activeIousForDay(day.date).reduce((s,i)=>s+(Number(i.amount)||0),0);
+    const cashInHand = closingAmount - iouTotal;
+
+    const banks = {};
+    state.banks.forEach(b=>{
+      const bd = day.banksDaily[b.id] || {sslDeposit:0,houseRentDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
+      const opening = prevBankClose[b.id];
+      const transferIn = day.deposits.filter(d=>d.bankId===b.id).reduce((s,d)=>s+(Number(d.amount)||0),0);
+      const transferOut = day.withdrawals.filter(w=>w.bankId===b.id).reduce((s,w)=>s+(Number(w.amount)||0),0);
+      const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
+      const bankXferIn = bankXfers.filter(t=>t.toBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
+      const bankXferOut = bankXfers.filter(t=>t.fromBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
+      const totalIn = opening + (Number(bd.sslDeposit)||0) + (Number(bd.houseRentDeposit)||0) + transferIn + bankXferIn;
+      const totalOut = (Number(bd.fees)||0) + (Number(bd.salaryAccount)||0) + (Number(bd.salaryCash)||0) + transferOut + bankXferOut;
+      const closing = totalIn - totalOut;
+      banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, houseRentDeposit:Number(bd.houseRentDeposit)||0, transferIn, bankXferIn, totalIn,
+                      fees:Number(bd.fees)||0, salaryAccount:Number(bd.salaryAccount)||0, salaryCash:Number(bd.salaryCash)||0,
+                      transferOut, bankXferOut, totalOut, closing};
+      prevBankClose[b.id] = closing;
+    });
+
+    const grandTotal = closingAmount + Object.values(banks).reduce((s,b)=>s+b.closing,0);
+
+    results[day.id] = {openingCash, withdrawTotal, cashCollected, totalAmountCash, coaTotals, coaTotal,
+                        depositTotal, totalCashDisbursed, closingAmount, iouTotal, cashInHand, banks, grandTotal};
+    prevCash = closingAmount;
+  });
+  return results;
+}
 function computeAll(){
   if(computeAllInProgress) return computeAllLastResult || {};
   computeAllInProgress = true;
   try{
-    const results = {};
-    let prevCash = null;
-    let prevBankClose = {};
-    state.banks.forEach(b=>{ prevBankClose[b.id] = b.opening||0; });
-
-    state.days.forEach((day, idx)=>{
-      const openingCash = idx===0 ? effectiveOpeningCashManual(day) : prevCash;
-      const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
-      const cashCollected = (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0) + withdrawTotal;
-      const totalAmountCash = openingCash + cashCollected;
-
-      let coaTotal = 0;
-      const coaTotals = {};
-      COA.forEach(c=>{
-        const t = (day.coa[c.key]||[]).reduce((s,l)=>s+(Number(l.amount)||0),0);
-        coaTotals[c.key]=t; coaTotal += t;
-      });
-      const depositTotal = day.deposits.reduce((s,d)=>s+(Number(d.amount)||0),0);
-      const totalCashDisbursed = coaTotal + depositTotal;
-      const closingAmount = totalAmountCash - totalCashDisbursed;
-      const iouTotal = activeIousForDay(day.date).reduce((s,i)=>s+(Number(i.amount)||0),0);
-      const cashInHand = closingAmount - iouTotal;
-
-      const banks = {};
-      state.banks.forEach(b=>{
-        const bd = day.banksDaily[b.id] || {sslDeposit:0,houseRentDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
-        const opening = prevBankClose[b.id];
-        const transferIn = day.deposits.filter(d=>d.bankId===b.id).reduce((s,d)=>s+(Number(d.amount)||0),0);
-        const transferOut = day.withdrawals.filter(w=>w.bankId===b.id).reduce((s,w)=>s+(Number(w.amount)||0),0);
-        const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
-        const bankXferIn = bankXfers.filter(t=>t.toBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
-        const bankXferOut = bankXfers.filter(t=>t.fromBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
-        const totalIn = opening + (Number(bd.sslDeposit)||0) + (Number(bd.houseRentDeposit)||0) + transferIn + bankXferIn;
-        const totalOut = (Number(bd.fees)||0) + (Number(bd.salaryAccount)||0) + (Number(bd.salaryCash)||0) + transferOut + bankXferOut;
-        const closing = totalIn - totalOut;
-        banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, houseRentDeposit:Number(bd.houseRentDeposit)||0, transferIn, bankXferIn, totalIn,
-                        fees:Number(bd.fees)||0, salaryAccount:Number(bd.salaryAccount)||0, salaryCash:Number(bd.salaryCash)||0,
-                        transferOut, bankXferOut, totalOut, closing};
-        prevBankClose[b.id] = closing;
-      });
-
-      const grandTotal = closingAmount + Object.values(banks).reduce((s,b)=>s+b.closing,0);
-
-      results[day.id] = {openingCash, withdrawTotal, cashCollected, totalAmountCash, coaTotals, coaTotal,
-                          depositTotal, totalCashDisbursed, closingAmount, iouTotal, cashInHand, banks, grandTotal};
-      prevCash = closingAmount;
-    });
+    const results = computeDayChain(state.days);
     computeAllLastResult = results;
     return results;
   } finally {
@@ -3480,6 +3539,34 @@ function renderHomeEndNav(){
 }
 function scrollPageToTop(){ window.scrollTo({top:0, left:0, behavior:'smooth'}); }
 function scrollPageToBottom(){ window.scrollTo({top:document.documentElement.scrollHeight, left:0, behavior:'smooth'}); }
+/* Same idea as scrollPageToTop/Bottom, but for the Monthly Ledger floating
+   window's own inner scroll area (#ml-floating-body has overflow:auto -
+   it's a separate scroll container from the main page, so scrolling the
+   page wouldn't move it at all). */
+function scrollMlToTop(){ const b = document.getElementById('ml-floating-body'); if(b) b.scrollTo({top:0, left:0, behavior:'smooth'}); }
+function scrollMlToBottom(){ const b = document.getElementById('ml-floating-body'); if(b) b.scrollTo({top:b.scrollHeight, left:0, behavior:'smooth'}); }
+
+/* Shared jump-to-element helper: waits a frame (twice, to survive a
+   re-render that's still settling - e.g. right after opening the Monthly
+   Ledger window) so the target is measured/scrolled against its final
+   layout, not a mid-reflow one. scrollIntoView (not a manual
+   window.scrollTo) is what correctly finds whichever scroll container
+   actually needs to move - the main page, or the Monthly Ledger window's
+   own inner scroll area - so the same function works for both. Briefly
+   highlights the landed-on element so the jump is visually confirmed. */
+function scrollToId(id){
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const target = document.getElementById(id);
+    if(!target) return;
+    target.scrollIntoView({behavior:'smooth', block:'start'});
+    document.querySelectorAll('.section-nav-target').forEach(x=>{
+      if(x!==target) x.classList.remove('section-nav-target');
+    });
+    target.classList.add('section-nav-target');
+    clearTimeout(target._navHighlightTimer);
+    target._navHighlightTimer = setTimeout(()=>target.classList.remove('section-nav-target'), 4500);
+  }));
+}
 
 /* Floating section-jump nav for the day panel. Numbered dots for the
    day's 5(ish) top-level sections (Cash received / Cash disbursed /
@@ -3504,27 +3591,6 @@ function renderSectionNav(day){
     ]},
   ];
   const nav = el(`<nav class="section-nav" aria-label="Jump to section"></nav>`);
-  const scrollToId = (id)=>{
-    /* Wait a frame (twice, to survive a re-render that's still settling -
-       e.g. right after opening the Monthly Ledger window) so the target
-       is measured/scrolled against its final layout, not a mid-reflow
-       one - that's what was landing a bit off from the real position.
-       scrollIntoView (not a manual window.scrollTo) is what correctly
-       finds whichever scroll container actually needs to move - the
-       main page, or the Monthly Ledger window's own inner scroll area -
-       so it keeps working for both. */
-    requestAnimationFrame(()=>requestAnimationFrame(()=>{
-      const target = document.getElementById(id);
-      if(!target) return;
-      target.scrollIntoView({behavior:'smooth', block:'start'});
-      document.querySelectorAll('.section-nav-target').forEach(x=>{
-        if(x!==target) x.classList.remove('section-nav-target');
-      });
-      target.classList.add('section-nav-target');
-      clearTimeout(target._navHighlightTimer);
-      target._navHighlightTimer = setTimeout(()=>target.classList.remove('section-nav-target'), 4500);
-    }));
-  };
   sections.forEach(sec=>{
     const dot = el(`
       <div class="section-nav-item">
@@ -3703,13 +3769,20 @@ function buildSparklineSvg(values, labels){
    month's last recorded day's closing cash (not the selected month's own
    days) - runs the same day-to-day chain as the Daily Ledger, across
    every day ever entered, so it works for any selected month. */
+/* Cash in Hand for the Balance Sheet's Cash in Hand row: that month's own
+   last recorded day's closing cash box amount (cash only, no bank; and
+   including money currently out on IOU, not the IOU-net cashInHand figure
+   used elsewhere) - works for the live month (via the cached computeAll())
+   and for archived months too (via a fresh chain scoped to that month's
+   own days, since archived days aren't part of state.days). */
 function lastDayCashInHandInMonth(monthKey){
   const [y, m] = monthKey.split('-');
-  const days = state.days.filter(d=>d.date.startsWith(`${y}-${m}`)).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const days = allDaysEverywhere().filter(d=>d.date.startsWith(`${y}-${m}`)).slice().sort((a,b)=>a.date.localeCompare(b.date));
   if(days.length===0) return null;
-  const computed = computeAll();
+  const isLive = monthKey === monthKeyFor(state.month, state.year);
+  const computed = isLive ? computeAll() : computeDayChain(days);
   const last = days[days.length-1];
-  return computed[last.id] ? computed[last.id].cashInHand : null;
+  return computed[last.id] ? computed[last.id].closingAmount : null;
 }
 
 /* Sums a per-bank Daily Ledger field (salaryAccount or salaryCash, from
@@ -3791,7 +3864,7 @@ function computeMonthlyLedgerFigures(key){
       cashInHandShown:0, autoBankTotal:null, bankBalanceShown:0, formulaBankTotal:0, bankFormulaMismatch:false,
       bankBreakdownShown:null, bankBreakdownSum:0, bankBreakdownMismatch:false, otherAsset:rec0.balanceSheet.otherAsset||{label:'',amount:0}, otherAssetAmount:0,
       remainingBalance:0, noteTotal:0, noteTotalMismatch:false, totalLiabilities:0, assetLiabilityMismatch:false,
-      debtTotal:0, gratuityPayable:0, eduAssistPayable:0, totalAssets:0, equity:0, customRowValues:{}, metricValues:{}, mandatoryIssues:[]};
+      gratuityPayable:0, eduAssistPayable:0, totalAssets:0, equity:0, customRowValues:{}, metricValues:{}, mandatoryIssues:[]};
   }
   _mlFigStack.add(key);
   _mlFigDepth++;
@@ -3852,7 +3925,6 @@ function computeMonthlyLedgerFigures(key){
   const autoBankTotal = latestComputed ? state.banks.reduce((s,b)=>s+latestComputed.banks[b.id].closing,0) : null;
   const cashInHandShown = rec.balanceSheet.cashInHandOverride!==null ? rec.balanceSheet.cashInHandOverride : autoCashInHand;
 
-  const debtTotal = rec.balanceSheet.debtItems.reduce((s,d)=>s+(Number(d.amount)||0),0); // legacy, unused going forward
   yrtNew.eduAssist -= expAssistAmt; // net of this month's own EduAssist expenditure - carries forward correctly via the updated yearlyRunningTotalBefore
   const gratuityPayable = yrtNew.gratuity;
   const eduAssistPayable = yrtNew.eduAssist; // already net of expenditure, see above
@@ -3942,7 +4014,7 @@ function computeMonthlyLedgerFigures(key){
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
-    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues, mandatoryIssues};
+    gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues, mandatoryIssues};
   } finally {
     _mlFigStack.delete(key);
     _mlFigDepth--;
@@ -4181,7 +4253,7 @@ function renderMonthlyLedgerCard(){
     liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoCashInHand, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
-    debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, mandatoryIssues} = f;
+    gratuityPayable, eduAssistPayable, totalAssets, equity, mandatoryIssues} = f;
 
   const monthOptions = (()=>{
     const keys = new Set(Object.keys(state.monthlyLedger.months));
@@ -4205,6 +4277,12 @@ function renderMonthlyLedgerCard(){
         <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
         <button type="button" class="${mlTotalViewOpen?'danger':'secondary'} small" data-action="ml-toggle-total-view" style="margin-left:auto;">${mlTotalViewOpen?'&#9660; Showing Total (all months)':'&#9654; Show Total (all months)'}</button>
       </div>
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:2px;">
+        <span style="font-size:11.5px;color:var(--ink-soft);align-self:center;margin-right:2px;">Jump to:</span>
+        ${ML_QUICK_NAV_SECTIONS.map(s=>`<button type="button" class="secondary small ml-jump-btn" data-ml-jump="${s.id}">${escapeHtml(s.label)}</button>`).join('')}
+        <button type="button" class="secondary small ml-jump-btn" data-ml-jump-top="1" title="Top of Monthly Ledger (Ctrl+Home while hovering this window)" style="margin-left:auto;">&#8962; Top</button>
+        <button type="button" class="secondary small ml-jump-btn" data-ml-jump-bottom="1" title="Bottom of Monthly Ledger (Ctrl+End while hovering this window)">Bottom &#8964;</button>
+      </div>
       ${mlTotalViewOpen ? renderMlTotalBox() : ''}
       ${!isLiveMonth ? `<p class="subnote" style="color:var(--danger);">This isn't the month currently open in the Daily Ledger (${state.month} ${state.year}) - Cash in Hand can't be pulled live for it here, so it shows as 0/blank until you switch the Daily Ledger to that month, or enter it manually below. ("Auto" expenditure columns are unaffected - they're pulled from saved Withdraw Notesheet history, not the live Daily Ledger.)</p>` : ''}
 
@@ -4220,7 +4298,7 @@ function renderMonthlyLedgerCard(){
       <div class="${rec.locked?'locked-day':''}">
       ${mandatoryIssues.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Required before this month is complete: ${mandatoryIssues.map(escapeHtml).join(', ')}.</p>` : ''}
       <div class="divider"></div>
-      <h3 style="font-size:14px;">Revenue</h3>
+      <h3 id="ml-section-revenue" style="font-size:14px;">Revenue</h3>
       <div class="row">
         <div class="field">
           <label>Beginning Balance (Bank) ${(!rec.beginningBankBalance && effectiveBeginningBankBalance(key)) ? '<span class="tag" title="Carried in from the previous tracked month\'s closing Bank Balance - edit to override">auto</span>' : ''}</label>
@@ -4244,12 +4322,12 @@ function renderMonthlyLedgerCard(){
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Income</span><span id="ml-total-income">${money(revTotalIncome)}</span></div>
 
       <div class="divider"></div>
-      <label>Total Due (per category, manual)</label>
+      <label id="ml-section-total-due">Total Due (per category, manual)</label>
       <div id="ml-total-due-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Due (sum)</span><span id="ml-total-due-sum">${money(totalDueSum)}</span></div>
 
       <div class="divider"></div>
-      <label>Transfer between categories (e.g. Admission Fee &rarr; Gratuity/Education Assistance Fund)</label>
+      <label id="ml-section-transfer">Transfer between categories (e.g. Admission Fee &rarr; Gratuity/Education Assistance Fund)</label>
       <div id="ml-transfer-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
 
       <div class="computed"><span class="lbl">Yearly Running Total (through this month)</span><span></span></div>
@@ -4259,7 +4337,7 @@ function renderMonthlyLedgerCard(){
       <div class="computed total"><span class="lbl">Total Amount (Beginning Balance + Total Income + House Rent Deposit)</span><span id="ml-total-amount">${money(totalAmount)}</span></div>
 
       <div class="divider"></div>
-      <h3 style="font-size:14px;">Expenditure</h3>
+      <h3 id="ml-section-expenditure" style="font-size:14px;">Expenditure</h3>
       <div class="row">
         <div class="field">
           <label>Salary by Account <span class="tag" title="Entered in the Daily Ledger's Bank section (Salary payment - by account) - auto-summed here">auto</span></label>
@@ -4284,7 +4362,7 @@ function renderMonthlyLedgerCard(){
       <button class="secondary small" type="button" data-action="ml-add-expentry">+ Add expenditure entry</button>
 
       <div class="divider"></div>
-      <h3 style="font-size:14px;">Balance Sheet</h3>
+      <h3 id="ml-section-balance-sheet" style="font-size:14px;">Balance Sheet</h3>
       <div class="row">
         <div class="field">
           <label>Cash in Hand ${autoCashInHand!==null?'<span class="tag">auto: this month\'s last day</span>':''}</label>
@@ -4324,14 +4402,14 @@ function renderMonthlyLedgerCard(){
       </div>
 
       <div class="divider"></div>
-      <label>Bank Balance breakdown</label>
+      <label id="ml-section-bank-breakdown">Bank Balance breakdown</label>
       <div id="ml-bank-breakdown-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Balance</span><span id="ml-bank-breakdown-sum">${money(bankBreakdownSum)}</span></div>
       <p id="ml-warn-bank-breakdown" class="subnote" style="color:#B3261E;${bankBreakdownMismatch?'':'display:none;'}">&#9888; Bank breakdown total doesn't match Balance in Bank Account above.</p>
       <p class="subnote" style="margin-top:2px;">A one-time opening amount per bank can be set in "Set starting point" above (applies to the earliest tracked month only).</p>
 
       <div class="divider"></div>
-      <label>Bank Statement Cross-Check <span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory &mdash; both banks</span></label>
+      <label id="ml-section-statement-check">Bank Statement Cross-Check <span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory &mdash; both banks</span></label>
       <p class="subnote" style="margin-top:-4px;">Upload each bank's real statement (Excel export: Date, Deposit, Withdrawal, Balance columns) for this month. It's checked date-by-date and as totals &mdash; deposits, withdrawals and closing balance &mdash; against everything recorded in the Daily Ledger, including online-payment (SSL Commerz) deposits.</p>
       ${state.banks.length===0 ? `<p class="empty">No bank accounts set up yet.</p>` : state.banks.map(b=>{
         const stmt = state.bankStatements[b.id];
@@ -4367,7 +4445,7 @@ function renderMonthlyLedgerCard(){
       }).join('')}
 
       <div class="divider"></div>
-      <label>Note: Head wise distribution of Balance in Account</label>
+      <label id="ml-section-headwise">Note: Head wise distribution of Balance in Account</label>
       <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span id="ml-note-gratuity">${money(gratuityPayable)}</span></div>
       <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span id="ml-note-eduassist">${money(eduAssistPayable)}</span></div>
       <div class="computed"><span class="lbl">Remaining Balance</span><span id="ml-note-remaining">${money(remainingBalance)}</span></div>
@@ -4379,7 +4457,7 @@ function renderMonthlyLedgerCard(){
       <p id="ml-warn-asset-liability" class="subnote" style="color:#B3261E;${assetLiabilityMismatch?'':'display:none;'}">&#9888; Asset total and Liability total don't match. Check the figures above.</p>
 
       <div class="divider"></div>
-      <label>Extra rows <span class="tag">optional</span></label>
+      <label id="ml-section-custom-rows">Extra rows <span class="tag">optional</span></label>
       <p class="subnote" style="margin-top:-4px;">Add any row your Excel sheet has that isn't already covered above (colour it green or yellow to match) - map it to a figure already tracked in this month (so it updates itself), or leave it as a manual number.</p>
       <div id="ml-custom-rows-list"></div>
       <div class="row">
@@ -4391,6 +4469,9 @@ function renderMonthlyLedgerCard(){
   `);
 
   card.querySelector('#ml-month-select').onchange = (e)=>{ monthlyLedgerViewKey = e.target.value; render(); };
+  card.querySelectorAll('[data-ml-jump]').forEach(btn=>{ btn.onclick = ()=> scrollToId(btn.dataset.mlJump); });
+  card.querySelectorAll('[data-ml-jump-top]').forEach(btn=>{ btn.onclick = scrollMlToTop; });
+  card.querySelectorAll('[data-ml-jump-bottom]').forEach(btn=>{ btn.onclick = scrollMlToBottom; });
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const bankInp = card.querySelector('#ml-bank-balance-override');
@@ -4407,7 +4488,7 @@ function renderMonthlyLedgerCard(){
 
   drawMlRevenueList(card.querySelector('#ml-revenue-list'), rec, key);
   drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
-  drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer');
+  drawMlGrid(card.querySelector('#ml-transfer-grid'), rec.revenueTransfer, 'transfer', rec);
   drawMlExpenditureList(card.querySelector('#ml-expenditure-list'), rec, liveCoaTotals);
   drawMlExpenditureEntryList(card.querySelector('#ml-expenditure-entry-list'), rec);
   drawMlCustomRowsList(card.querySelector('#ml-custom-rows-list'), rec, f);
@@ -4427,12 +4508,34 @@ function renderMonthlyLedgerCard(){
   return wrap;
 }
 
-function drawMlGrid(container, dataObj, kind){
+function drawMlGrid(container, dataObj, kind, rec){
   container.innerHTML = '';
+  const autoTransfer = kind==='transfer' ? autoGratuityEduAssist(rec) : null;
   REVENUE_CATS.forEach(c=>{
     if(kind==='transfer' && c.key==='admissionFee'){
-      const autoVal = -((Number(dataObj.gratuity)||0) + (Number(dataObj.eduAssist)||0));
+      const autoVal = -(effectiveRevenueTransfer(rec,'gratuity') + effectiveRevenueTransfer(rec,'eduAssist'));
       const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)} <span class="tag">auto: &minus;(Gratuity+EduAssist)</span></label><input type="text" disabled value="${formatAsianAmount(autoVal)}"></div>`);
+      container.appendChild(wrap);
+      return;
+    }
+    if(kind==='transfer' && (c.key==='gratuity' || c.key==='eduAssist')){
+      const auto = autoTransfer[c.key];
+      const overrideKey = c.key+'Override';
+      const overridden = dataObj[overrideKey]!==undefined && dataObj[overrideKey]!==null;
+      const val = overridden ? dataObj[overrideKey] : auto;
+      const wrap = el(`
+        <div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(c.label)} <span class="tag">${overridden?'manually overridden':'auto: 1/'+(c.key==='gratuity'?'6':'30')+' of Admission Fee'}</span></label><input type="text" inputmode="decimal" value="${formatAsianAmount(val)}"></div>
+      `);
+      const inp = wrap.querySelector('input');
+      wireAmountInput(inp, (num)=>{
+        dataObj[overrideKey] = (num===auto) ? null : num;
+        saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
+      });
+      if(overridden){
+        const resetBtn = el(`<button type="button" class="secondary small" title="Clear override, go back to auto" style="margin-left:4px;">&#8635;</button>`);
+        resetBtn.onclick = ()=>{ dataObj[overrideKey] = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
+        wrap.appendChild(resetBtn);
+      }
       container.appendChild(wrap);
       return;
     }
@@ -4440,7 +4543,6 @@ function drawMlGrid(container, dataObj, kind){
     const inp = wrap.querySelector('input');
     wireAmountInput(inp, (num)=>{
       dataObj[c.key] = num; saveState(); refreshMonthlyLedgerComputedOnly();
-      if(kind==='transfer' && (c.key==='gratuity' || c.key==='eduAssist')) renderMonthlyLedgerWindowInPlace();
     });
     container.appendChild(wrap);
   });
@@ -4449,7 +4551,7 @@ function drawMlGrid(container, dataObj, kind){
 function drawMlRevenueList(container, rec, monthKey){
   container.innerHTML = '';
   if(rec.revenueEntries.length===0){ container.appendChild(el(`<p class="empty">No revenue entries yet this month.</p>`)); }
-  rec.revenueEntries.forEach(entry=>{
+  sortedByDate(rec.revenueEntries).forEach(entry=>{
     const row = el(`
       <div class="card" id="ml-rev-entry-${entry.id}" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
         <div class="row">
@@ -4610,7 +4712,7 @@ function drawMlExpenditureEntryList(container, rec){
   const entryCols = rec.expenditureColumns.filter(c=>c.source==='entries' || c.source==='coa');
   if(entryCols.length===0 && rec.expenditureEntries.length===0){ container.appendChild(el(`<p class="empty">No day-by-day expenditure entries this month yet - generating a Withdraw Notesheet adds one automatically, or add one by hand below.</p>`)); return; }
   if(rec.expenditureEntries.length===0){ container.appendChild(el(`<p class="empty">No expenditure entries yet this month.</p>`)); }
-  rec.expenditureEntries.forEach(entry=>{
+  sortedByDate(rec.expenditureEntries).forEach(entry=>{
     if(!entry.amounts) entry.amounts = {};
     const row = el(`
       <div class="card" id="ml-exp-entry-${entry.id}" style="background:var(--card-alt,#F7F8F4);padding:10px;margin-bottom:8px;">
@@ -4656,25 +4758,6 @@ function drawMlBankBreakdownList(container, rec, bankBreakdownShown, isLiveMonth
       saveState(); refreshMonthlyLedgerComputedOnly();
     });
     container.appendChild(wrap);
-  });
-}
-
-function drawMlDebtList(container, rec){
-  container.innerHTML = '';
-  if(rec.balanceSheet.debtItems.length===0){ container.appendChild(el(`<p class="empty">No other liabilities recorded.</p>`)); }
-  rec.balanceSheet.debtItems.forEach(item=>{
-    const row = el(`
-      <div class="line-item">
-        <div class="field desc" style="margin-bottom:0;"><label>Description</label><input type="text" class="ml-debt-label" value="${escapeHtml(item.label||'')}" placeholder="e.g. Debt to III Assets Ltd"></div>
-        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="ml-debt-amt" value="${formatAsianAmount(item.amount||0)}"></div>
-        <button class="danger small" type="button" data-action="ml-remove-debt" data-item="${item.id}" title="Remove">&times;</button>
-      </div>
-    `);
-    const labelInp = row.querySelector('.ml-debt-label');
-    wireLockableTextInput(labelInp);
-    labelInp.oninput = (e)=>{ item.label = e.target.value; saveState(); };
-    wireAmountInput(row.querySelector('.ml-debt-amt'), (num)=>{ item.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
-    container.appendChild(row);
   });
 }
 
@@ -5209,10 +5292,10 @@ async function exportMonthlyLedger(key, previewOnly){
   r++;
 
   const dataStartRow = r;
-  rec.revenueEntries.forEach(entry=>{
+  sortedByDate(rec.revenueEntries).forEach(entry=>{
     rev.getCell(r,2).value = entry.date ? new Date(entry.date) : '';
     if(entry.date) rev.getCell(r,2).numFmt = 'd/m/yyyy';
-    rev.getCell(r,3).value = entry.desc||'';
+    rev.getCell(r,3).value = exportRevenueDesc(entry.desc);
     rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
     REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(entry[c.key])||0; });
     for(let c=2;c<=15;c++){ rev.getCell(r,c).border = thin; rev.getCell(r,c).font = c>=4 ? FONT_SMALL : FONT; }
@@ -5304,15 +5387,14 @@ async function exportMonthlyLedger(key, previewOnly){
     cell.value = col.label; cell.font = BOLD; cell.alignment = {wrapText:true, horizontal:'center'};
   });
 
-  const liveCoaTotals = monthWithdrawCoaTotals(key);
   let er = expHeaderRow+2;
   const expDataStartRow = er;
-  rec.expenditureEntries.forEach(entry=>{
+  sortedByDate(rec.expenditureEntries).forEach(entry=>{
     exp.getCell(er,1).value = entry.date ? new Date(entry.date) : '';
     if(entry.date) exp.getCell(er,1).numFmt = 'd/m/yyyy';
-    exp.getCell(er,2).value = entry.desc||'';
+    exp.getCell(er,2).value = exportExpenditureDesc(entry, rec);
     rec.expenditureColumns.forEach((col,i)=>{
-      if(col.source==='entries') exp.getCell(er, 4+i).value = Number((entry.amounts||{})[col.id])||0;
+      if((entry.amounts||{})[col.id]!==undefined) exp.getCell(er, 4+i).value = Number((entry.amounts||{})[col.id])||0;
     });
     exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
     for(let c=1;c<=EXP_LAST_COL;c++) exp.getCell(er,c).font = c>=3 ? FONT_SMALL : FONT;
@@ -5323,14 +5405,46 @@ async function exportMonthlyLedger(key, previewOnly){
     exp.getCell(row,1).value = text;
     exp.getCell(row,1).alignment = {horizontal:'left'};
   }
-  const expDataRow = er; // aggregate row for coa/manual columns (entries columns already itemized above)
-  expSummaryLabel(expDataRow, 'Recorded in Withdraw Notesheets - Category totals for the month');
+  // Every Withdraw Notesheet run already posts its own dated, per-category
+  // row above (expenditureEntries), so this row is no longer a second
+  // "category totals" total (that would double-count against the dated
+  // rows) - it's only ever needed to carry a manual override: the
+  // difference between a manually-typed override figure and what the
+  // dated notesheet rows already add up to for that column, so the
+  // column's Total Expenditure still equals the override. Non-overridden
+  // coa/entries columns are fully covered by the dated rows above and get 0 here.
+  const expDataRow = er;
+  expSummaryLabel(expDataRow, 'Manual override adjustment');
   rec.expenditureColumns.forEach((col,i)=>{
-    const amt = col.source==='coa' ? ((col.override!==undefined && col.override!==null) ? Number(col.override)||0 : (liveCoaTotals ? (liveCoaTotals[col.coaKey]||0) : 0)) : col.source==='entries' ? 0 : (Number(col.amount)||0);
+    let amt = 0;
+    if(col.source==='coa'){
+      if(col.override!==undefined && col.override!==null) amt = (Number(col.override)||0) - expenditureEntryColTotal(rec, col.id);
+    } else if(col.source!=='entries'){
+      amt = Number(col.amount)||0; // plain manual (non-coa, non-entries) column - no notesheet/entry data behind it at all
+    }
     exp.getCell(expDataRow, 4+i).value = amt;
   });
   exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
-  const salaryAccountStartRow = expDataRow+1;
+  // Bank fees: dated per-day, same treatment as Salary by Account/Cash
+  // below - a bank-side deduction, not tied to any COA expenditure
+  // category, so it goes straight into the Total column.
+  const bankFeesStartRow = expDataRow+1;
+  let fr = bankFeesStartRow;
+  const bankFeesEntries = dailyBankFieldEntries(key, 'fees');
+  if(bankFeesEntries.length){
+    bankFeesEntries.forEach(en=>{
+      exp.getCell(fr,1).value = new Date(en.date);
+      exp.getCell(fr,1).numFmt = 'd/m/yyyy';
+      exp.getCell(fr,2).value = 'Bank fees';
+      exp.getCell(fr,3).value = en.amount;
+      fr++;
+    });
+  } else {
+    expSummaryLabel(fr, 'Bank fees'); exp.getCell(fr,1).font = FONT;
+    exp.getCell(fr,3).value = 0;
+    fr++;
+  }
+  const salaryAccountStartRow = fr;
   let sr = salaryAccountStartRow;
   const salaryAccountManual = Number(rec.salaryByAccount)||0;
   const salaryAccountEntries = salaryAccountManual===0 ? dailyBankFieldEntries(key, 'salaryAccount') : [];
@@ -6225,6 +6339,38 @@ async function parseTBLStatement(arrayBuffer){
 function daysBetween(iso1, iso2){
   return Math.round((new Date(iso1+'T00:00:00Z') - new Date(iso2+'T00:00:00Z')) / 86400000);
 }
+/* Monthly Ledger revenue/expenditure entries are pushed in whatever order
+   notesheets happen to get generated in (e.g. Deposit Notesheet #117-119
+   generated before #115-116 is filed in afterward) - display and export
+   should always read chronologically by the entry's own date regardless
+   of that generation order. Stable sort on a copy; entries with no date
+   sort last so nothing silently disappears. */
+function sortedByDate(entries){
+  return (entries||[]).map((e,i)=>({e,i})).sort((a,b)=>{
+    const da = a.e.date||'', db = b.e.date||'';
+    if(da!==db) return da===''?1: db===''?-1 : da.localeCompare(db);
+    return a.i-b.i;
+  }).map(x=>x.e);
+}
+/* Export-only description formatting for the Monthly Revenue/Expenditure
+   sheets. The stored entry.desc strings (e.g. "Deposit Notesheet #117
+   (2026-07-09 to 2026-07-16)", "Online Payment (SSL Commerz) - entered
+   2026-07-26", "Withdraw Notesheet 26-15") stay exactly as-is in the data,
+   since the bank cross-check's exclusion matching and the in-app editable
+   list both key off those exact prefixes. Only the exported spreadsheet
+   shows the friendlier, accountant-facing label built from the same desc. */
+function exportRevenueDesc(desc){
+  const m = /^Deposit Notesheet #(\S+) \(/.exec(desc||'');
+  if(m) return `Service Revenue Deposited (Notesheet #${m[1]})`;
+  if(/^Online Payment \(SSL Commerz\)/.test(desc||'')) return 'Deposit through SSL Commerz';
+  return desc||'';
+}
+function exportExpenditureDesc(entry, rec){
+  const m = /^Withdraw Notesheet (.+)$/.exec(entry.desc||'');
+  if(!m) return entry.desc||'';
+  const cats = (rec.expenditureColumns||[]).filter(col=>Number((entry.amounts||{})[col.id])>0).map(col=>col.label);
+  return cats.length ? `${cats.join(', ')} (Summary ${m[1]})` : (entry.desc||'');
+}
 
 function crossCheckTBLStatement(stmtRows){
   // Build the list of what the app expects to see. Money that moves through
@@ -6261,6 +6407,25 @@ function crossCheckTBLStatement(stmtRows){
     });
   });
   const expectedSsl = (state.onlinePaymentLog||[]).map(l=>({side:'deposit', checkDate:l.bankDate, amount:l.grandTotal, label:'Online Payment (SSL Commerz)', tolDays:2}));
+  // The manual "Other deposit / SSL Commerz" field in the Daily Ledger's
+  // per-day Bank section is how the accountant records that day's bank
+  // balance increase for SSL Commerz money. When that same collection is
+  // ALSO split into revenue categories via the Online Payment (SSL Commerz)
+  // import, both entries describe the exact same one bank transaction -
+  // only one bank-statement line exists for it, so only one of the two
+  // should be checked against the statement. Skip a sslDeposit entry here
+  // if an onlinePaymentLog entry already matches it (same amount, within
+  // the same +/-2 day settlement window) - only genuinely standalone
+  // sslDeposit entries (a BEFTN credit with no matching online-payment
+  // import) get added as their own expectation.
+  (state.days||[]).forEach(day=>{
+    Object.values(day.banksDaily||{}).forEach(bd=>{
+      if(!bd || !Number(bd.sslDeposit)) return;
+      const amt = Number(bd.sslDeposit);
+      const alreadyCovered = (state.onlinePaymentLog||[]).some(l=>Math.abs((l.grandTotal||0)-amt)<=1 && Math.abs(daysBetween(l.bankDate, day.date))<=2);
+      if(!alreadyCovered) expectedSsl.push({side:'deposit', checkDate:day.date, amount:amt, label:'Other deposit / SSL Commerz', tolDays:2});
+    });
+  });
 
   // Not every BEFTN inward transfer is an SSL Commerz collection - some are
   // one-off transfers (e.g. Bangladesh Post, a direct bank transfer) that
@@ -6269,11 +6434,24 @@ function crossCheckTBLStatement(stmtRows){
   // Deposit rows either). Include those too, as a fallback - but skip any
   // revenue entry that's actually a Deposit Notesheet's own linked entry,
   // since that money is already accounted for above via Daily Ledger deposits.
+  // Matched by both shared id (current data) and the "Deposit Notesheet #"
+  // description prefix (older entries generated before log/revenue entries
+  // were linked by id still carry this label and must be excluded the
+  // same way, or they show up as a phantom duplicate of the real deposit).
   const depositNotesheetIds = new Set((state.depositNotesheetLog||[]).map(l=>l.id));
   const expectedManualRevenue = [];
   Object.values(state.monthlyLedger.months||{}).forEach(rec=>{
     (rec.revenueEntries||[]).forEach(entry=>{
       if(depositNotesheetIds.has(entry.id)) return;
+      if(/^Deposit Notesheet #/.test(entry.desc||'')) return;
+      // Same duplicate-representation issue as Deposit Notesheet above:
+      // every Online Payment (SSL Commerz) bucket writes BOTH a
+      // state.onlinePaymentLog entry (already checked against BEFTN rows
+      // via expectedSsl) AND this Monthly Ledger revenue entry for the
+      // exact same bank transaction. Without this exclusion, the revenue
+      // entry re-claims the same statement row after expectedSsl already
+      // matched it, and shows up as a phantom "missing" duplicate.
+      if(/^Online Payment \(SSL Commerz\)/.test(entry.desc||'')) return;
       const amt = REVENUE_CATS.reduce((s,c)=>s+(Number(entry[c.key])||0),0);
       if(amt && entry.date) expectedManualRevenue.push({side:'deposit', checkDate:entry.date, amount:amt, label: entry.desc || 'Monthly Ledger revenue entry', tolDays:0});
     });
@@ -7601,21 +7779,6 @@ function wireDelegation(){
       saveState(); render();
       return;
     }
-    if(action==='ml-add-debt'){
-      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
-      rec.balanceSheet.debtItems.push({id:uid(), label:'', amount:0});
-      saveState(); render();
-      return;
-    }
-    if(action==='ml-remove-debt'){
-      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
-      const idx = rec.balanceSheet.debtItems.findIndex(x=>x.id===t.dataset.item);
-      const removed = rec.balanceSheet.debtItems[idx];
-      rec.balanceSheet.debtItems = rec.balanceSheet.debtItems.filter(x=>x.id!==t.dataset.item);
-      pushUndo('Liability removed.', ()=>{ rec.balanceSheet.debtItems.splice(idx,0,removed); });
-      saveState(); render();
-      return;
-    }
     if(action==='ml-set-seed'){
       showMlSeedModal();
       return;
@@ -8552,6 +8715,15 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
     const key = desc.startsWith('Miscellaneous collection') ? 'misc' : DEPOSIT_TO_REVENUE_KEY[desc];
     if(key) revEntry[key] = (revEntry[key]||0) + amt;
   });
+  // Admission Fee and Admission Form are combined into one "Admission fee
+  // & Form" revenue line above (matching the institute's own template and
+  // Monthly Ledger column), but Gratuity and the Education Assistance Fund
+  // are only ever meant to come out of the Fee portion, never the Form
+  // portion - so the Fee-only amount is kept here too, separately, purely
+  // for that auto-transfer calculation (see autoGratuityEduAssist below).
+  // Not part of REVENUE_CATS, so it never shows as its own Monthly Ledger
+  // column or export line - Admission Fee & Form still shows as one total.
+  revEntry.admissionFeeOnly = parsed.totals['Admission Fee -I']||0;
   const [genYear, genMonthNum] = genISO.split('-');
   const monthName = MONTHS[parseInt(genMonthNum,10)-1];
   const mlKey = monthKeyFor(monthName, genYear);
@@ -9644,7 +9816,19 @@ if(typeof window!=='undefined' && typeof window.addEventListener==='function'){
     const isEditable = ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT' || ae.isContentEditable);
     if(isEditable) return;
     e.preventDefault();
-    if(e.key==='Home') scrollPageToTop(); else scrollPageToBottom();
+    // The Monthly Ledger floating window is its own scroll container
+    // (#ml-floating-body), separate from the main page - if that's what
+    // the person is actually working in (hovering it, or focus landed
+    // inside it, e.g. right after clicking one of its own buttons),
+    // Ctrl+Home/End should scroll that window instead of the page, or it
+    // would silently do nothing useful from in there.
+    const mlBody = document.getElementById('ml-floating-body');
+    const inMlWindow = mlBody && (mlBody.matches(':hover') || mlBody.contains(ae));
+    if(inMlWindow){
+      if(e.key==='Home') scrollMlToTop(); else scrollMlToBottom();
+    } else {
+      if(e.key==='Home') scrollPageToTop(); else scrollPageToBottom();
+    }
   });
 }
 if(typeof navigator!=='undefined' && 'serviceWorker' in navigator && typeof location!=='undefined' && (location.protocol==='https:' || location.hostname==='localhost')){
