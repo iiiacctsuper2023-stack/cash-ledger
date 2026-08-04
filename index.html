@@ -6262,6 +6262,23 @@ function crossCheckTBLStatement(stmtRows){
   });
   const expectedSsl = (state.onlinePaymentLog||[]).map(l=>({side:'deposit', checkDate:l.bankDate, amount:l.grandTotal, label:'Online Payment (SSL Commerz)', tolDays:2}));
 
+  // Not every BEFTN inward transfer is an SSL Commerz collection - some are
+  // one-off transfers (e.g. Bangladesh Post, a direct bank transfer) that
+  // only ever get recorded as a plain Monthly Ledger revenue entry, never
+  // through the Deposit Notesheet flow (so they're not in the Daily Ledger's
+  // Deposit rows either). Include those too, as a fallback - but skip any
+  // revenue entry that's actually a Deposit Notesheet's own linked entry,
+  // since that money is already accounted for above via Daily Ledger deposits.
+  const depositNotesheetIds = new Set((state.depositNotesheetLog||[]).map(l=>l.id));
+  const expectedManualRevenue = [];
+  Object.values(state.monthlyLedger.months||{}).forEach(rec=>{
+    (rec.revenueEntries||[]).forEach(entry=>{
+      if(depositNotesheetIds.has(entry.id)) return;
+      const amt = REVENUE_CATS.reduce((s,c)=>s+(Number(entry[c.key])||0),0);
+      if(amt && entry.date) expectedManualRevenue.push({side:'deposit', checkDate:entry.date, amount:amt, label: entry.desc || 'Monthly Ledger revenue entry', tolDays:0});
+    });
+  });
+
   const isBeftnRow = r => /beftn/i.test(r.particular||'');
   const beftnStmtRows = stmtRows.filter(isBeftnRow);
   const otherStmtRows = stmtRows.filter(r=>!isBeftnRow(r));
@@ -6303,6 +6320,8 @@ function crossCheckTBLStatement(stmtRows){
   tryMatch(expected, otherStmtRows, otherDates[0], otherDates[otherDates.length-1], Math.max(0, ...expected.map(e=>e.tolDays||0)));
   const beftnDates = beftnStmtRows.map(r=>r.date).filter(Boolean).sort();
   tryMatch(expectedSsl, beftnStmtRows, beftnDates[0], beftnDates[beftnDates.length-1], Math.max(0, ...expectedSsl.map(e=>e.tolDays||0)));
+  const allDates = stmtRows.map(r=>r.date).filter(Boolean).sort();
+  tryMatch(expectedManualRevenue, stmtRows, allDates[0], allDates[allDates.length-1], 0);
 
   const unmatchedStmtRows = stmtRows.filter((r,i)=>!usedStmtIdx.has(i) && (r.deposit>0 || r.withdrawal>0));
   return {matched, missingFromStatement, unmatchedStmtRows};
