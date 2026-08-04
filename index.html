@@ -6227,63 +6227,83 @@ function daysBetween(iso1, iso2){
 }
 
 function crossCheckTBLStatement(stmtRows){
-  // Build the list of what the app expects to see, from every source that
-  // touches this bank: Deposit Notesheets + Online Payments on the deposit
-  // side, Withdraw Notesheets on the withdrawal side.
+  // Build the list of what the app expects to see. Money that moves through
+  // the bank comes from two kinds of source in this app:
+  //  1. Deposit/Withdraw Notesheet totals, which the accountant also enters
+  //     day-by-day as Deposit/Withdraw rows in the Daily Ledger - that's the
+  //     actual bank-dated record, and more reliable than the notesheet log's
+  //     own generation/attribution date (which can legitimately differ from
+  //     the date the bank actually cleared the money).
+  //  2. Other bank movement entered directly in the Daily Ledger's per-day
+  //     Bank section: Salary by Cash, Salary by Account, Bank fees, and
+  //     House Rent Deposit - the same per-day dates that feed the Monthly
+  //     Ledger (see dailyBankFieldEntries()).
+  // SSL Commerz online payments are handled separately below: the bank only
+  // ever shows these as a BEFTN inward transfer (never a plain cash/online
+  // deposit line), so they're matched only against statement rows whose own
+  // description says BEFTN, rather than against the general pool.
   const expected = [];
-  (state.depositNotesheetLog||[]).forEach(l=>{
-    expected.push({side:'deposit', date:l.startISO && l.endISO ? null : null, checkDate:(l.revEntryDate||l.date||null), amount:l.grandTotal, label:`Deposit Notesheet #${l.noteNum||''}`.trim(), tolDays:0});
-  });
-  // depositNotesheetLog entries don't carry their own date field directly (the date lives on the linked Monthly Ledger revenue entry) - resolve it from there.
-  (state.depositNotesheetLog||[]).forEach((l,i)=>{
-    let foundDate = null;
-    Object.values(state.monthlyLedger.months).forEach(rec=>{
-      const e = rec.revenueEntries.find(en=>en.id===l.id);
-      if(e) foundDate = e.date;
+  (state.days||[]).forEach(day=>{
+    (day.deposits||[]).forEach(d=>{
+      const amt = Number(d.amount)||0;
+      if(amt) expected.push({side:'deposit', checkDate:day.date, amount:amt, label: d.note ? `Deposit - ${d.note}` : 'Deposit (Daily Ledger)', tolDays:0});
     });
-    expected[i].checkDate = foundDate;
+    (day.withdrawals||[]).forEach(w=>{
+      const amt = Number(w.amount)||0;
+      if(amt) expected.push({side:'withdrawal', checkDate:day.date, amount:amt, label: w.note ? `Withdrawal - ${w.note}` : 'Withdrawal (Daily Ledger)', tolDays:0});
+    });
+    Object.values(day.banksDaily||{}).forEach(bd=>{
+      if(!bd) return;
+      if(Number(bd.salaryCash)) expected.push({side:'withdrawal', checkDate:day.date, amount:Number(bd.salaryCash), label:'Salary by Cash', tolDays:0});
+      if(Number(bd.salaryAccount)) expected.push({side:'withdrawal', checkDate:day.date, amount:Number(bd.salaryAccount), label:'Salary by Account', tolDays:0});
+      if(Number(bd.fees)) expected.push({side:'withdrawal', checkDate:day.date, amount:Number(bd.fees), label:'Bank fees', tolDays:0});
+      if(Number(bd.houseRentDeposit)) expected.push({side:'deposit', checkDate:day.date, amount:Number(bd.houseRentDeposit), label:'House Rent Deposit', tolDays:0});
+    });
   });
-  (state.onlinePaymentLog||[]).forEach(l=>{
-    expected.push({side:'deposit', checkDate:l.bankDate, amount:l.grandTotal, label:`Online Payment (SSL Commerz)`, tolDays:1});
-  });
-  (state.withdrawNotesheetLog||[]).forEach(l=>{
-    expected.push({side:'withdrawal', checkDate:l.generatedDate||l.endDate, amount:l.grandTotal, label:`Withdraw Notesheet`, tolDays:0});
-  });
+  const expectedSsl = (state.onlinePaymentLog||[]).map(l=>({side:'deposit', checkDate:l.bankDate, amount:l.grandTotal, label:'Online Payment (SSL Commerz)', tolDays:2}));
+
+  const isBeftnRow = r => /beftn/i.test(r.particular||'');
+  const beftnStmtRows = stmtRows.filter(isBeftnRow);
+  const otherStmtRows = stmtRows.filter(r=>!isBeftnRow(r));
 
   // The statement only covers one period (whatever the uploaded file spans)
   // but `expected` above is built from the app's ENTIRE history. Without
   // scoping to the statement's own date range, every entry from every other
   // month gets flagged as "not found in the statement" just because this
-  // statement was never going to contain it. Scope by the statement's min/max
-  // date, padded by the widest tolerance in use, so nothing outside this
-  // upload's actual coverage is judged against it.
-  const stmtDates = stmtRows.map(r=>r.date).filter(Boolean).sort();
-  const stmtMinDate = stmtDates[0], stmtMaxDate = stmtDates[stmtDates.length-1];
-  const maxTol = Math.max(0, ...expected.map(e=>e.tolDays||0));
-  const inStatementWindow = (checkDate)=>{
-    if(!stmtMinDate || !stmtMaxDate) return true; // empty statement - don't filter, let the amount/date match below decide
-    return daysBetween(checkDate, stmtMinDate) >= -maxTol && daysBetween(checkDate, stmtMaxDate) <= maxTol;
+  // statement was never going to contain it. Scope by the (relevant rows')
+  // min/max date, padded by the widest tolerance in use.
+  const inWindow = (checkDate, minD, maxD, tol)=>{
+    if(!minD || !maxD) return true;
+    return daysBetween(checkDate, minD) >= -tol && daysBetween(checkDate, maxD) <= tol;
   };
 
-  const usedStmtIdx = new Set();
+  const usedStmtIdx = new Set(); // indices into the original stmtRows array
   const matched = [], missingFromStatement = [];
-  expected.forEach(e=>{
-    if(!e.amount) return; // nothing to check without an amount
-    if(!e.checkDate){ missingFromStatement.push(e); return; } // no resolvable date - surface it rather than silently dropping it
-    if(!inStatementWindow(e.checkDate)) return; // outside this statement's own coverage - not this statement's business
-    let foundIdx = -1;
-    for(let i=0;i<stmtRows.length;i++){
-      if(usedStmtIdx.has(i)) continue;
-      const row = stmtRows[i];
-      const amt = e.side==='deposit' ? row.deposit : row.withdrawal;
-      if(amt<=0) continue;
-      if(Math.abs(amt-e.amount)>1) continue;
-      if(Math.abs(daysBetween(row.date, e.checkDate))>e.tolDays) continue;
-      foundIdx = i; break;
-    }
-    if(foundIdx>=0){ usedStmtIdx.add(foundIdx); matched.push({...e, stmtDate:stmtRows[foundIdx].date}); }
-    else missingFromStatement.push(e);
-  });
+  function tryMatch(expectedList, rowsPool, windowMin, windowMax, tol){
+    expectedList.forEach(e=>{
+      if(!e.amount) return; // nothing to check without an amount
+      if(!e.checkDate){ missingFromStatement.push(e); return; } // no resolvable date - surface it rather than silently dropping it
+      if(!inWindow(e.checkDate, windowMin, windowMax, tol)) return; // outside this statement's own coverage - not this statement's business
+      let foundIdx = -1;
+      for(const row of rowsPool){
+        const i = stmtRows.indexOf(row);
+        if(usedStmtIdx.has(i)) continue;
+        const amt = e.side==='deposit' ? row.deposit : row.withdrawal;
+        if(amt<=0) continue;
+        if(Math.abs(amt-e.amount)>1) continue;
+        if(Math.abs(daysBetween(row.date, e.checkDate))>e.tolDays) continue;
+        foundIdx = i; break;
+      }
+      if(foundIdx>=0){ usedStmtIdx.add(foundIdx); matched.push({...e, stmtDate:stmtRows[foundIdx].date}); }
+      else missingFromStatement.push(e);
+    });
+  }
+
+  const otherDates = otherStmtRows.map(r=>r.date).filter(Boolean).sort();
+  tryMatch(expected, otherStmtRows, otherDates[0], otherDates[otherDates.length-1], Math.max(0, ...expected.map(e=>e.tolDays||0)));
+  const beftnDates = beftnStmtRows.map(r=>r.date).filter(Boolean).sort();
+  tryMatch(expectedSsl, beftnStmtRows, beftnDates[0], beftnDates[beftnDates.length-1], Math.max(0, ...expectedSsl.map(e=>e.tolDays||0)));
+
   const unmatchedStmtRows = stmtRows.filter((r,i)=>!usedStmtIdx.has(i) && (r.deposit>0 || r.withdrawal>0));
   return {matched, missingFromStatement, unmatchedStmtRows};
 }
@@ -6630,7 +6650,7 @@ function renderBankStatementCard(){
   const card = el(`
     <div class="card" id="section-bank-statement">
       <h3><span class="num">&#127974;</span> TBL Bank Statement Cross-Check</h3>
-      <p class="subnote">Upload Trust Bank's own Account Statement export for a month. Every Deposit Notesheet, Online Payment (SSL Commerz), and Withdraw Notesheet recorded for that period is checked against it by date and amount - anything that doesn't line up is called out clearly so you know exactly what to check.</p>
+      <p class="subnote">Upload Trust Bank's own Account Statement export. Every Deposit/Withdraw row entered in the Daily Ledger, plus Salary by Cash, Salary by Account, Bank fees, and House Rent Deposit, is checked against it by date, amount, and deposit-vs-withdrawal side. Statement lines mentioning BEFTN are checked specifically against Online Payments (SSL Commerz). Anything that doesn't line up is called out clearly so you know exactly what to check.</p>
       <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
         <div class="field" style="flex:1 1 260px;">
           <label>Account Statement file (.xlsx)</label>
