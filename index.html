@@ -660,6 +660,8 @@ let monthlyLedgerOpen = false;
 let mlSettingsOpen = false;
 let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
+let depositHistoryMonthKey = null;  // "YYYY-MM" the Deposit Notesheet card's "Saved history" list is showing - defaults to currentSelectedMonthKey(), but is pinned to whichever month was just generated into so a fresh entry is never hidden by an unrelated month selection elsewhere in the app
+let withdrawHistoryMonthKey = null; // same, for the Withdraw Notesheet card
 let mlTotalViewOpen = false; // shows a combined all-months summary above the per-month Balance Sheet when true
 let locked = false;            // true = show the lock screen instead of the app
 /* --- Data Encryption ("vault") session state ---------------------------
@@ -5989,17 +5991,22 @@ function renderNotesheetCard(){
   };
 
   if((state.withdrawNotesheetLog||[]).length){
-    const wnMonthKey = currentSelectedMonthKey();
+    const wnAllMonthKeys = [...new Set((state.withdrawNotesheetLog||[]).map(l=>(l.generatedDate||l.endDate||'').slice(0,7)))].filter(Boolean).sort();
+    const wnMonthKey = (withdrawHistoryMonthKey && wnAllMonthKeys.includes(withdrawHistoryMonthKey)) ? withdrawHistoryMonthKey
+      : wnAllMonthKeys.includes(currentSelectedMonthKey()) ? currentSelectedMonthKey()
+      : (wnAllMonthKeys[wnAllMonthKeys.length-1] || currentSelectedMonthKey());
     const wnLogThisMonth = state.withdrawNotesheetLog.filter(l=>{
       const d = l.generatedDate || l.endDate;
       return d && d.slice(0,7)===wnMonthKey;
     });
     const wnRec = state.monthlyLedger.months[wnMonthKey];
     const wnFilesHidden = wnRec && wnRec.notesheetFilesHidden;
-    if(wnLogThisMonth.length) card.appendChild(el(`
+    if(wnAllMonthKeys.length) card.appendChild(el(`
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
-          <div style="font-size:12px; font-weight:700; opacity:.7;">Saved history for ${monthKeyLabel(wnMonthKey)} (also feeds Monthly Ledger)${wnFilesHidden ? ' &mdash; files hidden' : ''}</div>
+          <div style="font-size:12px; font-weight:700; opacity:.7; display:flex; align-items:center; gap:6px;">Saved history for
+            ${wnAllMonthKeys.length>1 ? `<select id="wn-history-month" style="font-size:12px; font-weight:700; padding:1px 4px;">${wnAllMonthKeys.map(k=>`<option value="${k}" ${k===wnMonthKey?'selected':''}>${monthKeyLabel(k)}</option>`).join('')}</select>` : monthKeyLabel(wnMonthKey)}
+            (also feeds Monthly Ledger)${wnFilesHidden ? ' &mdash; files hidden' : ''}</div>
           <button type="button" class="secondary small" data-action="toggle-withdraw-files-hidden" data-month="${wnMonthKey}">${wnFilesHidden ? 'Show files again' : "Don't need files anymore"}</button>
         </div>
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
@@ -6024,13 +6031,18 @@ function renderNotesheetCard(){
         </table>
       </div>
     `));
+    const wnHistorySel = card.querySelector('#wn-history-month');
+    if(wnHistorySel) wnHistorySel.onchange = ()=>{ withdrawHistoryMonthKey = wnHistorySel.value; render(); };
   }
 
   return card;
 }
 
 function renderDepositNotesheetCard(){
-  const dnsMonthKey = currentSelectedMonthKey();
+  const dnsAllMonthKeys = [...new Set((state.depositNotesheetLog||[]).map(l=>(l.generatedDate||l.endDate||'').slice(0,7)))].filter(Boolean).sort();
+  const dnsMonthKey = (depositHistoryMonthKey && dnsAllMonthKeys.includes(depositHistoryMonthKey)) ? depositHistoryMonthKey
+    : dnsAllMonthKeys.includes(currentSelectedMonthKey()) ? currentSelectedMonthKey()
+    : (dnsAllMonthKeys[dnsAllMonthKeys.length-1] || currentSelectedMonthKey());
   const dnsLogThisMonth = (state.depositNotesheetLog||[]).filter(l=>{
     const d = l.generatedDate || (l.endDate);
     return d && d.slice(0,7)===dnsMonthKey;
@@ -6070,10 +6082,12 @@ function renderDepositNotesheetCard(){
       </label>
       <p class="subnote" style="margin-top:-4px;">Dates auto-fill from the uploaded file's own date range when possible &mdash; adjust them here if that's wrong or missing; whatever is set in these two boxes is what prints on the notesheet.</p>
       <div id="dns-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
-      ${dnsLogThisMonth.length ? `
+      ${dnsAllMonthKeys.length ? `
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
-          <div style="font-size:12px; font-weight:700; opacity:.7;">Saved history for ${monthKeyLabel(dnsMonthKey)} (also feeds Monthly Ledger)${dnsFilesHidden ? ' &mdash; files hidden' : ''}</div>
+          <div style="font-size:12px; font-weight:700; opacity:.7; display:flex; align-items:center; gap:6px;">Saved history for
+            ${dnsAllMonthKeys.length>1 ? `<select id="dns-history-month" style="font-size:12px; font-weight:700; padding:1px 4px;">${dnsAllMonthKeys.map(k=>`<option value="${k}" ${k===dnsMonthKey?'selected':''}>${monthKeyLabel(k)}</option>`).join('')}</select>` : monthKeyLabel(dnsMonthKey)}
+            (also feeds Monthly Ledger)${dnsFilesHidden ? ' &mdash; files hidden' : ''}</div>
           <button type="button" class="secondary small" data-action="toggle-deposit-files-hidden" data-month="${dnsMonthKey}">${dnsFilesHidden ? 'Show files again' : "Don't need files anymore"}</button>
         </div>
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
@@ -6100,6 +6114,8 @@ function renderDepositNotesheetCard(){
     const n = parseInt(numInp.value, 10);
     if(n>0){ state.nextDepositNotesheetNo = n; saveState(); }
   };
+  const historyMonthSel = card.querySelector('#dns-history-month');
+  if(historyMonthSel) historyMonthSel.onchange = ()=>{ depositHistoryMonthKey = historyMonthSel.value; render(); };
   const fileInp = card.querySelector('#dns-file-input');
   const startInp = card.querySelector('#dns-start-date');
   const endInp = card.querySelector('#dns-end-date');
@@ -8493,6 +8509,8 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
     fileName:`Revenue_deposit-${noteNum}.xlsx`, fileBase64: await workbookToBase64(wb)
   });
 
+  depositHistoryMonthKey = mlKey; // show the month this entry was just posted into, not whatever was previously selected
+
   await saveState();
   render();
 }
@@ -9131,6 +9149,7 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
       amounts[col.id] = total;
     });
     mlRec.expenditureEntries.push({id:uid(), date:finalAttribDate, desc:`Withdraw Notesheet ${state.summaryCounterYear}-${summaryNum}`, amounts});
+    withdrawHistoryMonthKey = mlKey; // show the month this entry was just posted into, not whatever was previously selected
   }
 
   await saveState();
