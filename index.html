@@ -6250,9 +6250,27 @@ function crossCheckTBLStatement(stmtRows){
     expected.push({side:'withdrawal', checkDate:l.generatedDate||l.endDate, amount:l.grandTotal, label:`Withdraw Notesheet`, tolDays:0});
   });
 
+  // The statement only covers one period (whatever the uploaded file spans)
+  // but `expected` above is built from the app's ENTIRE history. Without
+  // scoping to the statement's own date range, every entry from every other
+  // month gets flagged as "not found in the statement" just because this
+  // statement was never going to contain it. Scope by the statement's min/max
+  // date, padded by the widest tolerance in use, so nothing outside this
+  // upload's actual coverage is judged against it.
+  const stmtDates = stmtRows.map(r=>r.date).filter(Boolean).sort();
+  const stmtMinDate = stmtDates[0], stmtMaxDate = stmtDates[stmtDates.length-1];
+  const maxTol = Math.max(0, ...expected.map(e=>e.tolDays||0));
+  const inStatementWindow = (checkDate)=>{
+    if(!stmtMinDate || !stmtMaxDate) return true; // empty statement - don't filter, let the amount/date match below decide
+    return daysBetween(checkDate, stmtMinDate) >= -maxTol && daysBetween(checkDate, stmtMaxDate) <= maxTol;
+  };
+
   const usedStmtIdx = new Set();
   const matched = [], missingFromStatement = [];
-  expected.filter(e=>e.checkDate && e.amount).forEach(e=>{
+  expected.forEach(e=>{
+    if(!e.amount) return; // nothing to check without an amount
+    if(!e.checkDate){ missingFromStatement.push(e); return; } // no resolvable date - surface it rather than silently dropping it
+    if(!inStatementWindow(e.checkDate)) return; // outside this statement's own coverage - not this statement's business
     let foundIdx = -1;
     for(let i=0;i<stmtRows.length;i++){
       if(usedStmtIdx.has(i)) continue;
