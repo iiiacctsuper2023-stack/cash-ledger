@@ -1339,16 +1339,28 @@ function collectNotesheetRange(startDate, endDate){
   const cats = [];
   SUMMARY_ORDER.forEach(key=>{
     const cat = COA.find(c=>c.key===key);
-    const items = [];
+    const rawItems = [];
     days.forEach(day=>{
       (day.coa[key]||[]).forEach(it=>{
         const amt = Number(it.amount)||0;
-        if(amt>0){ items.push({voucher:it.voucher, desc:it.desc||cat.label, amount:amt, date:day.date}); }
+        if(amt>0){ rawItems.push({voucher:it.voucher, desc:it.desc||cat.label, amount:amt, date:day.date}); }
       });
     });
-    if(items.length===0) return;
+    if(rawItems.length===0) return;
+    // If the same description (e.g. the same person's name, for a salary
+    // or honorarium category) appears more than once in this category,
+    // combine them into one line with the summed amount - instead of
+    // repeating that name/description on separate lines.
+    const byDesc = new Map();
+    const items = [];
+    rawItems.forEach(it=>{
+      const existing = byDesc.get(it.desc);
+      if(existing){ existing.amount += it.amount; existing.voucher += `, ${it.voucher}`; }
+      else{ const merged = {voucher:it.voucher, desc:it.desc, amount:it.amount, date:it.date}; byDesc.set(it.desc, merged); items.push(merged); }
+    });
     const total = items.reduce((s,it)=>s+it.amount,0);
-    cats.push({key, cat, items, total, firstDate:items[0].date, lastDate:items[items.length-1].date});
+    cats.push({key, cat, items, total, firstDate:rawItems[0].date, lastDate:rawItems[rawItems.length-1].date,
+               firstVoucher:rawItems[0].voucher, lastVoucher:rawItems[rawItems.length-1].voucher});
   });
   const grandTotal = cats.reduce((s,c)=>s+c.total,0);
   return {cats, grandTotal};
@@ -1744,55 +1756,64 @@ function importBackupJson(file){
    Computation engine (single source of truth for every number shown
    on screen AND every number written into the exported spreadsheets)
    ====================================================================== */
+let computeAllInProgress = false;
+let computeAllLastResult = null;
 function computeAll(){
-  const results = {};
-  let prevCash = null;
-  let prevBankClose = {};
-  state.banks.forEach(b=>{ prevBankClose[b.id] = b.opening||0; });
+  if(computeAllInProgress) return computeAllLastResult || {};
+  computeAllInProgress = true;
+  try{
+    const results = {};
+    let prevCash = null;
+    let prevBankClose = {};
+    state.banks.forEach(b=>{ prevBankClose[b.id] = b.opening||0; });
 
-  state.days.forEach((day, idx)=>{
-    const openingCash = idx===0 ? effectiveOpeningCashManual(day) : prevCash;
-    const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
-    const cashCollected = (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0) + withdrawTotal;
-    const totalAmountCash = openingCash + cashCollected;
+    state.days.forEach((day, idx)=>{
+      const openingCash = idx===0 ? effectiveOpeningCashManual(day) : prevCash;
+      const withdrawTotal = day.withdrawals.reduce((s,w)=>s+(Number(w.amount)||0),0);
+      const cashCollected = (Number(day.serviceRevenue)||0) + (Number(day.miscCollection)||0) + withdrawTotal;
+      const totalAmountCash = openingCash + cashCollected;
 
-    let coaTotal = 0;
-    const coaTotals = {};
-    COA.forEach(c=>{
-      const t = (day.coa[c.key]||[]).reduce((s,l)=>s+(Number(l.amount)||0),0);
-      coaTotals[c.key]=t; coaTotal += t;
+      let coaTotal = 0;
+      const coaTotals = {};
+      COA.forEach(c=>{
+        const t = (day.coa[c.key]||[]).reduce((s,l)=>s+(Number(l.amount)||0),0);
+        coaTotals[c.key]=t; coaTotal += t;
+      });
+      const depositTotal = day.deposits.reduce((s,d)=>s+(Number(d.amount)||0),0);
+      const totalCashDisbursed = coaTotal + depositTotal;
+      const closingAmount = totalAmountCash - totalCashDisbursed;
+      const iouTotal = activeIousForDay(day.date).reduce((s,i)=>s+(Number(i.amount)||0),0);
+      const cashInHand = closingAmount - iouTotal;
+
+      const banks = {};
+      state.banks.forEach(b=>{
+        const bd = day.banksDaily[b.id] || {sslDeposit:0,houseRentDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
+        const opening = prevBankClose[b.id];
+        const transferIn = day.deposits.filter(d=>d.bankId===b.id).reduce((s,d)=>s+(Number(d.amount)||0),0);
+        const transferOut = day.withdrawals.filter(w=>w.bankId===b.id).reduce((s,w)=>s+(Number(w.amount)||0),0);
+        const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
+        const bankXferIn = bankXfers.filter(t=>t.toBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
+        const bankXferOut = bankXfers.filter(t=>t.fromBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
+        const totalIn = opening + (Number(bd.sslDeposit)||0) + (Number(bd.houseRentDeposit)||0) + transferIn + bankXferIn;
+        const totalOut = (Number(bd.fees)||0) + (Number(bd.salaryAccount)||0) + (Number(bd.salaryCash)||0) + transferOut + bankXferOut;
+        const closing = totalIn - totalOut;
+        banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, houseRentDeposit:Number(bd.houseRentDeposit)||0, transferIn, bankXferIn, totalIn,
+                        fees:Number(bd.fees)||0, salaryAccount:Number(bd.salaryAccount)||0, salaryCash:Number(bd.salaryCash)||0,
+                        transferOut, bankXferOut, totalOut, closing};
+        prevBankClose[b.id] = closing;
+      });
+
+      const grandTotal = closingAmount + Object.values(banks).reduce((s,b)=>s+b.closing,0);
+
+      results[day.id] = {openingCash, withdrawTotal, cashCollected, totalAmountCash, coaTotals, coaTotal,
+                          depositTotal, totalCashDisbursed, closingAmount, iouTotal, cashInHand, banks, grandTotal};
+      prevCash = closingAmount;
     });
-    const depositTotal = day.deposits.reduce((s,d)=>s+(Number(d.amount)||0),0);
-    const totalCashDisbursed = coaTotal + depositTotal;
-    const closingAmount = totalAmountCash - totalCashDisbursed;
-    const iouTotal = activeIousForDay(day.date).reduce((s,i)=>s+(Number(i.amount)||0),0);
-    const cashInHand = closingAmount - iouTotal;
-
-    const banks = {};
-    state.banks.forEach(b=>{
-      const bd = day.banksDaily[b.id] || {sslDeposit:0,houseRentDeposit:0,fees:0,salaryAccount:0,salaryCash:0};
-      const opening = prevBankClose[b.id];
-      const transferIn = day.deposits.filter(d=>d.bankId===b.id).reduce((s,d)=>s+(Number(d.amount)||0),0);
-      const transferOut = day.withdrawals.filter(w=>w.bankId===b.id).reduce((s,w)=>s+(Number(w.amount)||0),0);
-      const bankXfers = (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId);
-      const bankXferIn = bankXfers.filter(t=>t.toBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
-      const bankXferOut = bankXfers.filter(t=>t.fromBankId===b.id).reduce((s,t)=>s+(Number(t.amount)||0),0);
-      const totalIn = opening + (Number(bd.sslDeposit)||0) + (Number(bd.houseRentDeposit)||0) + transferIn + bankXferIn;
-      const totalOut = (Number(bd.fees)||0) + (Number(bd.salaryAccount)||0) + (Number(bd.salaryCash)||0) + transferOut + bankXferOut;
-      const closing = totalIn - totalOut;
-      banks[b.id] = {opening, sslDeposit:Number(bd.sslDeposit)||0, houseRentDeposit:Number(bd.houseRentDeposit)||0, transferIn, bankXferIn, totalIn,
-                      fees:Number(bd.fees)||0, salaryAccount:Number(bd.salaryAccount)||0, salaryCash:Number(bd.salaryCash)||0,
-                      transferOut, bankXferOut, totalOut, closing};
-      prevBankClose[b.id] = closing;
-    });
-
-    const grandTotal = closingAmount + Object.values(banks).reduce((s,b)=>s+b.closing,0);
-
-    results[day.id] = {openingCash, withdrawTotal, cashCollected, totalAmountCash, coaTotals, coaTotal,
-                        depositTotal, totalCashDisbursed, closingAmount, iouTotal, cashInHand, banks, grandTotal};
-    prevCash = closingAmount;
-  });
-  return results;
+    computeAllLastResult = results;
+    return results;
+  } finally {
+    computeAllInProgress = false;
+  }
 }
 
 /* ======================================================================
@@ -3739,7 +3760,28 @@ function effectiveHouseRentDeposit(key){
   return manual!==0 ? manual : sumDailyBankFieldForMonth(key, 'houseRentDeposit');
 }
 
+const _mlFigStack = new Set();
+let _mlFigDepth = 0;
+const MLFIG_MAX_DEPTH = 30; // hard circuit breaker - normal use never nests this deep
 function computeMonthlyLedgerFigures(key){
+  if(_mlFigStack.has(key) || _mlFigDepth > MLFIG_MAX_DEPTH){
+    // Reentrant call for a month whose figures are already being computed
+    // further up this same call stack (e.g. Beginning Balance/Opening Cash
+    // looking back through earlier months ends up circling back here), or
+    // the lookback chain has gone unexpectedly deep. Return a safe zeroed
+    // stand-in instead of recursing forever / blowing the call stack.
+    const rec0 = getMonthlyLedgerMonth(key);
+    return {rec:rec0, isLiveMonth:false, revTotals:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
+      revTotalIncome:0, yrtBefore:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])), yrtNew:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
+      totalDueSum:0, totalAmount:0, liveCoaTotals:Object.fromEntries(COA.map(c=>[c.key,0])), expColAmounts:[], expTotal:0, totalBalance:0,
+      cashInHandShown:0, autoBankTotal:null, bankBalanceShown:0, formulaBankTotal:0, bankFormulaMismatch:false,
+      bankBreakdownShown:null, bankBreakdownSum:0, bankBreakdownMismatch:false, otherAsset:rec0.balanceSheet.otherAsset||{label:'',amount:0}, otherAssetAmount:0,
+      remainingBalance:0, noteTotal:0, noteTotalMismatch:false, totalLiabilities:0, assetLiabilityMismatch:false,
+      debtTotal:0, gratuityPayable:0, eduAssistPayable:0, totalAssets:0, equity:0, customRowValues:{}, metricValues:{}, mandatoryIssues:[]};
+  }
+  _mlFigStack.add(key);
+  _mlFigDepth++;
+  try{
   const rec = getMonthlyLedgerMonth(key);
   const isLiveMonth = key === monthKeyFor(state.month, state.year);
 
@@ -3887,6 +3929,10 @@ function computeMonthlyLedgerFigures(key){
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     debtTotal, gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues, mandatoryIssues};
+  } finally {
+    _mlFigStack.delete(key);
+    _mlFigDepth--;
+  }
 }
 
 /* Self-service editing modal: lets the user fix small "data link" and
@@ -5931,12 +5977,22 @@ function renderNotesheetCard(){
   };
 
   if((state.withdrawNotesheetLog||[]).length){
-    card.appendChild(el(`
+    const wnMonthKey = currentSelectedMonthKey();
+    const wnLogThisMonth = state.withdrawNotesheetLog.filter(l=>{
+      const d = l.generatedDate || l.endDate;
+      return d && d.slice(0,7)===wnMonthKey;
+    });
+    const wnRec = state.monthlyLedger.months[wnMonthKey];
+    const wnFilesHidden = wnRec && wnRec.notesheetFilesHidden;
+    if(wnLogThisMonth.length) card.appendChild(el(`
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
-        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+          <div style="font-size:12px; font-weight:700; opacity:.7;">Saved history for ${monthKeyLabel(wnMonthKey)} (also feeds Monthly Ledger)${wnFilesHidden ? ' &mdash; files hidden' : ''}</div>
+          <button type="button" class="secondary small" data-action="toggle-withdraw-files-hidden" data-month="${wnMonthKey}">${wnFilesHidden ? 'Show files again' : "Don't need files anymore"}</button>
+        </div>
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.withdrawNotesheetLog.slice().sort((a,b)=>{
+            ${wnLogThisMonth.slice().sort((a,b)=>{
               const na = parseInt((a.summaryLabel||'').split('-').pop(),10)||0;
               const nb = parseInt((b.summaryLabel||'').split('-').pop(),10)||0;
               return na-nb;
@@ -5946,7 +6002,7 @@ function renderNotesheetCard(){
                 <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
                 <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
-                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-withdraw-log" data-id="${l.id}" title="View this notesheet">&#128065;</button>
+                  ${(l.fileBase64 && !wnFilesHidden) ? `<button type="button" class="secondary small" data-action="view-withdraw-log" data-id="${l.id}" title="View this notesheet">&#128065;</button>
                   <button type="button" class="secondary small" data-action="download-withdraw-log" data-id="${l.id}" title="Download this notesheet">&#11015;</button>` : ''}
                   <button type="button" class="danger small" data-action="delete-withdraw-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
                 </td>
@@ -5962,6 +6018,13 @@ function renderNotesheetCard(){
 }
 
 function renderDepositNotesheetCard(){
+  const dnsMonthKey = currentSelectedMonthKey();
+  const dnsLogThisMonth = (state.depositNotesheetLog||[]).filter(l=>{
+    const d = l.generatedDate || (l.endDate);
+    return d && d.slice(0,7)===dnsMonthKey;
+  });
+  const dnsRec = state.monthlyLedger.months[dnsMonthKey];
+  const dnsFilesHidden = dnsRec && dnsRec.notesheetFilesHidden;
   const card = el(`
     <div class="card" id="section-deposit-notesheet">
       <h3><span class="num">&#128190;</span> Deposit Notesheet</h3>
@@ -5995,18 +6058,21 @@ function renderDepositNotesheetCard(){
       </label>
       <p class="subnote" style="margin-top:-4px;">Dates auto-fill from the uploaded file's own date range when possible &mdash; adjust them here if that's wrong or missing; whatever is set in these two boxes is what prints on the notesheet.</p>
       <div id="dns-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
-      ${(state.depositNotesheetLog||[]).length ? `
+      ${dnsLogThisMonth.length ? `
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
-        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+          <div style="font-size:12px; font-weight:700; opacity:.7;">Saved history for ${monthKeyLabel(dnsMonthKey)} (also feeds Monthly Ledger)${dnsFilesHidden ? ' &mdash; files hidden' : ''}</div>
+          <button type="button" class="secondary small" data-action="toggle-deposit-files-hidden" data-month="${dnsMonthKey}">${dnsFilesHidden ? 'Show files again' : "Don't need files anymore"}</button>
+        </div>
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.depositNotesheetLog.slice().sort((a,b)=>(a.noteNum||0)-(b.noteNum||0)).slice(-5).map(l=>`
+            ${dnsLogThisMonth.slice().sort((a,b)=>(a.noteNum||0)-(b.noteNum||0)).slice(-5).map(l=>`
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;" class="mono">#${l.noteNum}</td>
                 <td style="padding:4px 6px;">${l.startDate} &rarr; ${l.endDate}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
                 <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
-                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-deposit-log" data-id="${l.id}" title="View this notesheet">&#128065;</button>
+                  ${(l.fileBase64 && !dnsFilesHidden) ? `<button type="button" class="secondary small" data-action="view-deposit-log" data-id="${l.id}" title="View this notesheet">&#128065;</button>
                   <button type="button" class="secondary small" data-action="download-deposit-log" data-id="${l.id}" title="Download this notesheet">&#11015;</button>` : ''}
                   <button type="button" class="danger small" data-action="delete-deposit-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
                 </td>
@@ -6190,11 +6256,16 @@ function crossCheckTBLStatement(stmtRows){
 const DUE_ACCOUNT_TO_REVENUE_KEY = {
   'transport -ar':'transportFee', 'transport-ar':'transportFee', 'transport':'transportFee',
   'tuition fee':'tuitionFee',
+  'late fine':'tuitionFee', 'late fine -ar':'tuitionFee', 'late fine-ar':'tuitionFee',
   'uniform fees':'uniform', 'uniform':'uniform',
   'admission fee':'admissionFee', 'admission fee & form':'admissionFee', 'admission fee -ar':'admissionFee',
   'muqaddam fees':'mqmFee',
   'session fees':'sessionFee', 'session fee':'sessionFee',
   'books & sty':'booksSty', 'books & stationeries':'booksSty',
+  'book & mp: stationery':'booksSty', 'book & mp : stationery':'booksSty', 'book & mp:stationery':'booksSty',
+  'books & mp: stationery':'booksSty', 'books & mp : stationery':'booksSty', 'book and mp: stationery':'booksSty',
+  'book & stationary':'booksSty', 'book &amp : stationary':'booksSty', 'book & amp: stationary':'booksSty',
+  'books & stationary':'booksSty', 'book and stationary':'booksSty',
   'event fee':'eventFee',
 };
 // Section titles for the Due List export, matching the accountant's own template wording
@@ -6237,7 +6308,9 @@ async function parseDuesRegisterFile(arrayBuffer){
       } else {
         dueTotals[singleKey] = (dueTotals[singleKey]||0) + duesAmt;
         if(!dueStudents[singleKey]) dueStudents[singleKey] = [];
-        dueStudents[singleKey].push({studentId:String(studentId), name:String(name), category:String(category), amount:duesAmt});
+        const existingRow = dueStudents[singleKey].find(s=>s.studentId===String(studentId));
+        if(existingRow){ existingRow.amount += duesAmt; }
+        else{ dueStudents[singleKey].push({studentId:String(studentId), name:String(name), category:String(category), amount:duesAmt}); }
       }
     }
     advanceTotal += advAmt; // one combined figure across every row - goes into a single Advance Payment box, not split by month
@@ -7130,6 +7203,17 @@ function distinctDayMonthKeys(){
   state.days.forEach(d=>{ if(d.date) keys.add(d.date.slice(0,7)); }); // "YYYY-MM" sorts correctly as a plain string
   return Array.from(keys).sort();
 }
+/* The month currently "selected" in the Daily Ledger - same footer
+   selector used for "Download whole month", falling back to the open day
+   tab's month, then the active Month/Year. Used to filter notesheet log
+   lists to just this month's entries. */
+function currentSelectedMonthKey(){
+  const keys = distinctDayMonthKeys();
+  if(dlMonthKey && keys.includes(dlMonthKey)) return dlMonthKey;
+  const activeDay = findDay(selectedDayId);
+  if(activeDay && activeDay.date) return activeDay.date.slice(0,7);
+  return monthKeyFor(state.month, state.year);
+}
 function renderFooter(){
   const keys = distinctDayMonthKeys();
   if(keys.length && (!dlMonthKey || !keys.includes(dlMonthKey))){
@@ -7231,6 +7315,18 @@ function wireDelegation(){
     if(action==='close-monthly-ledger'){
       monthlyLedgerOpen = false;
       render(); return;
+    }
+    if(action==='toggle-withdraw-files-hidden'){
+      const mk = t.dataset.month;
+      const rec = getMonthlyLedgerMonth(mk);
+      rec.notesheetFilesHidden = !rec.notesheetFilesHidden;
+      saveState(); render(); return;
+    }
+    if(action==='toggle-deposit-files-hidden'){
+      const mk = t.dataset.month;
+      const rec = getMonthlyLedgerMonth(mk);
+      rec.notesheetFilesHidden = !rec.notesheetFilesHidden;
+      saveState(); render(); return;
     }
     if(action==='delete-withdraw-log'){
       const id = t.dataset.id;
@@ -8379,13 +8475,13 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
 
   if(!Array.isArray(state.depositNotesheetLog)) state.depositNotesheetLog = [];
   state.depositNotesheetLog.push({
-    id:depositLogId, generatedAt:new Date().toISOString(), noteNum, startDate:startISO, endDate:endISO,
+    id:depositLogId, generatedAt:new Date().toISOString(), generatedDate:genISO, noteNum, startDate:startISO, endDate:endISO,
     lines: lines.map(([desc,amt])=>({desc,amt})),
     grandTotal: lines.reduce((s,[,amt])=>s+amt,0),
     fileName:`Revenue_deposit-${noteNum}.xlsx`, fileBase64: await workbookToBase64(wb)
   });
 
-  saveState();
+  await saveState();
   render();
 }
 
@@ -8775,7 +8871,7 @@ function uniqueSheetName(base, used){
 }
 
 /* --- Individual category notesheet, mirroring the hand-built template --- */
-function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
+function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firstVoucher, lastVoucher){
   ws.getColumn(1).width = 3.9; ws.getColumn(2).width = 3;
   ws.getColumn(3).width = 13; ws.getColumn(4).width = 47; ws.getColumn(5).width = 20;
   ws.getColumn(6).width = 7;
@@ -8807,7 +8903,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate){
   put('B4','Sheet No 01',{size:12});
 
   ws.mergeCells('B5:E5');
-  const sentence = `Following amount of money disbursed from ${dayLabelFull(firstDate)} ${state.year} - ${dayLabelFull(lastDate)} ${state.year} (voucher no: ${items[0].voucher} - ${items[items.length-1].voucher}) as ${coaText(cat,'expensePhrase')} expense may be withdrawn from madrasa acct:`;
+  const sentence = `Following amount of money disbursed from ${dayLabelFull(firstDate)} ${state.year} - ${dayLabelFull(lastDate)} ${state.year} (voucher no: ${firstVoucher} - ${lastVoucher}) as ${coaText(cat,'expensePhrase')} expense may be withdrawn from madrasa acct:`;
   put('B5', sentence, {size:12, wrap:true});
   ws.getRow(5).height = 30;
 
@@ -8980,10 +9076,10 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   const used = new Set();
   const summaryRows = [];
 
-  cats.forEach(({key, cat, items, total, firstDate, lastDate})=>{
+  cats.forEach(({key, cat, items, total, firstDate, lastDate, firstVoucher, lastVoucher})=>{
     const number = (state.notesheetCounters[key]||0) + 1;
     const ws = wb.addWorksheet(uniqueSheetName(`${coaText(cat,'notesheetLabel')} ${number}`.replace(/[\\\/\?\*\[\]:]/g,''), used));
-    writeNotesheet(ws, cat, number, items, total, firstDate, lastDate);
+    writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firstVoucher, lastVoucher);
     if(incrementNumbering) state.notesheetCounters[key] = number;
     summaryRows.push({label:coaText(cat,'summaryLabel'), total});
   });
