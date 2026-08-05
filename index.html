@@ -530,11 +530,15 @@ function monthRevenueTotals(monthRec){
 }
 /* Sum of the Admission-Fee-only portion (excluding Admission Form) of this
    month's Deposit Notesheets - see revEntry.admissionFeeOnly above. Older
-   revenue entries (pre-dating this split, or from any other source than a
-   generated Deposit Notesheet) simply have no admissionFeeOnly field and
-   contribute 0, same as if they'd never been through this calculation. */
+   revenue entries (generated before that split existed) have no
+   admissionFeeOnly field at all - rather than silently contributing 0
+   (which made Gratuity/EduAssist show 0 for every already-generated
+   historical month), they fall back to their combined admissionFee figure
+   (Fee + Form together), the best available approximation from data that
+   was never split at the source. Only genuinely post-split entries use
+   the accurate Fee-only figure. */
 function monthAdmissionFeeOnlyTotal(monthRec){
-  return (monthRec.revenueEntries||[]).reduce((s,e)=>s+(Number(e.admissionFeeOnly)||0),0);
+  return (monthRec.revenueEntries||[]).reduce((s,e)=>s+(Number(e.admissionFeeOnly!==undefined ? e.admissionFeeOnly : e.admissionFee)||0),0);
 }
 /* Gratuity gets 1/6 and the Education Assistance Fund gets 1/30 of this
    month's Admission-Fee-only collections (never the Admission Form
@@ -5299,7 +5303,7 @@ async function exportMonthlyLedger(key, previewOnly){
 
   let r = headerRowNum+1;
   const beginningBalanceRow = r;
-  revSummaryLabel(r, 'Beginning Balance Bank');
+  rev.getCell(r,3).value = 'Beginning Balance Bank';
   rev.getCell(r,4).value = effectiveBeginningBankBalance(key);
   r++;
   // House Rent Deposit only gets its own separate (non-dated) row in the
@@ -5325,14 +5329,11 @@ async function exportMonthlyLedger(key, previewOnly){
   // One combined, chronologically-sorted block: every revenue entry plus
   // every dated House Rent Deposit line, interleaved by date rather than
   // House Rent Deposit always sitting above everything else regardless of
-  // when it actually happened. House Rent Deposit rows carry a plain
-  // number straight into the Total column (not a category breakdown, so
-  // no SUM(E:O) formula for them) - their row numbers are tracked
-  // separately so Total Amount below can still add them in without
-  // double-counting them into Total Income (which sums only the
-  // per-category columns E:O, not column D, for exactly this reason).
+  // when it actually happened. Dated House Rent Deposit posts into the
+  // Miscellaneous Collection category column (see below), so it's fully
+  // part of Total Income like any other entry - no separate tracking
+  // needed for it here.
   const dataStartRow = r;
-  const houseRentRowNums = [];
   const mergedRevenueRows = [
     ...sortedByDate(rec.revenueEntries).map(entry=>({type:'revenue', date:entry.date, entry})),
     ...houseRentEntries.map(en=>({type:'houseRent', date:en.date, amount:en.amount})),
@@ -5340,13 +5341,18 @@ async function exportMonthlyLedger(key, previewOnly){
     const da = a.date||'', db = b.date||'';
     return da===db ? 0 : da===''?1: db===''?-1 : da.localeCompare(db);
   });
+  const miscColIdx = REVENUE_CATS.findIndex(c=>c.key==='misc');
   mergedRevenueRows.forEach(row=>{
     rev.getCell(r,2).value = row.date ? new Date(row.date) : '';
     if(row.date) rev.getCell(r,2).numFmt = 'd/m/yyyy';
     if(row.type==='houseRent'){
+      // Goes in the Miscellaneous Collection category column (like any
+      // other revenue entry) so it's genuinely part of Total Income, not
+      // a separately-tracked addition on top of it - the description
+      // still says "House Rent Deposit" so it's identifiable.
       rev.getCell(r,3).value = 'House Rent Deposit';
-      rev.getCell(r,4).value = row.amount;
-      houseRentRowNums.push(r);
+      rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
+      REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = i===miscColIdx ? row.amount : 0; });
     } else {
       rev.getCell(r,3).value = exportRevenueDesc(row.entry.desc);
       rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
@@ -5389,7 +5395,7 @@ async function exportMonthlyLedger(key, previewOnly){
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(rec.revenueTotalDue[c.key])||0; });
   r++;
   const transferRow = r;
-  revSummaryLabel(r, 'Transfer between categories'); rev.getCell(r,1).font = FONT;
+  revSummaryLabel(r, 'Transfer from Admission Fee to Gratuity & Education Assistant Fund'); rev.getCell(r,1).font = FONT;
   rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = effectiveRevenueTransfer(rec, c.key); });
   r++;
@@ -5410,13 +5416,11 @@ async function exportMonthlyLedger(key, previewOnly){
   r++;
   const totalAmountRow = r;
   revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
-  // House Rent Deposit is now scattered across the merged, date-sorted
-  // data rows (see mergedRevenueRows above) rather than one contiguous
-  // block, so its contribution here is summed by cell reference
-  // (houseRentRowNums) instead of a row range - falls back to the single
-  // non-dated manual row, or plain 0, when there's nothing dated to add.
-  const houseRentRef = houseRentRowNums.length ? `SUM(${houseRentRowNums.map(rn=>`D${rn}`).join(',')})`
-    : houseRentManualRow ? `D${houseRentManualRow}` : '0';
+  // Dated House Rent Deposit now posts straight into the Miscellaneous
+  // Collection column above, so it's already inside Total Income - only
+  // the rare legacy non-dated manual fallback (which can't be date-sorted
+  // into that block at all) still needs adding on separately here.
+  const houseRentRef = houseRentManualRow ? `D${houseRentManualRow}` : '0';
   rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+${houseRentRef}`};
   rev.getCell(r,4).font = BOLD;
   r++;
@@ -5486,19 +5490,25 @@ async function exportMonthlyLedger(key, previewOnly){
   });
 
   let er = expHeaderRow+2;
+  // First data line: a bold section label, matching how the Revenue sheet
+  // leads with "Beginning Balance Bank" - this whole block is the bank/
+  // cash withdrawal side of the ledger.
+  exp.getCell(er,2).value = 'Bank Cash withdraw';
+  exp.getCell(er,2).font = BOLD;
+  er++;
   const expDataStartRow = er;
   // One combined, chronologically-sorted block: expenditure entries (each
   // Withdraw Notesheet's own dated, per-category row) plus Bank fees,
   // Salary by Account, and Salary by Cash - all dated per-day - interleaved
   // by date instead of the latter three always trailing after everything
-  // else regardless of when they actually happened. The three "plain
-  // total, no category breakdown" types put their amount straight in the
-  // Total column; their row numbers are tracked (bankFeesRowNums etc., all
-  // scattered through the block, not contiguous) so Total Expenditure
-  // below can add them by reference without double-counting - the E:N
-  // category-column block sum used for Total Expenditure already covers
-  // every expenditure-entry row correctly since these three simply have
-  // nothing in those columns.
+  // else regardless of when they actually happened. Each of these three
+  // posts into its actual expenditure category column (Bank fees -> "Bank
+  // Charge", Salary by Account/Cash -> "Pay & Allce") rather than only
+  // ever showing up in the Total column with no category behind it - same
+  // treatment as an ordinary expenditure-entry row, so ROW_NUMS below is
+  // only used as a fallback for the rare case that column doesn't exist
+  // (e.g. renamed/deleted), where the amount still needs a specific cell
+  // reference into Total Expenditure instead of being silently dropped.
   const bankFeesEntries = dailyBankFieldEntries(key, 'fees');
   const salaryAccountManual = Number(rec.salaryByAccount)||0;
   const salaryAccountEntries = salaryAccountManual===0 ? dailyBankFieldEntries(key, 'salaryAccount') : [];
@@ -5516,19 +5526,32 @@ async function exportMonthlyLedger(key, previewOnly){
   });
   const ROW_LABEL = {fees:'Bank fees', salaryAccount:'Salary by Account', salaryCash:'Salary by Cash'};
   const ROW_NUMS = {fees:bankFeesRowNums, salaryAccount:salaryAccountRowNums, salaryCash:salaryCashRowNums};
+  // Which expenditure column each "plain" type actually spent from -
+  // matched by label so it still works if columns get reordered, and
+  // falls back to the old plain-Total-only behavior (via ROW_NUMS) if that
+  // column has been renamed or deleted.
+  const bankChargeCol = rec.expenditureColumns.find(c=>c.label==='Bank Charge');
+  const payAllceCol = rec.expenditureColumns.find(c=>c.label==='Pay & Allce');
+  const ROW_TARGET_COL = {fees:bankChargeCol, salaryAccount:payAllceCol, salaryCash:payAllceCol};
   mergedExpRows.forEach(row=>{
     exp.getCell(er,1).value = row.date ? new Date(row.date) : '';
     if(row.date) exp.getCell(er,1).numFmt = 'd/m/yyyy';
     if(row.type==='entry'){
       exp.getCell(er,2).value = exportExpenditureDesc(row.entry, rec);
       rec.expenditureColumns.forEach((col,i)=>{
-        if((row.entry.amounts||{})[col.id]!==undefined) exp.getCell(er, 4+i).value = Number((row.entry.amounts||{})[col.id])||0;
+        exp.getCell(er, 4+i).value = Number((row.entry.amounts||{})[col.id])||0;
       });
       exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
     } else {
       exp.getCell(er,2).value = ROW_LABEL[row.type];
-      exp.getCell(er,3).value = row.amount;
-      ROW_NUMS[row.type].push(er);
+      const targetCol = ROW_TARGET_COL[row.type];
+      if(targetCol){
+        rec.expenditureColumns.forEach((col,i)=>{ exp.getCell(er, 4+i).value = col===targetCol ? row.amount : 0; });
+        exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+      } else {
+        exp.getCell(er,3).value = row.amount;
+        ROW_NUMS[row.type].push(er);
+      }
     }
     for(let c=1;c<=EXP_LAST_COL;c++) exp.getCell(er,c).font = c>=3 ? FONT_SMALL : FONT;
     er++;
@@ -5544,18 +5567,36 @@ async function exportMonthlyLedger(key, previewOnly){
   }
   if(!bankFeesEntries.length){
     expSummaryLabel(er, 'Bank fees'); exp.getCell(er,1).font = FONT;
-    exp.getCell(er,3).value = 0;
-    bankFeesRowNums.push(er); er++;
+    if(bankChargeCol){
+      rec.expenditureColumns.forEach((col,i)=>{ exp.getCell(er, 4+i).value = 0; });
+      exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+    } else {
+      exp.getCell(er,3).value = 0;
+      bankFeesRowNums.push(er);
+    }
+    er++;
   }
   if(!salaryAccountEntries.length){
     expSummaryLabel(er, 'Salary by Account'); exp.getCell(er,1).font = FONT;
-    exp.getCell(er,3).value = salaryAccountManual;
-    salaryAccountRowNums.push(er); er++;
+    if(payAllceCol){
+      rec.expenditureColumns.forEach((col,i)=>{ exp.getCell(er, 4+i).value = col===payAllceCol ? salaryAccountManual : 0; });
+      exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+    } else {
+      exp.getCell(er,3).value = salaryAccountManual;
+      salaryAccountRowNums.push(er);
+    }
+    er++;
   }
   if(!salaryCashEntries.length){
     expSummaryLabel(er, 'Salary by Cash'); exp.getCell(er,1).font = FONT;
-    exp.getCell(er,3).value = salaryCashManual;
-    salaryCashRowNums.push(er); er++;
+    if(payAllceCol){
+      rec.expenditureColumns.forEach((col,i)=>{ exp.getCell(er, 4+i).value = col===payAllceCol ? salaryCashManual : 0; });
+      exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+    } else {
+      exp.getCell(er,3).value = salaryCashManual;
+      salaryCashRowNums.push(er);
+    }
+    er++;
   }
   const expDataFinalRow = er-1;
   // Manual override adjustment: only ever needed - and only ever shown -
