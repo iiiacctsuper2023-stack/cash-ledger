@@ -188,6 +188,11 @@
   .floating-window-controls{display:flex;gap:6px;}
   .floating-window-controls button{padding:2px 10px;min-width:0;line-height:1.6;}
   .floating-window-body{flex:1 1 auto;overflow:auto;padding:4px 10px 14px;}
+  /* Monthly Ledger's own "Jump to" row - sticks to the top of the
+     floating window's scroll area (not the page) so it stays clickable
+     no matter how far down the window itself has been scrolled. */
+  .ml-jump-nav{position:sticky;top:0;z-index:6;background:var(--card,#FBFAF5);padding:6px 0;margin:0 0 2px;box-shadow:0 2px 4px rgba(0,0,0,.05);}
+  .ml-jump-nav .ml-jump-label{font-size:11.5px;color:var(--ink-soft);align-self:center;margin-right:2px;}
   .floating-window-body .card{box-shadow:none;border:none;margin:0;padding:6px 0 0;}
   @media (max-width:900px){
     .floating-window{top:2vh;right:1vw;left:1vw;width:auto;height:96vh;}
@@ -1689,6 +1694,22 @@ function migrateState(){
     rec.revenueTransferMigrated = true;
     if(rec.revenueTransfer.gratuityOverride===undefined && Number(rec.revenueTransfer.gratuity)) rec.revenueTransfer.gratuityOverride = Number(rec.revenueTransfer.gratuity);
     if(rec.revenueTransfer.eduAssistOverride===undefined && Number(rec.revenueTransfer.eduAssist)) rec.revenueTransfer.eduAssistOverride = Number(rec.revenueTransfer.eduAssist);
+  });
+  // Cash in Hand / Balance in Bank Account used to lock in a manual
+  // override on every single blur of their input - including just
+  // clicking in and back out without typing anything - so a month could
+  // silently end up "stuck" showing a frozen 0 forever instead of the
+  // real auto-computed figure. Now fixed so only an actually-different
+  // typed number creates an override; this one-time pass clears out any
+  // exactly-zero override that's very likely a leftover from that old
+  // behavior rather than a genuine "cash in hand really is zero" entry,
+  // so auto-calculation can take back over. A genuinely nonzero override
+  // is left untouched either way.
+  Object.values(state.monthlyLedger.months||{}).forEach(rec=>{
+    if(!rec.balanceSheet || rec.zeroOverrideMigrated) return;
+    rec.zeroOverrideMigrated = true;
+    if(rec.balanceSheet.cashInHandOverride===0) rec.balanceSheet.cashInHandOverride = null;
+    if(rec.balanceSheet.bankBalanceOverride===0) rec.balanceSheet.bankBalanceOverride = null;
   });
   if(state.lockPasswordHash===undefined) state.lockPasswordHash = null;
   if(state.dayLockPasswordHash===undefined) state.dayLockPasswordHash = null;
@@ -4277,8 +4298,8 @@ function renderMonthlyLedgerCard(){
         <button type="button" class="secondary" data-action="ml-preview">&#128065; Preview &amp; correct before export</button>
         <button type="button" class="${mlTotalViewOpen?'danger':'secondary'} small" data-action="ml-toggle-total-view" style="margin-left:auto;">${mlTotalViewOpen?'&#9660; Showing Total (all months)':'&#9654; Show Total (all months)'}</button>
       </div>
-      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:2px;">
-        <span style="font-size:11.5px;color:var(--ink-soft);align-self:center;margin-right:2px;">Jump to:</span>
+      <div class="row ml-jump-nav" style="flex-wrap:wrap;gap:6px;">
+        <span class="ml-jump-label">Jump to:</span>
         ${ML_QUICK_NAV_SECTIONS.map(s=>`<button type="button" class="secondary small ml-jump-btn" data-ml-jump="${s.id}">${escapeHtml(s.label)}</button>`).join('')}
         <button type="button" class="secondary small ml-jump-btn" data-ml-jump-top="1" title="Top of Monthly Ledger (Ctrl+Home while hovering this window)" style="margin-left:auto;">&#8962; Top</button>
         <button type="button" class="secondary small ml-jump-btn" data-ml-jump-bottom="1" title="Bottom of Monthly Ledger (Ctrl+End while hovering this window)">Bottom &#8964;</button>
@@ -4365,15 +4386,17 @@ function renderMonthlyLedgerCard(){
       <h3 id="ml-section-balance-sheet" style="font-size:14px;">Balance Sheet</h3>
       <div class="row">
         <div class="field">
-          <label>Cash in Hand ${autoCashInHand!==null?'<span class="tag">auto: this month\'s last day</span>':''}</label>
+          <label>Cash in Hand ${rec.balanceSheet.cashInHandOverride!==null?'<span class="tag">manually overridden</span>':autoCashInHand!==null?'<span class="tag">auto: this month\'s last day</span>':''}</label>
           <input type="text" inputmode="decimal" id="ml-cash-override" value="${formatAsianAmount(cashInHandShown||0)}" ${isLiveMonth && rec.balanceSheet.cashInHandOverride===null ? 'placeholder="auto"' : ''}>
+          ${rec.balanceSheet.cashInHandOverride!==null ? `<button type="button" class="secondary small" id="ml-cash-reset" title="Clear override, go back to auto" style="margin-top:4px;">&#8635; Reset to auto</button>` : ''}
         </div>
         <div class="field">
-          <label>Balance in Bank Account ${isLiveMonth&&autoBankTotal!==null?'<span class="tag">auto from Daily Ledger</span>':'<span class="tag">auto: Beginning + Income − Expenditure</span>'}</label>
+          <label>Balance in Bank Account ${rec.balanceSheet.bankBalanceOverride!==null?'<span class="tag">manually overridden</span>':isLiveMonth&&autoBankTotal!==null?'<span class="tag">auto from Daily Ledger</span>':'<span class="tag">auto: Beginning + Income − Expenditure</span>'}</label>
           <input type="text" inputmode="decimal" id="ml-bank-balance-override" value="${formatAsianAmount(bankBalanceShown||0)}" ${isLiveMonth && rec.balanceSheet.bankBalanceOverride===null ? 'placeholder="auto"' : ''}>
+          ${rec.balanceSheet.bankBalanceOverride!==null ? `<button type="button" class="secondary small" id="ml-bank-balance-reset" title="Clear override, go back to auto" style="margin-top:4px;">&#8635; Reset to auto</button>` : ''}
         </div>
       </div>
-      <p id="ml-warn-bank-formula" class="subnote" style="margin-top:-6px;color:#B3261E;${bankFormulaMismatch?'':'display:none;'}">&#9888; This doesn't match Beginning Balance + Income &minus; Expenditure (${money(formulaBankTotal)}). Check for a data entry mistake.</p>
+      <p class="subnote" style="margin-top:-4px;">These two only turn into a manual override when the number you type actually differs from the auto figure - just clicking in and out, or tabbing through, never locks one in.</p>      <p id="ml-warn-bank-formula" class="subnote" style="margin-top:-6px;color:#B3261E;${bankFormulaMismatch?'':'display:none;'}">&#9888; This doesn't match Beginning Balance + Income &minus; Expenditure (${money(formulaBankTotal)}). Check for a data entry mistake.</p>
 
       <div class="row">
         <div class="field">
@@ -4475,7 +4498,13 @@ function renderMonthlyLedgerCard(){
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const bankInp = card.querySelector('#ml-bank-balance-override');
-  if(bankInp) wireAmountInput(bankInp, (num)=>{ rec.balanceSheet.bankBalanceOverride = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  const autoBankValue = isLiveMonth && autoBankTotal!==null ? autoBankTotal : formulaBankTotal;
+  if(bankInp) wireAmountInput(bankInp, (num)=>{
+    rec.balanceSheet.bankBalanceOverride = (num===autoBankValue) ? null : num;
+    saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
+  });
+  const bankResetBtn = card.querySelector('#ml-bank-balance-reset');
+  if(bankResetBtn) bankResetBtn.onclick = ()=>{ rec.balanceSheet.bankBalanceOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
   const otherAssetAmtInp = card.querySelector('#ml-other-asset-amount');
   if(otherAssetAmtInp) wireAmountInput(otherAssetAmtInp, (num)=>{ rec.balanceSheet.otherAsset.amount = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const otherAssetLabelInp = card.querySelector('.ml-other-asset-label');
@@ -4484,7 +4513,12 @@ function renderMonthlyLedgerCard(){
     otherAssetLabelInp.oninput = (e)=>{ rec.balanceSheet.otherAsset.label = e.target.value; saveState(); };
   }
   const cashInp = card.querySelector('#ml-cash-override');
-  if(cashInp) wireAmountInput(cashInp, (num)=>{ rec.balanceSheet.cashInHandOverride = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  if(cashInp) wireAmountInput(cashInp, (num)=>{
+    rec.balanceSheet.cashInHandOverride = (num===autoCashInHand) ? null : num;
+    saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
+  });
+  const cashResetBtn = card.querySelector('#ml-cash-reset');
+  if(cashResetBtn) cashResetBtn.onclick = ()=>{ rec.balanceSheet.cashInHandOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
 
   drawMlRevenueList(card.querySelector('#ml-revenue-list'), rec, key);
   drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
@@ -5268,36 +5302,56 @@ async function exportMonthlyLedger(key, previewOnly){
   revSummaryLabel(r, 'Beginning Balance Bank');
   rev.getCell(r,4).value = effectiveBeginningBankBalance(key);
   r++;
-  const houseRentDepositStartRow = r;
+  // House Rent Deposit only gets its own separate (non-dated) row in the
+  // rare legacy case where it's a flat manually-typed monthly total with
+  // no day-by-day source to date it by; the normal, dated, per-day case is
+  // merged into the main date-sorted data block below instead of always
+  // appearing first regardless of its actual date.
   const houseRentManual = Number(rec.houseRentDeposit)||0;
   const houseRentEntries = houseRentManual===0 ? dailyBankFieldEntries(key, 'houseRentDeposit') : [];
-  if(houseRentEntries.length){
-    houseRentEntries.forEach(en=>{
-      rev.getCell(r,2).value = new Date(en.date);
-      rev.getCell(r,2).numFmt = 'd/m/yyyy';
-      rev.getCell(r,3).value = 'House Rent Deposit';
-      rev.getCell(r,4).value = en.amount;
-      r++;
-    });
-  } else {
+  let houseRentManualRow = null;
+  if(!houseRentEntries.length){
+    houseRentManualRow = r;
     revSummaryLabel(r, 'House Rent Deposit');
     rev.getCell(r,4).value = houseRentManual;
     r++;
   }
-  const houseRentDepositEndRow = r-1;
   const yrtBeforeRow = r;
   rev.getCell(r,3).value = 'Yearly Running Total from Previous Month';
   const yrtBefore = yearlyRunningTotalBefore(key);
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r, 5+i).value = yrtBefore[c.key]; });
   r++;
 
+  // One combined, chronologically-sorted block: every revenue entry plus
+  // every dated House Rent Deposit line, interleaved by date rather than
+  // House Rent Deposit always sitting above everything else regardless of
+  // when it actually happened. House Rent Deposit rows carry a plain
+  // number straight into the Total column (not a category breakdown, so
+  // no SUM(E:O) formula for them) - their row numbers are tracked
+  // separately so Total Amount below can still add them in without
+  // double-counting them into Total Income (which sums only the
+  // per-category columns E:O, not column D, for exactly this reason).
   const dataStartRow = r;
-  sortedByDate(rec.revenueEntries).forEach(entry=>{
-    rev.getCell(r,2).value = entry.date ? new Date(entry.date) : '';
-    if(entry.date) rev.getCell(r,2).numFmt = 'd/m/yyyy';
-    rev.getCell(r,3).value = exportRevenueDesc(entry.desc);
-    rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
-    REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(entry[c.key])||0; });
+  const houseRentRowNums = [];
+  const mergedRevenueRows = [
+    ...sortedByDate(rec.revenueEntries).map(entry=>({type:'revenue', date:entry.date, entry})),
+    ...houseRentEntries.map(en=>({type:'houseRent', date:en.date, amount:en.amount})),
+  ].sort((a,b)=>{
+    const da = a.date||'', db = b.date||'';
+    return da===db ? 0 : da===''?1: db===''?-1 : da.localeCompare(db);
+  });
+  mergedRevenueRows.forEach(row=>{
+    rev.getCell(r,2).value = row.date ? new Date(row.date) : '';
+    if(row.date) rev.getCell(r,2).numFmt = 'd/m/yyyy';
+    if(row.type==='houseRent'){
+      rev.getCell(r,3).value = 'House Rent Deposit';
+      rev.getCell(r,4).value = row.amount;
+      houseRentRowNums.push(r);
+    } else {
+      rev.getCell(r,3).value = exportRevenueDesc(row.entry.desc);
+      rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
+      REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,5+i).value = Number(row.entry[c.key])||0; });
+    }
     for(let c=2;c<=15;c++){ rev.getCell(r,c).border = thin; rev.getCell(r,c).font = c>=4 ? FONT_SMALL : FONT; }
     r++;
   });
@@ -5315,7 +5369,15 @@ async function exportMonthlyLedger(key, previewOnly){
 
   const totalIncomeRow = r;
   revSummaryLabel(r, 'Total Income:'); rev.getCell(r,1).font = BOLD;
-  for(let c=4;c<=15;c++){
+  // Column D (Total) sums the E:O category grid directly across the whole
+  // data range, rather than summing column D's own per-row values - that
+  // keeps House Rent Deposit rows (which put a plain number straight in
+  // column D, no category breakdown) correctly excluded from Total
+  // Income, now that they're interleaved into this same row range instead
+  // of living in their own separate block above it.
+  rev.getCell(r,4).value = dataEndRow>=dataStartRow ? {formula:`SUM(E${dataStartRow}:O${dataEndRow})`} : 0;
+  rev.getCell(r,4).font = BOLD;
+  for(let c=5;c<=15;c++){
     const colLetter = rev.getColumn(c).letter;
     rev.getCell(r,c).value = dataEndRow>=dataStartRow ? {formula:`SUM(${colLetter}${dataStartRow}:${colLetter}${dataEndRow})`} : 0;
     rev.getCell(r,c).font = BOLD;
@@ -5348,15 +5410,51 @@ async function exportMonthlyLedger(key, previewOnly){
   r++;
   const totalAmountRow = r;
   revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
-  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+SUM(D${houseRentDepositStartRow}:D${houseRentDepositEndRow})`};
+  // House Rent Deposit is now scattered across the merged, date-sorted
+  // data rows (see mergedRevenueRows above) rather than one contiguous
+  // block, so its contribution here is summed by cell reference
+  // (houseRentRowNums) instead of a row range - falls back to the single
+  // non-dated manual row, or plain 0, when there's nothing dated to add.
+  const houseRentRef = houseRentRowNums.length ? `SUM(${houseRentRowNums.map(rn=>`D${rn}`).join(',')})`
+    : houseRentManualRow ? `D${houseRentManualRow}` : '0';
+  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+${houseRentRef}`};
   rev.getCell(r,4).font = BOLD;
+  r++;
+
+  // Bank-to-Bank Transfer: purely informational, dated - money moving
+  // between the institution's own two bank accounts isn't income (it's
+  // already reflected in each bank's own opening/closing balance), so
+  // these rows are never summed into Total Income/Total Amount above;
+  // they're just listed here, in date order, so a transfer is visible
+  // somewhere in the Monthly Ledger rather than only inferable from two
+  // banks' closing balances not matching their own deposit/withdrawal total.
+  const bankXferRows = [];
+  (allDaysEverywhere().filter(d=>d.date.slice(0,7)===key)).forEach(day=>{
+    (day.bankTransfers||[]).filter(t=>t.fromBankId!==t.toBankId).forEach(t=>{
+      const fromBank = state.banks.find(b=>b.id===t.fromBankId);
+      const toBank = state.banks.find(b=>b.id===t.toBankId);
+      bankXferRows.push({date:day.date, amount:Number(t.amount)||0, from:fromBank?fromBank.name:'?', to:toBank?toBank.name:'?'});
+    });
+  });
+  if(bankXferRows.length){
+    const bankXferHeaderRow = r;
+    revSummaryLabel(r, 'Bank-to-Bank Transfer (informational - not part of Total Income)'); rev.getCell(r,1).font = BOLD;
+    r++;
+    bankXferRows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(x=>{
+      rev.getCell(r,2).value = new Date(x.date); rev.getCell(r,2).numFmt = 'd/m/yyyy';
+      rev.getCell(r,3).value = `${x.from} \u2192 ${x.to}`;
+      rev.getCell(r,4).value = x.amount;
+      r++;
+    });
+  }
+  const revSheetLastRow = r-1;
 
   // All-border across the whole used block, first line through last line -
   // also applies the Asian comma + 2-decimal number format to every amount
   // column (4 = Total, 5-15 = per-category amounts); columns 1-3 (index/
   // date/description) are left alone since numFmt has no effect on them
   // anyway, but skipping them keeps the intent clear.
-  for(let rr=2; rr<=totalAmountRow; rr++){
+  for(let rr=2; rr<=revSheetLastRow; rr++){
     for(let cc=1; cc<=REV_LAST_COL; cc++){
       rev.getCell(rr,cc).border = thin;
       if(!rev.getCell(rr,cc).font || !rev.getCell(rr,cc).font.name) rev.getCell(rr,cc).font = FONT;
@@ -5389,101 +5487,120 @@ async function exportMonthlyLedger(key, previewOnly){
 
   let er = expHeaderRow+2;
   const expDataStartRow = er;
-  sortedByDate(rec.expenditureEntries).forEach(entry=>{
-    exp.getCell(er,1).value = entry.date ? new Date(entry.date) : '';
-    if(entry.date) exp.getCell(er,1).numFmt = 'd/m/yyyy';
-    exp.getCell(er,2).value = exportExpenditureDesc(entry, rec);
-    rec.expenditureColumns.forEach((col,i)=>{
-      if((entry.amounts||{})[col.id]!==undefined) exp.getCell(er, 4+i).value = Number((entry.amounts||{})[col.id])||0;
-    });
-    exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+  // One combined, chronologically-sorted block: expenditure entries (each
+  // Withdraw Notesheet's own dated, per-category row) plus Bank fees,
+  // Salary by Account, and Salary by Cash - all dated per-day - interleaved
+  // by date instead of the latter three always trailing after everything
+  // else regardless of when they actually happened. The three "plain
+  // total, no category breakdown" types put their amount straight in the
+  // Total column; their row numbers are tracked (bankFeesRowNums etc., all
+  // scattered through the block, not contiguous) so Total Expenditure
+  // below can add them by reference without double-counting - the E:N
+  // category-column block sum used for Total Expenditure already covers
+  // every expenditure-entry row correctly since these three simply have
+  // nothing in those columns.
+  const bankFeesEntries = dailyBankFieldEntries(key, 'fees');
+  const salaryAccountManual = Number(rec.salaryByAccount)||0;
+  const salaryAccountEntries = salaryAccountManual===0 ? dailyBankFieldEntries(key, 'salaryAccount') : [];
+  const salaryCashManual = Number(rec.salaryByCash)||0;
+  const salaryCashEntries = salaryCashManual===0 ? dailyBankFieldEntries(key, 'salaryCash') : [];
+  const bankFeesRowNums = [], salaryAccountRowNums = [], salaryCashRowNums = [];
+  const mergedExpRows = [
+    ...sortedByDate(rec.expenditureEntries).map(entry=>({type:'entry', date:entry.date, entry})),
+    ...bankFeesEntries.map(en=>({type:'fees', date:en.date, amount:en.amount})),
+    ...salaryAccountEntries.map(en=>({type:'salaryAccount', date:en.date, amount:en.amount})),
+    ...salaryCashEntries.map(en=>({type:'salaryCash', date:en.date, amount:en.amount})),
+  ].sort((a,b)=>{
+    const da = a.date||'', db = b.date||'';
+    return da===db ? 0 : da===''?1: db===''?-1 : da.localeCompare(db);
+  });
+  const ROW_LABEL = {fees:'Bank fees', salaryAccount:'Salary by Account', salaryCash:'Salary by Cash'};
+  const ROW_NUMS = {fees:bankFeesRowNums, salaryAccount:salaryAccountRowNums, salaryCash:salaryCashRowNums};
+  mergedExpRows.forEach(row=>{
+    exp.getCell(er,1).value = row.date ? new Date(row.date) : '';
+    if(row.date) exp.getCell(er,1).numFmt = 'd/m/yyyy';
+    if(row.type==='entry'){
+      exp.getCell(er,2).value = exportExpenditureDesc(row.entry, rec);
+      rec.expenditureColumns.forEach((col,i)=>{
+        if((row.entry.amounts||{})[col.id]!==undefined) exp.getCell(er, 4+i).value = Number((row.entry.amounts||{})[col.id])||0;
+      });
+      exp.getCell(er,3).value = {formula:`SUM(D${er}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${er})`};
+    } else {
+      exp.getCell(er,2).value = ROW_LABEL[row.type];
+      exp.getCell(er,3).value = row.amount;
+      ROW_NUMS[row.type].push(er);
+    }
     for(let c=1;c<=EXP_LAST_COL;c++) exp.getCell(er,c).font = c>=3 ? FONT_SMALL : FONT;
     er++;
   });
+  const expDataEndRow = er-1;
+  // Manual-total fallback for Bank fees/Salary (no per-day source at all
+  // for this month) - a single non-dated row, same legacy case as House
+  // Rent Deposit on the Revenue sheet.
   function expSummaryLabel(row, text){
     exp.mergeCells(row,1,row,2);
     exp.getCell(row,1).value = text;
     exp.getCell(row,1).alignment = {horizontal:'left'};
   }
-  // Every Withdraw Notesheet run already posts its own dated, per-category
-  // row above (expenditureEntries), so this row is no longer a second
-  // "category totals" total (that would double-count against the dated
-  // rows) - it's only ever needed to carry a manual override: the
-  // difference between a manually-typed override figure and what the
-  // dated notesheet rows already add up to for that column, so the
-  // column's Total Expenditure still equals the override. Non-overridden
-  // coa/entries columns are fully covered by the dated rows above and get 0 here.
-  const expDataRow = er;
-  expSummaryLabel(expDataRow, 'Manual override adjustment');
-  rec.expenditureColumns.forEach((col,i)=>{
-    let amt = 0;
-    if(col.source==='coa'){
-      if(col.override!==undefined && col.override!==null) amt = (Number(col.override)||0) - expenditureEntryColTotal(rec, col.id);
-    } else if(col.source!=='entries'){
-      amt = Number(col.amount)||0; // plain manual (non-coa, non-entries) column - no notesheet/entry data behind it at all
-    }
-    exp.getCell(expDataRow, 4+i).value = amt;
+  if(!bankFeesEntries.length){
+    expSummaryLabel(er, 'Bank fees'); exp.getCell(er,1).font = FONT;
+    exp.getCell(er,3).value = 0;
+    bankFeesRowNums.push(er); er++;
+  }
+  if(!salaryAccountEntries.length){
+    expSummaryLabel(er, 'Salary by Account'); exp.getCell(er,1).font = FONT;
+    exp.getCell(er,3).value = salaryAccountManual;
+    salaryAccountRowNums.push(er); er++;
+  }
+  if(!salaryCashEntries.length){
+    expSummaryLabel(er, 'Salary by Cash'); exp.getCell(er,1).font = FONT;
+    exp.getCell(er,3).value = salaryCashManual;
+    salaryCashRowNums.push(er); er++;
+  }
+  const expDataFinalRow = er-1;
+  // Manual override adjustment: only ever needed - and only ever shown -
+  // when a Withdraw Notesheet category has actually been manually
+  // overridden (see the coa-column override UI); the difference between
+  // the override figure and what the dated notesheet rows above already
+  // add up to for that column, so the column's Total Expenditure still
+  // equals the override. Skipped entirely otherwise, rather than always
+  // appearing as a zeroed-out line.
+  const expOverrideAmounts = rec.expenditureColumns.map(col=>{
+    if(col.source==='coa' && col.override!==undefined && col.override!==null) return (Number(col.override)||0) - expenditureEntryColTotal(rec, col.id);
+    return 0;
   });
-  exp.getCell(expDataRow,3).value = {formula:`SUM(D${expDataRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expDataRow})`};
-  // Bank fees: dated per-day, same treatment as Salary by Account/Cash
-  // below - a bank-side deduction, not tied to any COA expenditure
-  // category, so it goes straight into the Total column.
-  const bankFeesStartRow = expDataRow+1;
-  let fr = bankFeesStartRow;
-  const bankFeesEntries = dailyBankFieldEntries(key, 'fees');
-  if(bankFeesEntries.length){
-    bankFeesEntries.forEach(en=>{
-      exp.getCell(fr,1).value = new Date(en.date);
-      exp.getCell(fr,1).numFmt = 'd/m/yyyy';
-      exp.getCell(fr,2).value = 'Bank fees';
-      exp.getCell(fr,3).value = en.amount;
-      fr++;
-    });
-  } else {
-    expSummaryLabel(fr, 'Bank fees'); exp.getCell(fr,1).font = FONT;
-    exp.getCell(fr,3).value = 0;
-    fr++;
+  let expOverrideRow = null;
+  if(expOverrideAmounts.some(a=>Math.abs(a)>0.001)){
+    expOverrideRow = er;
+    expSummaryLabel(expOverrideRow, 'Manual override adjustment');
+    rec.expenditureColumns.forEach((col,i)=>{ exp.getCell(expOverrideRow, 4+i).value = expOverrideAmounts[i]; });
+    exp.getCell(expOverrideRow,3).value = {formula:`SUM(D${expOverrideRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expOverrideRow})`};
+    for(let c=1;c<=EXP_LAST_COL;c++) exp.getCell(expOverrideRow,c).font = c>=3 ? FONT_SMALL : FONT;
+    er++;
   }
-  const salaryAccountStartRow = fr;
-  let sr = salaryAccountStartRow;
-  const salaryAccountManual = Number(rec.salaryByAccount)||0;
-  const salaryAccountEntries = salaryAccountManual===0 ? dailyBankFieldEntries(key, 'salaryAccount') : [];
-  if(salaryAccountEntries.length){
-    salaryAccountEntries.forEach(en=>{
-      exp.getCell(sr,1).value = new Date(en.date);
-      exp.getCell(sr,1).numFmt = 'd/m/yyyy';
-      exp.getCell(sr,2).value = 'Salary by Account';
-      exp.getCell(sr,3).value = en.amount;
-      sr++;
-    });
-  } else {
-    expSummaryLabel(sr, 'Salary by Account'); exp.getCell(sr,1).font = FONT;
-    exp.getCell(sr,3).value = salaryAccountManual;
-    sr++;
-  }
-  const salaryCashManual = Number(rec.salaryByCash)||0;
-  const salaryCashEntries = salaryCashManual===0 ? dailyBankFieldEntries(key, 'salaryCash') : [];
-  if(salaryCashEntries.length){
-    salaryCashEntries.forEach(en=>{
-      exp.getCell(sr,1).value = new Date(en.date);
-      exp.getCell(sr,1).numFmt = 'd/m/yyyy';
-      exp.getCell(sr,2).value = 'Salary by Cash';
-      exp.getCell(sr,3).value = en.amount;
-      sr++;
-    });
-  } else {
-    expSummaryLabel(sr, 'Salary by Cash'); exp.getCell(sr,1).font = FONT;
-    exp.getCell(sr,3).value = salaryCashManual;
-    sr++;
-  }
-  const salaryCashRow = sr-1; // last salary row written - the range-sum formulas below run through this row, so they naturally cover however many dated rows ended up here
-  const expTotalRow = sr;
+  const expBlockEndRow = er-1;
+
+  const expTotalRow = er;
   expSummaryLabel(expTotalRow, 'Total Expenditure:'); exp.getCell(expTotalRow,1).font = BOLD;
-  for(let i=0;i<=rec.expenditureColumns.length;i++){
-    const colLetter = exp.getColumn(3+i).letter;
-    exp.getCell(expTotalRow, 3+i).value = {formula:`SUM(${colLetter}${expDataStartRow}:${colLetter}${salaryCashRow})`};
-    exp.getCell(expTotalRow, 3+i).font = BOLD;
-  }
+  // Column C (Total): the D:N category grid summed directly across the
+  // whole block (covers every expenditure-entry row, including the
+  // override adjustment row above, since those all carry real D:N values)
+  // plus the non-categorized Bank fees/Salary rows added by direct cell
+  // reference, since those are scattered through the block instead of
+  // being one contiguous range.
+  const plainRowNums = [...bankFeesRowNums, ...salaryAccountRowNums, ...salaryCashRowNums];
+  const plainRowRef = plainRowNums.length ? `+SUM(${plainRowNums.map(rn=>`C${rn}`).join(',')})` : '';
+  exp.getCell(expTotalRow,3).value = expBlockEndRow>=expDataStartRow
+    ? {formula:`SUM(D${expDataStartRow}:${exp.getColumn(3+rec.expenditureColumns.length).letter}${expBlockEndRow})${plainRowRef}`}
+    : 0;
+  exp.getCell(expTotalRow,3).font = BOLD;
+  rec.expenditureColumns.forEach((col,i)=>{
+    const colLetter = exp.getColumn(4+i).letter;
+    exp.getCell(expTotalRow, 4+i).value = expBlockEndRow>=expDataStartRow ? {formula:`SUM(${colLetter}${expDataStartRow}:${colLetter}${expBlockEndRow})`} : 0;
+    exp.getCell(expTotalRow, 4+i).font = BOLD;
+  });
+  er++;
+
   const balanceRow = expTotalRow+1;
   expSummaryLabel(balanceRow, 'Total Balance:'); exp.getCell(balanceRow,1).font = BOLD;
   exp.getCell(balanceRow,3).value = {formula:`C${balanceRow+1}-C${expTotalRow}`};
@@ -6365,10 +6482,21 @@ function exportRevenueDesc(desc){
   if(/^Online Payment \(SSL Commerz\)/.test(desc||'')) return 'Deposit through SSL Commerz';
   return desc||'';
 }
+/* Shorter category names specifically for the Withdraw Notesheet export
+   description (e.g. "Misc, Trans, Tailor, Utility, Books & Sty (Summary
+   26-15)") - falls back to the column's own label (used everywhere else:
+   column headers, the app's own UI) for anything not in this list,
+   including any custom-added column, which keeps whatever name it was
+   given. */
+const EXPORT_CAT_ABBREV = {
+  'Transport':'Trans',
+  'Utility Bill':'Utility',
+  'Education & Assistant':'EduAssist',
+};
 function exportExpenditureDesc(entry, rec){
   const m = /^Withdraw Notesheet (.+)$/.exec(entry.desc||'');
   if(!m) return entry.desc||'';
-  const cats = (rec.expenditureColumns||[]).filter(col=>Number((entry.amounts||{})[col.id])>0).map(col=>col.label);
+  const cats = (rec.expenditureColumns||[]).filter(col=>Number((entry.amounts||{})[col.id])>0).map(col=>EXPORT_CAT_ABBREV[col.label]||col.label);
   return cats.length ? `${cats.join(', ')} (Summary ${m[1]})` : (entry.desc||'');
 }
 
