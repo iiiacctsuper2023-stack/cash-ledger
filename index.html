@@ -460,21 +460,37 @@ function prevMonthKey(key){
   const d = new Date(y, m-2, 1); // m-1 is this month 0-indexed, minus 1 more = previous month
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
-/* Beginning Balance (Bank): the manually-typed figure if one has been
-   entered, otherwise carried in automatically from the previous tracked
-   month's own closing Bank Balance (computeMonthlyLedgerFigures'
-   bankBalanceShown, which already respects that month's own override if
-   any) - so a new month doesn't start at a blank/zero balance just
+/* Beginning Balance (Bank), per bank: the manually-typed figure for that
+   specific bank if one has been entered, otherwise carried in
+   automatically from the previous tracked month's own closing balance for
+   that bank (computeMonthlyLedgerFigures' bankBreakdownShown, which
+   already respects that bank's own manual entries for that earlier
+   month) - so a new month doesn't start at a blank/zero balance just
    because nobody re-typed last month's closing figure by hand. Only
    carries from a month that's actually been tracked (has its own record
-   already) - never silently creates one. */
-function effectiveBeginningBankBalance(key){
+   already) - never silently creates one; for the very first month ever
+   tracked, falls back instead to that bank's own share of the one-time
+   starting point ("Set Starting Point"), if any. Broken out per bank
+   (e.g. "IBBPLC Total", "TBL Total" on the Monthly Revenue export) since
+   money sits in both accounts even though day-to-day deposits/
+   withdrawals currently only happen through one of them. */
+function effectiveBeginningBankBalanceFor(key, bankId){
   const rec = getMonthlyLedgerMonth(key);
-  const manual = Number(rec.beginningBankBalance)||0;
+  const manual = Number((rec.beginningBankBalanceByBank||{})[bankId])||0;
   if(manual!==0) return manual;
   const pk = prevMonthKey(key);
-  if(!state.monthlyLedger.months[pk]) return 0;
-  return computeMonthlyLedgerFigures(pk).bankBalanceShown;
+  if(state.monthlyLedger.months[pk]) return Number(computeMonthlyLedgerFigures(pk).bankBreakdownShown[bankId])||0;
+  const seed = state.monthlyLedger.seed;
+  if(seed && seed.active!==false && key===earliestTrackedMonthKey()) return Number((seed.bankBreakdown||{})[bankId])||0;
+  // Legacy fallback: a month saved before Beginning Balance (Bank) was
+  // split per bank may still only have the old single combined figure -
+  // since all deposits/withdrawals currently run through TBL, attribute
+  // that whole old figure to TBL rather than losing it.
+  if(/tbl/i.test(state.banks.find(b=>b.id===bankId)?.name||'')){
+    const oldManual = Number(rec.beginningBankBalance)||0;
+    if(oldManual!==0) return oldManual;
+  }
+  return 0;
 }
 /* Opening Cash for the very first day ever recorded in the Daily Ledger:
    the manually-typed figure if one has been entered, otherwise carried in
@@ -502,6 +518,7 @@ function getMonthlyLedgerMonth(key){
       revenueTotalDue:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       revenueTransfer:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       beginningBankBalance:0,
+      beginningBankBalanceByBank:{},
       houseRentDeposit:0,
       houseRentDepositDate:'',
       houseRentDepositBankId:null,
@@ -1747,6 +1764,7 @@ function migrateState(){
     if(rec.salaryByAccountBankId===undefined) rec.salaryByAccountBankId = null;
     if(rec.salaryByCashDate===undefined) rec.salaryByCashDate = '';
     if(rec.salaryByCashBankId===undefined) rec.salaryByCashBankId = null;
+    if(!rec.beginningBankBalanceByBank) rec.beginningBankBalanceByBank = {};
   });
   (state.days||[]).forEach(day=>{ if(day.locked===undefined) day.locked = false; });
   const stampStatus = (day)=>{
@@ -3945,7 +3963,8 @@ function computeMonthlyLedgerFigures(key){
   const yrtNew = {};
   REVENUE_CATS.forEach(c=>{ yrtNew[c.key] = yrtBefore[c.key] + revTotals[c.key] + effectiveRevenueTransfer(rec, c.key); });
   const totalDueSum = REVENUE_CATS.reduce((s,c)=>s+(Number(rec.revenueTotalDue[c.key])||0),0);
-  const totalAmount = effectiveBeginningBankBalance(key) + revTotalIncome + effectiveHouseRentDeposit(key);
+  const beginningBankBalanceSum = state.banks.reduce((s,b)=>s+effectiveBeginningBankBalanceFor(key,b.id),0);
+  const totalAmount = beginningBankBalanceSum + revTotalIncome + effectiveHouseRentDeposit(key);
 
   const liveCoaTotals = monthWithdrawCoaTotals(key);
   if(seedActive){
@@ -4349,10 +4368,15 @@ function renderMonthlyLedgerCard(){
       <div class="divider"></div>
       <h3 id="ml-section-revenue" style="font-size:14px;">Revenue</h3>
       <div class="row">
+        ${state.banks.map(b=>{
+          const auto = effectiveBeginningBankBalanceFor(key,b.id);
+          const manualVal = Number((rec.beginningBankBalanceByBank||{})[b.id])||0;
+          return `
         <div class="field">
-          <label>Beginning Balance (Bank) ${(!rec.beginningBankBalance && effectiveBeginningBankBalance(key)) ? '<span class="tag" title="Carried in from the previous tracked month\'s closing Bank Balance - edit to override">auto</span>' : ''}</label>
-          <input type="text" inputmode="decimal" id="ml-beginning-balance" value="${formatAsianAmount(effectiveBeginningBankBalance(key))}">
-        </div>
+          <label>Beginning Balance (${escapeHtml(b.name)}) ${(!manualVal && auto) ? '<span class="tag" title="Carried in from the previous tracked month\'s closing balance for this bank - edit to override">auto</span>' : ''}</label>
+          <input type="text" inputmode="decimal" class="ml-beginning-balance-bank" data-bank="${b.id}" value="${formatAsianAmount(auto)}">
+        </div>`;
+        }).join('')}
         <div class="field">
           <label>House Rent Deposit <span class="tag" title="Entered in the Daily Ledger's Bank section (Other deposit / House Rent) - auto-summed here">auto</span></label>
           <input type="text" inputmode="decimal" value="${formatAsianAmount(effectiveHouseRentDeposit(key))}" readonly style="background:var(--paper);${!effectiveHouseRentDeposit(key)?'border-color:var(--danger);':''}">
@@ -4526,7 +4550,13 @@ function renderMonthlyLedgerCard(){
   card.querySelectorAll('[data-ml-jump]').forEach(btn=>{ btn.onclick = ()=> scrollToId(btn.dataset.mlJump); });
   card.querySelectorAll('[data-ml-jump-top]').forEach(btn=>{ btn.onclick = scrollMlToTop; });
   card.querySelectorAll('[data-ml-jump-bottom]').forEach(btn=>{ btn.onclick = scrollMlToBottom; });
-  card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
+  card.querySelectorAll('.ml-beginning-balance-bank').forEach(inp=>{
+    wireAmountInput(inp, (num)=>{
+      if(!rec.beginningBankBalanceByBank) rec.beginningBankBalanceByBank = {};
+      rec.beginningBankBalanceByBank[inp.dataset.bank] = num;
+      saveState(); refreshMonthlyLedgerComputedOnly();
+    });
+  });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
   const bankResetBtn = card.querySelector('#ml-bank-balance-reset');
   if(bankResetBtn) bankResetBtn.onclick = ()=>{ rec.balanceSheet.bankBalanceOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
@@ -5065,6 +5095,17 @@ function parseFullRevenueSheet(ws){
       result.beginningBankBalance = totalCol ? (Number(mlCellVal(ws,r,totalCol))||0) : (catRowSum(r) || firstNumericAfter(r, descCol));
       continue;
     }
+    // New per-bank format ("IBBPLC Total", "TBL Total", ...) - sums
+    // whichever of these rows are present into the same combined figure,
+    // for a workbook exported after the Beginning Balance Bank row was
+    // split out by bank.
+    if(state.banks.some(b=>{
+      const bn = mlNorm(b.name);
+      return (label===`${bn} total` || desc===`${bn} total`);
+    })){
+      result.beginningBankBalance += totalCol ? (Number(mlCellVal(ws,r,totalCol))||0) : (catRowSum(r) || firstNumericAfter(r, descCol));
+      continue;
+    }
     if((/yearly running total/.test(label)||/yearly running total/.test(desc)) && (/previous month/.test(label)||/previous month/.test(desc))){
       Object.keys(catCol).forEach(k=>{ const v=Number(mlCellVal(ws,r,catCol[k]))||0; if(v) result.seedRevenue[k]=v; });
       continue;
@@ -5367,10 +5408,16 @@ async function exportMonthlyLedger(key, previewOnly){
   });
 
   let r = headerRowNum+1;
-  const beginningBalanceRow = r;
-  rev.getCell(r,3).value = 'Beginning Balance Bank';
-  rev.getCell(r,4).value = effectiveBeginningBankBalance(key);
-  r++;
+  // One row per bank ("IBBPLC Total", "TBL Total", ...) rather than a
+  // single combined figure - both accounts hold money even though, at the
+  // moment, day-to-day deposits/withdrawals only happen through TBL.
+  const bankBeginRows = {};
+  state.banks.forEach(b=>{
+    bankBeginRows[b.id] = r;
+    rev.getCell(r,3).value = `${b.name} Total`;
+    rev.getCell(r,4).value = effectiveBeginningBankBalanceFor(key, b.id);
+    r++;
+  });
   // House Rent Deposit only gets its own separate (non-dated) row in the
   // rare legacy case where it's a flat manually-typed monthly total with
   // no day-by-day source to date it by; the normal, dated, per-day case is
@@ -5454,6 +5501,17 @@ async function exportMonthlyLedger(key, previewOnly){
     rev.getCell(r,c).font = BOLD;
   }
   r++;
+  const totalAmountRow = r;
+  revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
+  // Dated House Rent Deposit now posts straight into the Miscellaneous
+  // Collection column above, so it's already inside Total Income - only
+  // the rare legacy non-dated manual fallback (which can't be date-sorted
+  // into that block at all) still needs adding on separately here.
+  const houseRentRef = houseRentManualRow ? `D${houseRentManualRow}` : '0';
+  const bankBeginRef = state.banks.map(b=>`D${bankBeginRows[b.id]}`).join('+') || '0';
+  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+${bankBeginRef}+${houseRentRef}`};
+  rev.getCell(r,4).font = BOLD;
+  r++;
   const totalDueRow = r;
   revSummaryLabel(r, 'Total Due'); rev.getCell(r,1).font = FONT;
   rev.getCell(r,4).value = {formula:`SUM(E${r}:O${r})`};
@@ -5478,16 +5536,6 @@ async function exportMonthlyLedger(key, previewOnly){
     }
     rev.getCell(r,5+i).font = BOLD;
   });
-  r++;
-  const totalAmountRow = r;
-  revSummaryLabel(r, 'Total Amount'); rev.getCell(r,1).font = BOLD;
-  // Dated House Rent Deposit now posts straight into the Miscellaneous
-  // Collection column above, so it's already inside Total Income - only
-  // the rare legacy non-dated manual fallback (which can't be date-sorted
-  // into that block at all) still needs adding on separately here.
-  const houseRentRef = houseRentManualRow ? `D${houseRentManualRow}` : '0';
-  rev.getCell(r,4).value = {formula:`D${totalIncomeRow}+D${beginningBalanceRow}+${houseRentRef}`};
-  rev.getCell(r,4).font = BOLD;
   r++;
 
   // Bank-to-Bank Transfer: purely informational, dated - money moving
@@ -5709,24 +5757,15 @@ async function exportMonthlyLedger(key, previewOnly){
 
   const balanceRow = expTotalRow+1;
   expSummaryLabel(balanceRow, 'Total Balance:'); exp.getCell(balanceRow,1).font = BOLD;
-  // Same four reference rows the Revenue sheet ends with, in the same
-  // order, each pulled straight from there by formula - so the
-  // Expenditure sheet shows the full revenue-side picture too, not just
-  // the one figure (Total Amount) actually needed for Total Balance.
-  const totalIncomeRefRow = balanceRow+1;
-  expSummaryLabel(totalIncomeRefRow, 'Total Income:'); exp.getCell(totalIncomeRefRow,1).font = FONT;
-  exp.getCell(totalIncomeRefRow,3).value = {formula:`'Monthly Revenue'!D${totalIncomeRow}`};
-  const totalAmountRefRow = totalIncomeRefRow+1;
+  // Total Income / Total Due / Transfer from Admission Fee are shown only
+  // on the Revenue sheet now, not duplicated here. Total Amount is the
+  // one exception - it's kept as a reference row (pulled from the Revenue
+  // sheet by formula) because Total Balance below is computed from it.
+  const totalAmountRefRow = balanceRow+1;
   expSummaryLabel(totalAmountRefRow, 'Total Amount:'); exp.getCell(totalAmountRefRow,1).font = FONT;
   exp.getCell(totalAmountRefRow,3).value = {formula:`'Monthly Revenue'!D${totalAmountRow}`};
-  const totalDueRefRow = totalAmountRefRow+1;
-  expSummaryLabel(totalDueRefRow, 'Total Due:'); exp.getCell(totalDueRefRow,1).font = FONT;
-  exp.getCell(totalDueRefRow,3).value = {formula:`'Monthly Revenue'!D${totalDueRow}`};
-  const transferRefRow = totalDueRefRow+1;
-  expSummaryLabel(transferRefRow, 'Transfer from Admission Fee to Gratuity & Education Assistant Fund:'); exp.getCell(transferRefRow,1).font = FONT;
-  exp.getCell(transferRefRow,3).value = {formula:`'Monthly Revenue'!D${transferRow}`};
   exp.getCell(balanceRow,3).value = {formula:`C${totalAmountRefRow}-C${expTotalRow}`};
-  const incomeRefRow = transferRefRow;
+  const incomeRefRow = totalAmountRefRow;
 
   // All-border across header through Total Income row, full width - also
   // applies the Asian comma + 2-decimal format to every amount column
