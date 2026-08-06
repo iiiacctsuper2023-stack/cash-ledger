@@ -3800,14 +3800,38 @@ function buildSparklineSvg(values, labels){
    used elsewhere) - works for the live month (via the cached computeAll())
    and for archived months too (via a fresh chain scoped to that month's
    own days, since archived days aren't part of state.days). */
-function lastDayCashInHandInMonth(monthKey){
+function lastDayComputedInMonth(monthKey){
   const [y, m] = monthKey.split('-');
   const days = allDaysEverywhere().filter(d=>d.date.startsWith(`${y}-${m}`)).slice().sort((a,b)=>a.date.localeCompare(b.date));
   if(days.length===0) return null;
   const isLive = monthKey === monthKeyFor(state.month, state.year);
   const computed = isLive ? computeAll() : computeDayChain(days);
   const last = days[days.length-1];
-  return computed[last.id] ? computed[last.id].closingAmount : null;
+  return computed[last.id] || null;
+}
+function lastDayCashInHandInMonth(monthKey){
+  const c = lastDayComputedInMonth(monthKey);
+  return c ? c.closingAmount : null;
+}
+/* Same idea, for one bank's own closing balance as of that month's last
+   recorded day - the "formula" (auto-computed, not hand-typed) source for
+   the Bank Balance breakdown, in both the app and the export. Works for
+   any month, live or archived, same as lastDayCashInHandInMonth above. */
+function lastDayBankClosingInMonth(monthKey, bankId){
+  const c = lastDayComputedInMonth(monthKey);
+  return (c && c.banks[bankId]) ? c.banks[bankId].closing : null;
+}
+/* Same day-chain machinery, but for one specific date rather than "the
+   last day of a month" - used by the TBL statement cross-check to verify
+   the app's own closing balance as of the statement's own last date. */
+function computedForDate(dateISO){
+  const monthKey = dateISO.slice(0,7);
+  const isLive = monthKey === monthKeyFor(state.month, state.year);
+  const days = allDaysEverywhere().filter(d=>d.date.startsWith(monthKey)).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const day = days.find(d=>d.date===dateISO);
+  if(!day) return null;
+  const computed = isLive ? computeAll() : computeDayChain(days);
+  return computed[day.id] || null;
 }
 
 /* Sums a per-bank Daily Ledger field (salaryAccount or salaryCash, from
@@ -3965,25 +3989,24 @@ function computeMonthlyLedgerFigures(key){
 
   const bankBreakdownShown = {};
   state.banks.forEach(b=>{
-    const ov = rec.balanceSheet.bankBreakdown[b.id];
-    const base = (ov!==undefined && ov!==null) ? ov : (isLiveMonth && latestComputed ? latestComputed.banks[b.id].closing : null);
+    // Formula-driven only (no manual override) - each bank's own closing
+    // balance as of this month's last recorded day, straight from the
+    // Daily Ledger day-chain (works for the live month and, once real
+    // archived day-by-day data exists, any other month too).
+    const base = lastDayBankClosingInMonth(key, b.id);
     const beginningAdd = seedActive ? (Number((seed.bankBreakdown||{})[b.id])||0) : 0;
     // House Rent Deposit is a money movement that doesn't pass through
-    // the day-to-day voucher flow, so it's layered on top of whichever
-    // bank was picked for it - but only into the auto figure, never on
-    // top of a manual override (the person's own typed number already
-    // accounts for whatever it needs to). Salary by Account/Cash only
-    // gets the same treatment when it's a genuine manual figure typed
-    // into Manual Bank Items - when it's instead auto-summed from the
-    // Daily Ledger's Bank section, it's already reflected in that bank's
-    // own day-by-day closing balance, so adjusting again here would
-    // double-count it.
+    // the day-to-day voucher flow, so it's layered on top separately.
+    // Salary by Account/Cash only gets the same treatment when it's a
+    // genuine manual figure typed into Manual Bank Items - when it's
+    // instead auto-summed from the Daily Ledger's Bank section, it's
+    // already reflected in that bank's own day-by-day closing balance,
+    // so adjusting again here would double-count it.
     let manualAdj = 0;
     if(rec.houseRentDepositBankId===b.id) manualAdj += Number(rec.houseRentDeposit)||0;
     if((Number(rec.salaryByAccount)||0)!==0 && rec.salaryByAccountBankId===b.id) manualAdj -= Number(rec.salaryByAccount)||0;
     if((Number(rec.salaryByCash)||0)!==0 && rec.salaryByCashBankId===b.id) manualAdj -= Number(rec.salaryByCash)||0;
-    const autoAdj = (ov!==undefined && ov!==null) ? 0 : manualAdj;
-    bankBreakdownShown[b.id] = (base===null && beginningAdd===0 && autoAdj===0) ? null : (Number(base)||0) + beginningAdd + autoAdj;
+    bankBreakdownShown[b.id] = (base===null && beginningAdd===0 && manualAdj===0) ? null : (Number(base)||0) + beginningAdd + manualAdj;
   });
   const bankBreakdownSum = state.banks.reduce((s,b)=>s+(Number(bankBreakdownShown[b.id])||0),0);
   const bankBreakdownMismatch = bankBalanceShown!==null && Math.abs(bankBreakdownSum - (Number(bankBalanceShown)||0)) > 1;
@@ -4788,13 +4811,12 @@ function drawMlBankBreakdownList(container, rec, bankBreakdownShown, isLiveMonth
   if(state.banks.length===0){ container.appendChild(el(`<p class="empty">No bank accounts set up yet.</p>`)); return; }
   state.banks.forEach(b=>{
     const val = bankBreakdownShown[b.id];
-    const isAuto = isLiveMonth && (rec.balanceSheet.bankBreakdown[b.id]===undefined || rec.balanceSheet.bankBreakdown[b.id]===null);
-    const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(b.name)} ${isAuto?'<span class="tag">auto</span>':''}</label><input type="text" inputmode="decimal" value="${formatAsianAmount(val||0)}" ${isAuto?'placeholder="auto"':''}></div>`);
-    const inp = wrap.querySelector('input');
-    wireAmountInput(inp, (num)=>{
-      rec.balanceSheet.bankBreakdown[b.id] = num;
-      saveState(); refreshMonthlyLedgerComputedOnly();
-    });
+    // Formula-driven only - each bank's own closing balance from the
+    // Daily Ledger day-chain, no manual override. Read-only display, same
+    // reasoning as Cash in Hand/Balance in Bank Account being auto: this
+    // number should always match what the Daily Ledger itself already
+    // computed, never drift from a hand-typed figure.
+    const wrap = el(`<div class="field" style="margin-bottom:0;"><label style="font-size:11.5px;">${escapeHtml(b.name)} <span class="tag">auto</span></label><div class="computed" style="padding:6px 8px;">${val===null?'&mdash;':money(val)}</div></div>`);
     container.appendChild(wrap);
   });
 }
@@ -5262,6 +5284,56 @@ async function importMonthlyLedgerFile(file){
   }
 }
 
+/* When several Revenue (or Expenditure) rows share the same date, put
+   them in the same order they actually happened in on the real TBL bank
+   statement, instead of an arbitrary tie order - matched by amount
+   against that date's Deposit (Revenue) or Withdrawal (Expenditure)
+   lines, in the sequence those lines appear in the uploaded statement.
+   Runs automatically on every export whenever that month's statement has
+   been uploaded (state.bankStatements, from the TBL bank's Bank
+   Reconciliation card); if it hasn't, or a same-date row's amount just
+   doesn't match anything on the statement (e.g. two rows tie on the
+   exact same amount so which-is-which is genuinely ambiguous), that row
+   simply keeps its original relative position - left for a manual look
+   rather than guessed at. Only reorders WITHIN a date; the overall date
+   order from the earlier sort is untouched. */
+function reorderByBankStatement(rows, amountFn, side){
+  const tblBank = state.banks.find(b=>/tbl/i.test(b.name));
+  const stmt = tblBank && state.bankStatements[tblBank.id];
+  if(!stmt || !stmt.rows || !stmt.rows.length) return rows;
+  const out = [];
+  let i = 0;
+  while(i < rows.length){
+    let j = i;
+    while(j < rows.length && rows[j].date === rows[i].date) j++;
+    const group = rows.slice(i, j);
+    if(group.length <= 1 || !rows[i].date){ out.push(...group); i = j; continue; }
+    const stmtRows = stmt.rows.filter(r=>r.date===rows[i].date && Number(r[side])>0);
+    if(!stmtRows.length){ out.push(...group); i = j; continue; }
+    const used = new Array(group.length).fill(false);
+    const matched = [];
+    stmtRows.forEach(sr=>{
+      const amt = Number(sr[side])||0;
+      for(let k=0;k<group.length;k++){
+        if(used[k]) continue;
+        if(Math.abs(amountFn(group[k]) - amt) < 0.5){ used[k]=true; matched.push(group[k]); break; }
+      }
+    });
+    const unmatched = group.filter((_,k)=>!used[k]);
+    out.push(...matched, ...unmatched);
+    i = j;
+  }
+  return out;
+}
+function expRowAmount(row){
+  if(row.type==='entry') return Object.values(row.entry.amounts||{}).reduce((s,v)=>s+(Number(v)||0),0);
+  return Number(row.amount)||0;
+}
+function revRowAmount(row){
+  if(row.type==='revenue') return REVENUE_CATS.reduce((s,c)=>s+(Number(row.entry[c.key])||0),0);
+  return Number(row.amount)||0;
+}
+
 /* --- Monthly Ledger: export the two-sheet workbook, matching the
    institution's existing format with real formulas (not hardcoded
    results), so it recalculates correctly if opened and tweaked. --- */
@@ -5342,7 +5414,7 @@ async function exportMonthlyLedger(key, previewOnly){
     return da===db ? 0 : da===''?1: db===''?-1 : da.localeCompare(db);
   });
   const miscColIdx = REVENUE_CATS.findIndex(c=>c.key==='misc');
-  mergedRevenueRows.forEach(row=>{
+  reorderByBankStatement(mergedRevenueRows, revRowAmount, 'deposit').forEach(row=>{
     rev.getCell(r,2).value = row.date ? new Date(row.date) : '';
     if(row.date) rev.getCell(r,2).numFmt = 'd/m/yyyy';
     if(row.type==='houseRent'){
@@ -5533,7 +5605,7 @@ async function exportMonthlyLedger(key, previewOnly){
   const bankChargeCol = rec.expenditureColumns.find(c=>c.label==='Bank Charge');
   const payAllceCol = rec.expenditureColumns.find(c=>c.label==='Pay & Allce');
   const ROW_TARGET_COL = {fees:bankChargeCol, salaryAccount:payAllceCol, salaryCash:payAllceCol};
-  mergedExpRows.forEach(row=>{
+  reorderByBankStatement(mergedExpRows, expRowAmount, 'withdrawal').forEach(row=>{
     exp.getCell(er,1).value = row.date ? new Date(row.date) : '';
     if(row.date) exp.getCell(er,1).numFmt = 'd/m/yyyy';
     if(row.type==='entry'){
@@ -5644,10 +5716,24 @@ async function exportMonthlyLedger(key, previewOnly){
 
   const balanceRow = expTotalRow+1;
   expSummaryLabel(balanceRow, 'Total Balance:'); exp.getCell(balanceRow,1).font = BOLD;
-  exp.getCell(balanceRow,3).value = {formula:`C${balanceRow+1}-C${expTotalRow}`};
-  const incomeRefRow = balanceRow+1;
-  expSummaryLabel(incomeRefRow, 'Total Amount (Beginning + Income):'); exp.getCell(incomeRefRow,1).font = FONT;
-  exp.getCell(incomeRefRow,3).value = {formula:`'Monthly Revenue'!D${totalAmountRow}`};
+  // Same four reference rows the Revenue sheet ends with, in the same
+  // order, each pulled straight from there by formula - so the
+  // Expenditure sheet shows the full revenue-side picture too, not just
+  // the one figure (Total Amount) actually needed for Total Balance.
+  const totalIncomeRefRow = balanceRow+1;
+  expSummaryLabel(totalIncomeRefRow, 'Total Income:'); exp.getCell(totalIncomeRefRow,1).font = FONT;
+  exp.getCell(totalIncomeRefRow,3).value = {formula:`'Monthly Revenue'!D${totalIncomeRow}`};
+  const totalAmountRefRow = totalIncomeRefRow+1;
+  expSummaryLabel(totalAmountRefRow, 'Total Amount:'); exp.getCell(totalAmountRefRow,1).font = FONT;
+  exp.getCell(totalAmountRefRow,3).value = {formula:`'Monthly Revenue'!D${totalAmountRow}`};
+  const totalDueRefRow = totalAmountRefRow+1;
+  expSummaryLabel(totalDueRefRow, 'Total Due:'); exp.getCell(totalDueRefRow,1).font = FONT;
+  exp.getCell(totalDueRefRow,3).value = {formula:`'Monthly Revenue'!D${totalDueRow}`};
+  const transferRefRow = totalDueRefRow+1;
+  expSummaryLabel(transferRefRow, 'Transfer from Admission Fee to Gratuity & Education Assistant Fund:'); exp.getCell(transferRefRow,1).font = FONT;
+  exp.getCell(transferRefRow,3).value = {formula:`'Monthly Revenue'!D${transferRow}`};
+  exp.getCell(balanceRow,3).value = {formula:`C${totalAmountRefRow}-C${expTotalRow}`};
+  const incomeRefRow = transferRefRow;
 
   // All-border across header through Total Income row, full width - also
   // applies the Asian comma + 2-decimal format to every amount column
@@ -6524,20 +6610,22 @@ function exportRevenueDesc(desc){
   return desc||'';
 }
 /* Shorter category names specifically for the Withdraw Notesheet export
-   description (e.g. "Misc, Trans, Tailor, Utility, Books & Sty (Summary
-   26-15)") - falls back to the column's own label (used everywhere else:
-   column headers, the app's own UI) for anything not in this list,
-   including any custom-added column, which keeps whatever name it was
-   given. */
-const EXPORT_CAT_ABBREV = {
-  'Transport':'Trans',
-  'Utility Bill':'Utility',
-  'Education & Assistant':'EduAssist',
-};
+   description (e.g. "Misc, Trans, Tailor, Utility, BooksSty (Summary
+   26-15)") - uses the same CoA "short" abbreviation shown before the
+   auto serial number on a bill voucher (e.g. Hons7/7/26), so the export
+   description matches voucher shorthand exactly. Falls back to the
+   column's own label (used everywhere else: column headers, the app's
+   own UI) for anything that doesn't resolve to a CoA category, including
+   any custom-added column, which keeps whatever name it was given. */
+function exportCatAbbrev(col){
+  const coaKey = resolveColCoaKey(col);
+  const coa = coaKey ? COA.find(c=>c.key===coaKey) : null;
+  return coa ? coa.short : (col.label||'');
+}
 function exportExpenditureDesc(entry, rec){
   const m = /^Withdraw Notesheet (.+)$/.exec(entry.desc||'');
   if(!m) return entry.desc||'';
-  const cats = (rec.expenditureColumns||[]).filter(col=>Number((entry.amounts||{})[col.id])>0).map(col=>EXPORT_CAT_ABBREV[col.label]||col.label);
+  const cats = (rec.expenditureColumns||[]).filter(col=>Number((entry.amounts||{})[col.id])>0).map(exportCatAbbrev);
   return cats.length ? `${cats.join(', ')} (Summary ${m[1]})` : (entry.desc||'');
 }
 
@@ -7042,7 +7130,27 @@ function renderBankStatementCard(){
       const stmtRows = await parseTBLStatement(buf);
       const {matched, missingFromStatement, unmatchedStmtRows} = crossCheckTBLStatement(stmtRows);
       statusEl.textContent = `${stmtRows.length} statement line(s) read. ${matched.length} matched, ${missingFromStatement.length} app entr${missingFromStatement.length===1?'y':'ies'} not found in the statement, ${unmatchedStmtRows.length} statement line(s) not yet recorded in the app.`;
-      resultsEl.innerHTML = buildCrossCheckResultsHtml(matched, missingFromStatement, unmatchedStmtRows);
+      // Also verify the app's own TBL closing balance, as of the
+      // statement's own last date, against that date's statement balance -
+      // catches anything the line-by-line match above wouldn't (e.g. a
+      // transaction recorded on the wrong date, or missed entirely on
+      // both sides in a way that still happens to net out).
+      let balanceCheckHtml = '';
+      const tblBank = state.banks.find(b=>/tbl/i.test(b.name));
+      if(tblBank && stmtRows.length){
+        const lastRow = stmtRows.slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
+        const dayComputed = computedForDate(lastRow.date);
+        const appClosing = dayComputed && dayComputed.banks[tblBank.id] ? dayComputed.banks[tblBank.id].closing : null;
+        if(appClosing===null){
+          balanceCheckHtml = `<p class="subnote">Couldn't verify TBL's closing balance against ${lastRow.date} &mdash; no Daily Ledger day recorded for that date.</p>`;
+        } else {
+          const diff = Math.round((appClosing - lastRow.balance)*100)/100;
+          balanceCheckHtml = Math.abs(diff)>1
+            ? `<p class="subnote" style="color:var(--danger);font-weight:600;">&#9888; TBL closing balance mismatch as of ${lastRow.date}: app shows ${money(appClosing)}, statement shows ${money(lastRow.balance)} (difference ${money(diff)}).</p>`
+            : `<p class="subnote" style="color:#2E7D32;">&#10003; TBL closing balance matches the statement as of ${lastRow.date} (${money(appClosing)}).</p>`;
+        }
+      }
+      resultsEl.innerHTML = balanceCheckHtml + buildCrossCheckResultsHtml(matched, missingFromStatement, unmatchedStmtRows);
       if(!Array.isArray(state.bankCrossCheckLog)) state.bankCrossCheckLog = [];
       state.bankCrossCheckLog.push({
         id:uid(), checkedAt:new Date().toISOString(), fileName:file.name,
