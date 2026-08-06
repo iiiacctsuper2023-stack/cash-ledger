@@ -3454,7 +3454,7 @@ function renderDayPanel(dayId, computed){
         <div class="computed total"><span class="lbl">Closing balance &mdash; ${escapeHtml(b.name)}</span><span id="bc-closing-${b.id}">${money(bc.closing)}</span></div>
         <div class="divider"></div>
         <label>Bank Reconciliation ${/tbl/i.test(b.name) ? '<span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory</span>' : '<span class="tag">optional</span>'}</label>
-        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.${/tbl/i.test(b.name) ? ' TBL must be reconciled before you can consider the day fully closed.' : ''} Uploading the statement in Monthly Ledger fills this in automatically for every matching date.</p>
+        <p class="subnote" style="margin-top:-4px;">Enter the bank statement's closing balance for this day to check it against the ledger's own figure.${/tbl/i.test(b.name) ? ' TBL must be reconciled before you can consider the day fully closed.' : ''}</p>
         <div class="row">
           <div class="field">
             <label>Bank statement balance</label>
@@ -3911,7 +3911,7 @@ function computeMonthlyLedgerFigures(key){
       revTotalIncome:0, yrtBefore:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])), yrtNew:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       totalDueSum:0, totalAmount:0, liveCoaTotals:Object.fromEntries(COA.map(c=>[c.key,0])), expColAmounts:[], expTotal:0, totalBalance:0,
       cashInHandShown:0, autoBankTotal:null, bankBalanceShown:0, formulaBankTotal:0, bankFormulaMismatch:false,
-      bankBreakdownShown:null, bankBreakdownSum:0, bankBreakdownMismatch:false, otherAsset:rec0.balanceSheet.otherAsset||{label:'',amount:0}, otherAssetAmount:0,
+      bankBreakdownShown:null, bankBreakdownSum:0, bankBreakdownHasData:false, bankBreakdownMismatch:false, otherAsset:rec0.balanceSheet.otherAsset||{label:'',amount:0}, otherAssetAmount:0,
       remainingBalance:0, noteTotal:0, noteTotalMismatch:false, totalLiabilities:0, assetLiabilityMismatch:false,
       gratuityPayable:0, eduAssistPayable:0, totalAssets:0, equity:0, customRowValues:{}, metricValues:{}, mandatoryIssues:[]};
   }
@@ -3978,15 +3978,13 @@ function computeMonthlyLedgerFigures(key){
   const gratuityPayable = yrtNew.gratuity;
   const eduAssistPayable = yrtNew.eduAssist; // already net of expenditure, see above
 
-  // "Balance in Bank Account" = Beginning Balance + this month's Income -
-  // this month's Expenditure (the formula the person specified), used as
-  // the default for every month; the live month additionally cross-checks
-  // it against the actual bank total pulled from the Daily Ledger's last
-  // day, and either can be overridden by hand if it doesn't match.
+  // "Balance in Bank Account" = the sum of each bank's own closing balance
+  // in the breakdown below (straight from the Daily Ledger day-chain),
+  // so the two can never disagree with each other. Beginning Balance +
+  // Income − Expenditure is kept only as a sanity-check figure (shown in
+  // the mismatch warning) and as the fallback for a month with no
+  // day-chain data at all for any bank yet.
   const formulaBankTotal = totalBalance; // totalBalance already = (Beginning Balance + Income) - Expenditure
-  const bankBalanceShown = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : (isLiveMonth && autoBankTotal!==null ? autoBankTotal : formulaBankTotal);
-  const bankFormulaMismatch = bankBalanceShown!==null && Math.abs((Number(bankBalanceShown)||0) - formulaBankTotal) > 1;
-
   const bankBreakdownShown = {};
   state.banks.forEach(b=>{
     // Formula-driven only (no manual override) - each bank's own closing
@@ -4009,6 +4007,9 @@ function computeMonthlyLedgerFigures(key){
     bankBreakdownShown[b.id] = (base===null && beginningAdd===0 && manualAdj===0) ? null : (Number(base)||0) + beginningAdd + manualAdj;
   });
   const bankBreakdownSum = state.banks.reduce((s,b)=>s+(Number(bankBreakdownShown[b.id])||0),0);
+  const bankBreakdownHasData = state.banks.some(b=>bankBreakdownShown[b.id]!==null);
+  const bankBalanceShown = rec.balanceSheet.bankBalanceOverride!==null ? rec.balanceSheet.bankBalanceOverride : (bankBreakdownHasData ? bankBreakdownSum : formulaBankTotal);
+  const bankFormulaMismatch = bankBalanceShown!==null && Math.abs((Number(bankBalanceShown)||0) - formulaBankTotal) > 1;
   const bankBreakdownMismatch = bankBalanceShown!==null && Math.abs(bankBreakdownSum - (Number(bankBalanceShown)||0)) > 1;
 
   const otherAsset = rec.balanceSheet.otherAsset || {label:'Debt to III Assets Ltd', amount:250000};
@@ -4060,7 +4061,7 @@ function computeMonthlyLedgerFigures(key){
 
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
-    bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
+    bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownHasData, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues, mandatoryIssues};
   } finally {
@@ -4299,7 +4300,7 @@ function renderMonthlyLedgerCard(){
   const f = computeMonthlyLedgerFigures(key);
   const {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoCashInHand, autoBankTotal,
-    bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownMismatch,
+    bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownHasData, bankBreakdownMismatch,
     otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     gratuityPayable, eduAssistPayable, totalAssets, equity, mandatoryIssues} = f;
 
@@ -4414,16 +4415,16 @@ function renderMonthlyLedgerCard(){
       <div class="row">
         <div class="field">
           <label>Cash in Hand ${rec.balanceSheet.cashInHandOverride!==null?'<span class="tag">manually overridden</span>':autoCashInHand!==null?'<span class="tag">auto: this month\'s last day</span>':''}</label>
-          <input type="text" inputmode="decimal" id="ml-cash-override" value="${formatAsianAmount(cashInHandShown||0)}" ${isLiveMonth && rec.balanceSheet.cashInHandOverride===null ? 'placeholder="auto"' : ''}>
+          <div class="computed" style="padding:6px 8px;">${cashInHandShown===null?'&mdash;':money(cashInHandShown)}</div>
           ${rec.balanceSheet.cashInHandOverride!==null ? `<button type="button" class="secondary small" id="ml-cash-reset" title="Clear override, go back to auto" style="margin-top:4px;">&#8635; Reset to auto</button>` : ''}
         </div>
         <div class="field">
-          <label>Balance in Bank Account ${rec.balanceSheet.bankBalanceOverride!==null?'<span class="tag">manually overridden</span>':isLiveMonth&&autoBankTotal!==null?'<span class="tag">auto from Daily Ledger</span>':'<span class="tag">auto: Beginning + Income − Expenditure</span>'}</label>
-          <input type="text" inputmode="decimal" id="ml-bank-balance-override" value="${formatAsianAmount(bankBalanceShown||0)}" ${isLiveMonth && rec.balanceSheet.bankBalanceOverride===null ? 'placeholder="auto"' : ''}>
+          <label>Balance in Bank Account ${rec.balanceSheet.bankBalanceOverride!==null?'<span class="tag">manually overridden</span>':bankBreakdownHasData?'<span class="tag">auto: bank breakdown total</span>':'<span class="tag">auto: Beginning + Income − Expenditure</span>'}</label>
+          <div class="computed" style="padding:6px 8px;">${money(bankBalanceShown||0)}</div>
           ${rec.balanceSheet.bankBalanceOverride!==null ? `<button type="button" class="secondary small" id="ml-bank-balance-reset" title="Clear override, go back to auto" style="margin-top:4px;">&#8635; Reset to auto</button>` : ''}
         </div>
       </div>
-      <p class="subnote" style="margin-top:-4px;">These two only turn into a manual override when the number you type actually differs from the auto figure - just clicking in and out, or tabbing through, never locks one in.</p>      <p id="ml-warn-bank-formula" class="subnote" style="margin-top:-6px;color:#B3261E;${bankFormulaMismatch?'':'display:none;'}">&#9888; This doesn't match Beginning Balance + Income &minus; Expenditure (${money(formulaBankTotal)}). Check for a data entry mistake.</p>
+      <p class="subnote" style="margin-top:-4px;">These two are computed automatically (same as the Bank Balance breakdown below) and can't be typed into directly.</p>      <p id="ml-warn-bank-formula" class="subnote" style="margin-top:-6px;color:#B3261E;${bankFormulaMismatch?'':'display:none;'}">&#9888; This doesn't match Beginning Balance + Income &minus; Expenditure (${money(formulaBankTotal)}). Check for a data entry mistake.</p>
 
       <div class="row">
         <div class="field">
@@ -4469,10 +4470,13 @@ function renderMonthlyLedgerCard(){
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
               <strong style="font-size:13px;">${escapeHtml(b.name)}</strong>
               <div>
+                ${/tbl/i.test(b.name) ? `<button type="button" class="secondary small" data-ml-jump="section-bank-statement">&#128269; Upload / re-upload below (TBL Bank Statement Cross-Check)</button>` : `
                 <button type="button" class="secondary small" data-action="upload-bank-statement" data-bank="${b.id}">&#11014; ${stmt?'Replace':'Upload'} statement (.xlsx)</button>
                 <input type="file" id="bank-statement-input-${b.id}" accept=".xlsx" style="display:none;" data-bank="${b.id}">
+                `}
               </div>
             </div>
+            ${/tbl/i.test(b.name) ? `<p class="subnote" style="margin:4px 0 0;">TBL's statement is uploaded once, in the "TBL Bank Statement Cross-Check" section further down (also used for the day-by-day match below and export row ordering) - not here.</p>` : ''}
             ${!stmt ? `<p class="subnote" style="color:var(--danger);margin:6px 0 0;">&#9888; No statement uploaded yet for ${escapeHtml(b.name)} &mdash; required before this month can be considered checked.</p>` : !isLiveMonth ? `
               <p class="subnote" style="margin:6px 0 0;">Statement on file: ${escapeHtml(stmt.fileName)} (${stmt.rows.length} rows). Switch the Daily Ledger to ${escapeHtml(monthKeyLabel(key))} to see the day-by-day cross-check here.</p>
             ` : cc ? `
@@ -4524,12 +4528,6 @@ function renderMonthlyLedgerCard(){
   card.querySelectorAll('[data-ml-jump-bottom]').forEach(btn=>{ btn.onclick = scrollMlToBottom; });
   card.querySelector('#ml-beginning-balance') && wireAmountInput(card.querySelector('#ml-beginning-balance'), (num)=>{ rec.beginningBankBalance = num; saveState(); });
   card.querySelector('#ml-advance-payment') && wireAmountInput(card.querySelector('#ml-advance-payment'), (num)=>{ rec.balanceSheet.advancePayment = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
-  const bankInp = card.querySelector('#ml-bank-balance-override');
-  const autoBankValue = isLiveMonth && autoBankTotal!==null ? autoBankTotal : formulaBankTotal;
-  if(bankInp) wireAmountInput(bankInp, (num)=>{
-    rec.balanceSheet.bankBalanceOverride = (num===autoBankValue) ? null : num;
-    saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
-  });
   const bankResetBtn = card.querySelector('#ml-bank-balance-reset');
   if(bankResetBtn) bankResetBtn.onclick = ()=>{ rec.balanceSheet.bankBalanceOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
   const otherAssetAmtInp = card.querySelector('#ml-other-asset-amount');
@@ -4539,11 +4537,6 @@ function renderMonthlyLedgerCard(){
     wireLockableTextInput(otherAssetLabelInp);
     otherAssetLabelInp.oninput = (e)=>{ rec.balanceSheet.otherAsset.label = e.target.value; saveState(); };
   }
-  const cashInp = card.querySelector('#ml-cash-override');
-  if(cashInp) wireAmountInput(cashInp, (num)=>{
-    rec.balanceSheet.cashInHandOverride = (num===autoCashInHand) ? null : num;
-    saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
-  });
   const cashResetBtn = card.querySelector('#ml-cash-reset');
   if(cashResetBtn) cashResetBtn.onclick = ()=>{ rec.balanceSheet.cashInHandOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
 
@@ -7137,7 +7130,29 @@ function renderBankStatementCard(){
       // both sides in a way that still happens to net out).
       let balanceCheckHtml = '';
       const tblBank = state.banks.find(b=>/tbl/i.test(b.name));
+      // Save the parsed statement into state.bankStatements too, so this
+      // one upload also feeds: (1) the Monthly Ledger's own "Bank
+      // Statement Cross-Check" summary (deposit/withdrawal totals, matched/
+      // mismatched days) for this bank, and (2) the Monthly/Revenue
+      // Expenditure export's same-date row ordering, which matches ledger
+      // entries to the actual sequence of transactions on the statement.
+      // (Each day's own Bank Reconciliation balance stays manual - typed in
+      // by hand, not auto-filled from here.) Merge by date range rather
+      // than overwrite outright, so uploading one month's statement
+      // doesn't erase an earlier month's already-saved rows - only the
+      // newly uploaded date range is replaced (handles a corrected
+      // re-upload of the same month too).
       if(tblBank && stmtRows.length){
+        const existingRows = (state.bankStatements[tblBank.id] && state.bankStatements[tblBank.id].rows) || [];
+        const newDates = stmtRows.map(r=>r.date).sort();
+        const minD = newDates[0], maxD = newDates[newDates.length-1];
+        const kept = existingRows.filter(r=> r.date<minD || r.date>maxD);
+        state.bankStatements[tblBank.id] = {
+          fileName: file.name,
+          rows: kept.concat(stmtRows).sort((a,b)=>a.date.localeCompare(b.date)),
+          uploadedAt: new Date().toISOString()
+        };
+
         const lastRow = stmtRows.slice().sort((a,b)=>a.date.localeCompare(b.date)).pop();
         const dayComputed = computedForDate(lastRow.date);
         const appClosing = dayComputed && dayComputed.banks[tblBank.id] ? dayComputed.banks[tblBank.id].closing : null;
