@@ -9064,6 +9064,8 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   ws.getCell('B7').value = dateText
     ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
     : `Following amount of cash collected may be deposited to madrasa account`;
+  ws.getCell('K3').value = 'Attach';
+  ws.getColumn(11).width = 7; // match the withdrawal notesheet's Attach column (F) width
 
   const rows = writeDepositCategoryLines(ws, lines);
   applyDepositNotesheetFormatting(ws, rows);
@@ -9088,6 +9090,8 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
     miscWs.getCell('B7').value = dateText
       ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
       : `Following amount of cash collected may be deposited to madrasa account`;
+    miscWs.getCell('K3').value = 'Attach';
+    miscWs.getColumn(11).width = 7; // match the withdrawal notesheet's Attach column (F) width
     const miscRows = writeDepositCategoryLines(miscWs, miscLines);
     applyDepositNotesheetFormatting(miscWs, miscRows);
   }
@@ -9644,8 +9648,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firs
   rr = wordsRow+5;
   ws.mergeCells(`B${rr}:C${rr}`);
   put(`B${rr}`, 'Admin Manager', {size:13, border:false});
-  ws.getCell(`B${rr}`).border = {left:THIN, bottom:THIN};
-  ws.getCell(`C${rr}`).border = {bottom:THIN};
+  ws.getCell(`B${rr}`).font = {...ws.getCell(`B${rr}`).font, underline:true};
   rr = wordsRow+11; // extra room before the name so there's more space to sign above it
   ws.mergeCells(`D${rr}:E${rr}`);
   put(`E${rr}`, sigValue(s.adminManager, s.adminManagerRole), {size:13, border:false, wrap:true});
@@ -9653,8 +9656,7 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firs
   rr = wordsRow+13;
   ws.mergeCells(`B${rr}:C${rr}`);
   put(`B${rr}`, 'Principal', {size:13, border:false});
-  ws.getCell(`B${rr}`).border = {left:THIN, bottom:THIN};
-  ws.getCell(`C${rr}`).border = {bottom:THIN};
+  ws.getCell(`B${rr}`).font = {...ws.getCell(`B${rr}`).font, underline:true};
   rr = wordsRow+19; // extra room before the name so there's more space to sign above it
   ws.mergeCells(`D${rr}:E${rr}`);
   put(`E${rr}`, sigValue(s.principal, s.principalRole), {size:13, border:false, wrap:true});
