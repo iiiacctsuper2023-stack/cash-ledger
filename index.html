@@ -1389,17 +1389,26 @@ function takaInWords(amount){
   if(rest) parts.push(threeDigitWords(rest));
   return (neg?'Minus ':'')+parts.join(' ')+' Taka Only';
 }
+/* The month a notesheet's signature block shows is always the real
+   calendar month/year the sheet is generated in (today's actual date) -
+   deliberately NOT tied to the Daily Ledger's currently-selected month
+   dropdown (state.month/state.year), which covers the accounting period
+   being worked on and can easily be left on an earlier month while
+   today's real date has already moved on - that mismatch is exactly what
+   used to make a freshly-generated notesheet still show last month's name
+   in the signature. */
 function monthYearAbbr(){
-  return (state.month||'').slice(0,3)+' '+String(state.year||'').slice(-2);
+  const d = new Date();
+  return MONTHS[d.getMonth()].slice(0,3)+' '+String(d.getFullYear()).slice(-2);
 }
-/* A real Date value (1st of the selected month) to store in a hidden
-   reference cell on each notesheet, so the "month" line under every
-   signatory can be a formula that reads this cell (TEXT(...,"mmm-yy"))
-   instead of a typed-in string with no traceable source. The date itself
-   is never displayed - only its formatted month/year. */
+/* A real Date value (1st of the current calendar month) to store in a
+   hidden reference cell on each notesheet, so the "month" line under
+   every signatory can be a formula that reads this cell (TEXT(...,
+   "mmm-yy")) instead of a typed-in string with no traceable source. The
+   date itself is never displayed - only its formatted month/year. */
 function monthRefDate(){
-  const idx = MONTHS.indexOf(state.month);
-  return new Date(Number(state.year)||new Date().getFullYear(), idx>=0?idx:0, 1);
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 /* Third signature line under Name/Designation on notesheets: a bare
    "Jul 26" with no label reads like a stray date, so it's always prefixed
