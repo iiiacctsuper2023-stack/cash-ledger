@@ -817,7 +817,14 @@ function defaultState(){
        export of the real bank statement, used to auto-fill and
        cross-check the per-day Bank Reconciliation fields above instead
        of typing each day's closing balance by hand. */
-    bankStatements:{}
+    bankStatements:{},
+    /* Bangladesh government/bank holiday dates (ISO "YYYY-MM-DD"), entered
+       by hand since there's no fixed formula for them (unlike the
+       Friday/Saturday weekend, which is checked separately). Used by SSL
+       Commerz bank-credit-date calculation: if the day after a payment
+       falls on one of these, or a Friday/Saturday, the money instead lands
+       on the next working day the bank is actually open. */
+    bankHolidays:[]
   };
 }
 function newDay(dateStr){
@@ -1377,7 +1384,7 @@ function takaInWords(amount){
   const rest = n;
   const parts=[];
   if(crore) parts.push(threeDigitWords(crore)+' Crore');
-  if(lakh) parts.push(twoDigitWords(lakh)+' Lakh');
+  if(lakh) parts.push(twoDigitWords(lakh)+' Lac');
   if(thousand) parts.push(twoDigitWords(thousand)+' Thousand');
   if(rest) parts.push(threeDigitWords(rest));
   return (neg?'Minus ':'')+parts.join(' ')+' Taka Only';
@@ -1747,6 +1754,7 @@ function migrateState(){
   if(!state.archive) state.archive = [];
   if(!state.templates) state.templates = [];
   if(!state.bankStatements) state.bankStatements = {};
+  if(!state.bankHolidays) state.bankHolidays = [];
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -5187,6 +5195,7 @@ async function importFullMonthFile(file){
     await loadExcelJS();
     const buf = await file.arrayBuffer();
     const wb = new ExcelJS.Workbook();
+    wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
     await wb.xlsx.load(buf);
     const revWs = wb.worksheets.find(w=>/revenue/i.test(w.name));
     const expWs = wb.worksheets.find(w=>/expenditure/i.test(w.name));
@@ -5256,6 +5265,7 @@ async function importMonthlyLedgerFile(file){
     await loadExcelJS();
     const buf = await file.arrayBuffer();
     const wb = new ExcelJS.Workbook();
+    wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
     await wb.xlsx.load(buf);
     const revSheet = wb.worksheets.find(w=>/revenue/i.test(w.name));
     if(!revSheet){ showAlert('Could not find a "Monthly Revenue" sheet in that file.'); return; }
@@ -5376,6 +5386,7 @@ async function exportMonthlyLedger(key, previewOnly){
   const mlFig = computeMonthlyLedgerFigures(key);
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
 
   const FONT = {name:'Times New Roman', size:11};
   const BOLD = {name:'Times New Roman', size:11, bold:true};
@@ -6521,6 +6532,7 @@ function renderDepositNotesheetCard(){
       await loadExcelJS();
       const buf = await file.arrayBuffer();
       const wb = new ExcelJS.Workbook();
+      wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
       await wb.xlsx.load(buf);
       const rawText = wb.worksheets[0].getCell('B3').value;
       const iso = depositParseRawRangeToISO(rawText);
@@ -6566,12 +6578,13 @@ function renderDepositNotesheetCard(){
    straight in the TBL bank account automatically - there's no cash in
    hand to physically carry to the bank, so no Deposit Notesheet document
    is generated for it. The accountant enters the date money actually
-   landed in the account (bank-credit date; payments made Thu/Fri/Sat all
-   land the following Sunday) and uploads the same "Collection Register
-   Account Wise Summary" export used for Deposit Notesheets, purely to
-   split the total across revenue categories. The export's own date
-   (payment date, one or more days earlier) is ignored on purpose - the
-   Monthly Ledger entry always uses the bank-credit date the user typed. */
+   landed in the account (bank-credit date; normally the next day, later
+   if that day is a Friday/Saturday or a listed government holiday) and
+   uploads the same "Collection Register Account Wise Summary" export used
+   for Deposit Notesheets, purely to split the total across revenue
+   categories. The export's own date (payment date, one or more days
+   earlier) is ignored on purpose - the Monthly Ledger entry always uses
+   the bank-credit date the user typed. */
 /* TBL (Trust Bank) Bank Statement Cross-Check: parses the bank's own
    Account Statement export (Tran Date / Particular / Withdrawal / Deposit
    / Balance, one header row, ending at a "Grand Total" row) and matches
@@ -6585,6 +6598,7 @@ function renderDepositNotesheetCard(){
 async function parseTBLStatement(arrayBuffer){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   await wb.xlsx.load(arrayBuffer);
   const ws = wb.worksheets[0];
   let headerRow = null;
@@ -6828,6 +6842,7 @@ const DUE_LIST_SECTION_TITLE = {
 async function parseDuesRegisterFile(arrayBuffer){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   await wb.xlsx.load(arrayBuffer);
   const ws = wb.worksheets[0];
   let headerRow = null, headers = {};
@@ -6873,6 +6888,7 @@ async function parseDuesRegisterFile(arrayBuffer){
 async function buildDueListWorkbook(dueStudents, monthKey){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   const ws = wb.addWorksheet('Due List');
   const FONT = {name:'Times New Roman', size:11};
   const BOLD = {name:'Times New Roman', size:11, bold:true};
@@ -7230,23 +7246,37 @@ function renderBankStatementCard(){
 /* Online Payment (SSL Commerz): the raw export is a whole month's worth of
    individual student transactions (one row per payment, dated the day the
    student paid). SSL Commerz doesn't settle same-day - money lands in the
-   TBL account the next day, except payments made Thu/Fri/Sat which all
-   land together the following Sunday. So one uploaded file typically needs
-   to be split into SEVERAL Monthly Ledger entries, one per computed
-   bank-credit date, each with its own category breakdown. The computed
-   date is a best-effort default from that rule; the real source of truth
-   is the bank statement, so every bucket's date stays editable before
-   saving in case a holiday or bank delay shifted it. */
+   TBL account the next day; but if that next day is a bank holiday - the
+   Friday/Saturday weekend, or a Bangladesh government holiday from the
+   list below - no money moves that day, so it instead lands on the next
+   day the bank is actually open (skipping over back-to-back holidays too,
+   e.g. a holiday that falls right after the weekend). So one uploaded
+   file typically needs to be split into SEVERAL Monthly Ledger entries,
+   one per computed bank-credit date, each with its own category
+   breakdown. The computed date is a best-effort default from that rule;
+   the real source of truth is the bank statement, so every bucket's date
+   stays editable before saving in case a holiday not yet added below, or
+   some other bank delay, shifted it. */
+function isBankHoliday(dateISO){
+  const d = new Date(dateISO+'T00:00:00Z');
+  const wd = d.getUTCDay(); // 0=Sun..6=Sat
+  if(wd===5 || wd===6) return true; // Bangladesh weekend: Friday, Saturday
+  return (state.bankHolidays||[]).includes(dateISO);
+}
 function sslBankCreditDateISO(tranDateISO){
   const d = new Date(tranDateISO+'T00:00:00Z');
-  const wd = d.getUTCDay(); // 0=Sun..6=Sat
-  const addDays = wd===4 ? 3 : wd===5 ? 2 : wd===6 ? 1 : 1; // Thu/Fri/Sat -> following Sunday, else next day
-  d.setUTCDate(d.getUTCDate()+addDays);
-  return d.toISOString().slice(0,10);
+  d.setUTCDate(d.getUTCDate()+1); // starts as simply "the next day"
+  let iso = d.toISOString().slice(0,10);
+  while(isBankHoliday(iso)){
+    d.setUTCDate(d.getUTCDate()+1);
+    iso = d.toISOString().slice(0,10);
+  }
+  return iso;
 }
 async function parseSSLCommerzTransactionFile(arrayBuffer){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   await wb.xlsx.load(arrayBuffer);
   const ws = wb.worksheets[0];
   let headerRow = null, headers = {};
@@ -7293,7 +7323,29 @@ function renderOnlinePaymentCard(){
   const card = el(`
     <div class="card" id="section-online-payment">
       <h3><span class="num">&#127760;</span> Online Payment (SSL Commerz)</h3>
-      <p class="subnote">No Deposit Notesheet is needed for this - the money already lands directly in the TBL account. Upload the SSL Commerz transaction export; it's split automatically into one Monthly Ledger entry per bank-credit date (next day, or the following Sunday for Thu/Fri/Sat payments). Check each date against your bank statement before saving - edit any that don't match.</p>
+      <p class="subnote">No Deposit Notesheet is needed for this - the money already lands directly in the TBL account. Upload the SSL Commerz transaction export; it's split automatically into one Monthly Ledger entry per bank-credit date (the next day, skipped forward past the Friday/Saturday weekend and any government holiday listed below). Check each date against your bank statement before saving - edit any that don't match.</p>
+      <div style="margin:10px 0; border:1px solid var(--line-soft); border-radius:8px; padding:8px 10px;">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:6px;">Bank holidays (Bangladesh) - beyond the Friday/Saturday weekend, which is already skipped automatically</div>
+        <div class="row" style="align-items:flex-end; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+          <div class="field" style="flex:0 0 160px;">
+            <label>Date</label>
+            <input type="date" id="bh-date-input">
+          </div>
+          <div class="field" style="flex:1 1 200px;">
+            <label>Occasion (optional)</label>
+            <input type="text" id="bh-label-input" placeholder="e.g. Eid-ul-Fitr">
+          </div>
+          <button class="secondary small" type="button" id="bh-add-btn">+ Add</button>
+        </div>
+        ${(state.bankHolidays||[]).length ? `
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          ${state.bankHolidays.slice().sort((a,b)=>(a.date||a).localeCompare(b.date||b)).map(h=>{
+            const date = typeof h==='string' ? h : h.date;
+            const label = typeof h==='string' ? '' : (h.label||'');
+            return `<span class="tag" style="display:inline-flex; align-items:center; gap:5px;">${date}${label?' &mdash; '+escapeHtml(label):''} <button type="button" data-action="remove-bank-holiday" data-date="${date}" style="border:none;background:none;cursor:pointer;color:inherit;font-weight:700;padding:0;">&times;</button></span>`;
+          }).join('')}
+        </div>` : `<p class="subnote" style="margin:0;">No holidays added yet - only the Friday/Saturday weekend is being skipped.</p>`}
+      </div>
       <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
         <div class="field" style="flex:1 1 260px;">
           <label>SSL Commerz transaction file (.xlsx)</label>
@@ -7328,6 +7380,24 @@ function renderOnlinePaymentCard(){
   const statusEl = card.querySelector('#op-status');
   const previewWrap = card.querySelector('#op-preview-wrap');
   let currentBuckets = null;
+
+  card.querySelector('#bh-add-btn').onclick = ()=>{
+    const dateInp = card.querySelector('#bh-date-input');
+    const labelInp = card.querySelector('#bh-label-input');
+    const date = dateInp.value;
+    if(!date){ showAlert('Pick a date first.'); return; }
+    if(!Array.isArray(state.bankHolidays)) state.bankHolidays = [];
+    const existing = state.bankHolidays.find(h=>(typeof h==='string'?h:h.date)===date);
+    if(existing){ if(typeof existing==='object') existing.label = labelInp.value.trim(); }
+    else state.bankHolidays.push({date, label: labelInp.value.trim()});
+    saveState(); render();
+  };
+  card.querySelectorAll('[data-action="remove-bank-holiday"]').forEach(btn=>{
+    btn.onclick = ()=>{
+      state.bankHolidays = (state.bankHolidays||[]).filter(h=>(typeof h==='string'?h:h.date)!==btn.dataset.date);
+      saveState(); render();
+    };
+  });
 
   function drawPreview(){
     previewWrap.innerHTML = '';
@@ -7386,6 +7456,7 @@ function renderOnlinePaymentCard(){
 async function buildOnlinePaymentWorkbook(b){
   await loadExcelJS();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   const ws = wb.addWorksheet('Online Payment');
   const BOLD = {bold:true};
   ws.getColumn(1).width = 34; ws.getColumn(2).width = 18;
@@ -8518,6 +8589,7 @@ async function parseBankStatementFile(bankId, file){
   await loadExcelJS();
   const buf = await file.arrayBuffer();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   await wb.xlsx.load(buf);
   const ws = wb.worksheets[0];
   if(!ws) throw new Error('No sheet found in that file.');
@@ -8704,7 +8776,7 @@ function depositNumberToWordsIndian(n){
   const rest = n;
   const parts = [];
   if(crore) parts.push(depositThreeDigitWords(crore)+' crore');
-  if(lakh) parts.push(depositThreeDigitWords(lakh)+' lakh');
+  if(lakh) parts.push(depositThreeDigitWords(lakh)+' lac');
   if(thousand) parts.push(depositThreeDigitWords(thousand)+' thousand');
   if(rest) parts.push(depositThreeDigitWords(rest));
   return parts.join(' ');
@@ -8730,6 +8802,7 @@ const DEPOSIT_CAT_COLS = ['Tuition Fee -I','Admission Fee -I','Exam Fee -I','Adm
 
 async function parseDepositRawFile(arrayBuffer){
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   await wb.xlsx.load(arrayBuffer);
   const ws = wb.worksheets[0];
   const dateRangeRaw = ws.getCell('B3').value;
@@ -8975,6 +9048,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   const noteNum = state.nextDepositNotesheetNo || 117;
   const srcWs = await loadDepositNotesheetTemplate();
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   const ws = cloneTemplateSheet(wb, srcWs, String(noteNum - 1), 11);
 
   ws.getCell('B3').value = `III/Acct/Madrasa/revenue/${noteNum}`;
@@ -9394,6 +9468,7 @@ async function exportAnnualSummary(year){
   if(expVouchers.length===0 && incVouchers.length===0){ showAlert('No income or expenditure recorded for '+year+' yet.'); return; }
 
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
 
   function writeGrid(ws, title, vouchers, catKeys, catLookup){
     ws.getColumn(1).width = 26;
@@ -9663,6 +9738,7 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
 
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   const used = new Set();
   const summaryRows = [];
 
@@ -9935,6 +10011,7 @@ async function viewStoredWorkbook(base64, filename, title){
   try{
     await loadExcelJS();
     const wb = new ExcelJS.Workbook();
+    wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
     await wb.xlsx.load(base64ToArrayBuffer(base64));
     showWorkbookPreview(wb, {title: title||filename, onDownload: ()=>downloadStoredWorkbook(base64, filename)});
   }catch(e){
@@ -10006,6 +10083,7 @@ async function exportDay(dayId){
   const computed = computeAll();
   const c = computed[dayId];
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   const used = new Set();
   const ws = wb.addWorksheet(sheetNameFor(day, used));
   const beginRefs = {
@@ -10039,6 +10117,7 @@ async function exportMonth(){
   try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
   const computed = computeAll(); // computed over the FULL day history, so the target month's opening balances are still correct even though only that month gets exported
   const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   const used = new Set(['Overview']);
 
   const wsOverview = wb.addWorksheet('Overview');
