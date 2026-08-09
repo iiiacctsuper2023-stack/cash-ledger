@@ -8983,10 +8983,13 @@ function applyDepositNotesheetFormatting(ws, rows){
   delete ws.pageSetup.scale;
 
   // Hidden reference cell holding the selected month as a real Date value.
-  // Every signature block's 3rd line is a formula that reads this cell via
-  // TEXT(...,"mmm-yy") - so the month shown always traces back to an actual
-  // date, never a typed-in string - while the date itself stays off the
-  // printed sheet (hidden column + explicit print area excluding it).
+  // Each signature block's own date line (just below the name/role box,
+  // template rows 26/35/46) is tied to this cell via a formula instead of
+  // keeping the template's baked-in date - so it always shows the month the
+  // notesheet is actually generated in, off a single traceable source. The
+  // name/role text above it (rows 24/33/45) is left untouched - it used to
+  // have this same month appended as a 3rd line too, which showed the month
+  // twice; that append has been removed.
   const refCol = 13; // column M, past the K "Attach" box
   ws.getColumn(refCol).hidden = true;
   const refAddr = 'M3';
@@ -8996,27 +8999,14 @@ function applyDepositNotesheetFormatting(ws, rows){
   refCell.font = {color:{argb:'FFFFFFFF'}};
   ws.pageSetup.printArea = `A1:K${finalRow}`;
 
-  const esc = s => String(s||'').replace(/"/g,'""');
   const shift = n => n + rows.extra;
-  const setSignatureLines = (addr)=>{
-    const c = ws.getCell(addr);
-    const lines = String(c.value||'').split('\n');
-    const literal = lines.map(l=>`"${esc(l)}"`).join('&CHAR(10)&');
-    c.value = {formula: `${literal}&CHAR(10)&TEXT(${refAddr},"mmm-yy")`, result: `${lines.join('\n')}\n${monthYearAbbr()}`};
-    c.alignment = {...(c.alignment||{}), wrapText:true};
-  };
-  [24,33].forEach(rowNum=>{
-    const addr = `H${shift(rowNum)}`;
-    setSignatureLines(addr);
+  [24,33,45].forEach(rowNum=>{
     const row = ws.getRow(shift(rowNum));
     if((row.height||0) < 45) row.height = 45;
   });
-  {
-    const addr = `H${shift(45)}`;
-    setSignatureLines(addr);
-    const row = ws.getRow(shift(45));
-    if((row.height||0) < 45) row.height = 45;
-  }
+  [26,35,46].forEach(rowNum=>{
+    ws.getCell(`H${shift(rowNum)}`).value = {formula: refAddr, result: monthRefDate()};
+  });
 }
 
 async function generateDepositNotesheet(file, startISO, endISO, shouldSave, previewOnly, attribDate){
