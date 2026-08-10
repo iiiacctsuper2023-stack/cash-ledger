@@ -854,9 +854,11 @@ function ensureBankDaily(day, bankId){
   return bd;
 }
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function todayDateStr(){
-  const d = new Date();
+function toLocalDateStr(d){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function todayDateStr(){
+  return toLocalDateStr(new Date());
 }
 function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 function dayLabel(dateStr){
@@ -1341,7 +1343,12 @@ function promptVaultPassphrase(message){
 function addDaysStr(dateStr, delta){
   const d = new Date(dateStr+'T00:00:00');
   d.setDate(d.getDate()+delta);
-  return d.toISOString().slice(0,10);
+  // Build the "YYYY-MM-DD" string from the Date object's own local
+  // year/month/day fields, NOT toISOString() (which converts to UTC first -
+  // for any timezone ahead of UTC, e.g. Bangladesh/UTC+6, local midnight
+  // converts to the previous UTC day, silently shifting the result back by
+  // one day and cancelling out a +1-day advance).
+  return toLocalDateStr(d);
 }
 /* An IOU carries forward automatically from the day it's added until it's
    removed - "removed" just closes off its toDate so it stops appearing on
@@ -3233,12 +3240,30 @@ function renderSetup(){
 
 function renderDayTabs(){
   const wrap = el(`<div></div>`);
-  const tabs = el(`<div class="day-tabs"></div>`);
+  const row = el(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;"></div>`);
+  const tabs = el(`<div class="day-tabs" style="margin-bottom:0;flex:1 1 auto;min-width:0;"></div>`);
   state.days.forEach(d=>{
     tabs.appendChild(el(`<div class="day-tab ${d.id===selectedDayId?'active':''}" data-action="select-day" data-day="${d.id}">${dayLabel(d.date)}</div>`));
   });
   tabs.appendChild(el(`<button class="secondary small" style="flex:none;" data-action="add-day">+ Add day</button>`));
-  wrap.appendChild(tabs);
+  // "Jump to day" - lets you land on any date in this month directly
+  // instead of having to scroll the whole day-tabs strip to find it once
+  // there are many days in the month.
+  if(state.days.length>1){
+    const sortedDays = [...state.days].sort((a,b)=> (a.date||'') < (b.date||'') ? -1 : 1);
+    const jump = el(`
+      <select style="flex:none;font-size:12.5px;font-family:'IBM Plex Mono',monospace;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);">
+        <option value="">Jump to day&hellip;</option>
+        ${sortedDays.map(d=>`<option value="${d.id}" ${d.id===selectedDayId?'selected':''}>${dayLabel(d.date)}</option>`).join('')}
+      </select>
+    `);
+    jump.onchange = ()=>{
+      if(jump.value){ selectedDayId = jump.value; render(); }
+    };
+    row.appendChild(jump);
+  }
+  row.appendChild(tabs);
+  wrap.appendChild(row);
   // Jump straight to the active (current) day tab instead of leaving the
   // strip scrolled to the start of the month - the days you actually need
   // (today and recent) are near the end, older ones rarely matter.
@@ -3730,7 +3755,7 @@ function renderDashboardCard(){
   const monthTotal = Object.values(catTotals).reduce((s,v)=>s+v,0);
   const topCats = COA.map(c=>({cat:c, total:catTotals[c.key]})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
 
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayDateStr();
   const outstandingIous = (state.iouRegistry||[]).filter(i=> i.toDate===null || i.toDate>=today);
   const outstandingTotal = outstandingIous.reduce((s,i)=>s+(Number(i.amount)||0),0);
   const outstandingPayables = (state.payableRegistry||[]).filter(i=> i.toDate===null || i.toDate>=today);
@@ -8287,12 +8312,11 @@ function wireDelegation(){
       let next;
       if(validDates.length){
         const maxDate = validDates.reduce((a,b)=> a>b ? a : b); // "YYYY-MM-DD" strings compare correctly
-        next = new Date(maxDate+'T00:00:00');
-        next.setDate(next.getDate()+1);
+        next = addDaysStr(maxDate, 1);
       } else {
-        next = new Date();
+        next = todayDateStr();
       }
-      const d = newDay(next.toISOString().slice(0,10));
+      const d = newDay(next);
       state.days.push(d);
       selectedDayId = d.id;
       saveState(); render();
