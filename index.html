@@ -706,6 +706,13 @@ const MONTHS = ['January','February','March','April','May','June','July','August
    ====================================================================== */
 let state = null;
 let selectedDayId = null;
+// Which month's days the Daily Ledger's day-tabs strip is currently
+// showing (e.g. "2026-08") - independent from state.month/state.year (the
+// "live" recording month). Lets the tabs/jump-to-day list stay short even
+// after many months of days have accumulated, instead of listing every day
+// ever entered. null = not yet resolved, defaults to the live month once
+// renderDayTabs first runs.
+let dayTabsViewMonth = null;
 let dlMonthKey = null; // "YYYY-MM" chosen in the footer's "Download whole month" selector - defaults to the selected day's month
 let notesheetRange = null; // {start, end} - lazily defaulted to the full recorded month
 let notesheetSettingsOpen = false;
@@ -3241,16 +3248,49 @@ function renderSetup(){
 function renderDayTabs(){
   const wrap = el(`<div></div>`);
   const row = el(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;"></div>`);
+
+  // Group days by month so the tabs/jump list only ever shows ONE month's
+  // days, however many months' worth have piled up in state.days overall
+  // (which is one continuous, never-reset list across every month).
+  const monthKeys = [...new Set(state.days.map(d=>d.date ? d.date.slice(0,7) : null).filter(Boolean))].sort();
+  const liveKey = monthKeyFor(state.month, state.year);
+  const selectedDay = findDay(selectedDayId);
+  if(!dayTabsViewMonth || !monthKeys.includes(dayTabsViewMonth)){
+    if(selectedDay && selectedDay.date && monthKeys.includes(selectedDay.date.slice(0,7))){
+      dayTabsViewMonth = selectedDay.date.slice(0,7); // keep whatever day is already open in view
+    } else {
+      dayTabsViewMonth = monthKeys.includes(liveKey) ? liveKey : (monthKeys[monthKeys.length-1] || liveKey);
+    }
+  }
+  const visibleDays = state.days.filter(d=>d.date && d.date.slice(0,7)===dayTabsViewMonth);
+
+  if(monthKeys.length>1){
+    const monthSel = el(`
+      <select style="flex:none;font-size:12.5px;font-family:'IBM Plex Mono',monospace;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font-weight:600;">
+        ${monthKeys.map(k=>`<option value="${k}" ${k===dayTabsViewMonth?'selected':''}>${monthKeyLabel(k)}</option>`).join('')}
+      </select>
+    `);
+    monthSel.onchange = ()=>{
+      dayTabsViewMonth = monthSel.value;
+      const inMonth = state.days.filter(d=>d.date && d.date.slice(0,7)===dayTabsViewMonth);
+      if(inMonth.length){
+        const sorted = [...inMonth].sort((a,b)=> (a.date||'') < (b.date||'') ? -1 : 1);
+        selectedDayId = sorted[sorted.length-1].id; // land on that month's last day
+      }
+      render();
+    };
+    row.appendChild(monthSel);
+  }
+
   const tabs = el(`<div class="day-tabs" style="margin-bottom:0;flex:1 1 auto;min-width:0;"></div>`);
-  state.days.forEach(d=>{
+  visibleDays.forEach(d=>{
     tabs.appendChild(el(`<div class="day-tab ${d.id===selectedDayId?'active':''}" data-action="select-day" data-day="${d.id}">${dayLabel(d.date)}</div>`));
   });
   tabs.appendChild(el(`<button class="secondary small" style="flex:none;" data-action="add-day">+ Add day</button>`));
   // "Jump to day" - lets you land on any date in this month directly
-  // instead of having to scroll the whole day-tabs strip to find it once
-  // there are many days in the month.
-  if(state.days.length>1){
-    const sortedDays = [...state.days].sort((a,b)=> (a.date||'') < (b.date||'') ? -1 : 1);
+  // instead of having to scroll the day-tabs strip to find it.
+  if(visibleDays.length>1){
+    const sortedDays = [...visibleDays].sort((a,b)=> (a.date||'') < (b.date||'') ? -1 : 1);
     const jump = el(`
       <select style="flex:none;font-size:12.5px;font-family:'IBM Plex Mono',monospace;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);">
         <option value="">Jump to day&hellip;</option>
@@ -8319,6 +8359,7 @@ function wireDelegation(){
       const d = newDay(next);
       state.days.push(d);
       selectedDayId = d.id;
+      dayTabsViewMonth = next.slice(0,7); // show the month the new day landed in
       saveState(); render();
       // Scroll straight to the new day and highlight it, so it's obvious
       // a fresh day with the next date was created - not just the same
@@ -10081,6 +10122,8 @@ function findDayMandatoryIssues(day){
 function goToMandatoryIssue(issue){
   if(monthlyLedgerOpen){ monthlyLedgerOpen = false; }
   selectedDayId = issue.dayId;
+  const issueDay = findDay(issue.dayId);
+  if(issueDay && issueDay.date) dayTabsViewMonth = issueDay.date.slice(0,7);
   render();
   setTimeout(()=>{
     const target = document.getElementById(issue.sectionId);
