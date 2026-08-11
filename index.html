@@ -2029,6 +2029,35 @@ function wireLockableTextInput(inputEl){
     }
   });
   inputEl.addEventListener('blur', syncLock);
+  // Spell-check suggestion strip - on blur (once the person has finished
+  // typing), checks the text against every description word used
+  // elsewhere in the tool before and shows any likely typo as a clickable
+  // "wrong -> right" chip. Harmless no-op on Bangla note fields since only
+  // Latin-script words are indexed/checked.
+  inputEl.addEventListener('blur', ()=>{
+    const host = inputEl.parentElement;
+    if(!host) return;
+    const existing = host.querySelector('.spell-suggest-strip');
+    if(existing) existing.remove();
+    const suggestions = findSpellingSuggestions(inputEl.value, descriptionWordIndex());
+    if(!suggestions.length) return;
+    const strip = el(`<div class="spell-suggest-strip" style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>`);
+    strip.appendChild(el(`<span style="opacity:.7;">Spelling?</span>`));
+    suggestions.forEach(s=>{
+      const chip = el(`<button type="button" style="border:1px solid var(--line-soft);background:#fff;border-radius:12px;padding:2px 9px;font-size:11.5px;cursor:pointer;color:var(--primary-dark);">${escapeHtml(s.wrong)} &rarr; <strong>${escapeHtml(s.suggestion)}</strong></button>`);
+      chip.onclick = ()=>{
+        inputEl.readOnly = false;
+        inputEl.classList.remove('locked-text');
+        const escaped = s.wrong.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        inputEl.value = inputEl.value.replace(new RegExp(`\\b${escaped}\\b`), s.suggestion);
+        inputEl.dispatchEvent(new Event('input', {bubbles:true}));
+        strip.remove();
+        inputEl.dispatchEvent(new Event('blur'));
+      };
+      strip.appendChild(chip);
+    });
+    host.appendChild(strip);
+  });
 }
 function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 /* Wraps every case-insensitive occurrence of query in <mark>, escaping
@@ -7717,6 +7746,78 @@ function transferNoteSuggestions(field){
     (day[field]||[]).forEach(item=>{ if(item.note && item.note.trim()) seen.add(item.note.trim()); });
   });
   return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+}
+
+/* Plain Levenshtein edit distance between two strings - used only for the
+   description spell-check suggestion below, on short Latin-script words. */
+function levenshtein(a, b){
+  const m = a.length, n = b.length;
+  const dp = [];
+  for(let i=0;i<=m;i++){ dp.push([i]); }
+  for(let j=1;j<=n;j++){ dp[0][j] = j; }
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+/* Every Latin-script word (3+ letters) ever typed across every
+   description-like field in the whole tool - vouchers, misc collection,
+   IOU/payable descriptions, recurring templates, Monthly Ledger manual
+   entries. This is the "known correct spellings" vocabulary the spell
+   suggestion checks against, since there's no real dictionary here - just
+   what's actually been typed (and reused) before. Tracks the most-used
+   original casing per word so a suggestion reads naturally, e.g.
+   "Tuition" rather than "tuition". */
+function descriptionWordIndex(){
+  const idx = new Map();
+  const addText = (text)=>{
+    if(!text) return;
+    String(text).split(/[^A-Za-z]+/).forEach(raw=>{
+      if(raw.length<3) return;
+      const key = raw.toLowerCase();
+      let e = idx.get(key);
+      if(!e){ e = {count:0, forms:new Map()}; idx.set(key,e); }
+      e.count++;
+      e.forms.set(raw, (e.forms.get(raw)||0)+1);
+    });
+  };
+  allVouchers().forEach(v=>addText(v.desc));
+  allDaysEverywhere().forEach(d=>{
+    (d.miscCollectionSections||[]).forEach(sec=>addText(sec.desc));
+  });
+  (state.iouRegistry||[]).forEach(i=>addText(i.desc));
+  (state.payableRegistry||[]).forEach(i=>addText(i.desc));
+  (state.templates||[]).forEach(t=>addText(t.desc));
+  return idx;
+}
+/* Flags words in `text` that don't exactly match the known vocabulary
+   above but are close (1 edit for short words, 2 for longer ones) to a
+   word that's been used more than once before - a likely typo, not just
+   an uncommon-but-correct word. */
+function findSpellingSuggestions(text, idx){
+  if(!text) return [];
+  const out = [];
+  const seen = new Set();
+  [...text.matchAll(/[A-Za-z]{3,}/g)].forEach(m=>{
+    const raw = m[0];
+    const key = raw.toLowerCase();
+    if(idx.has(key) || seen.has(key)) return; // already a known/correct spelling
+    let best = null, bestDist = Infinity;
+    idx.forEach((entry, candKey)=>{
+      if(entry.count<2) return; // only trust spellings seen more than once
+      const maxDist = candKey.length<=4 ? 1 : 2;
+      const dist = levenshtein(key, candKey);
+      if(dist<=maxDist && dist<bestDist){ bestDist = dist; best = entry; }
+    });
+    if(best){
+      seen.add(key);
+      const form = [...best.forms.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+      out.push({wrong: raw, suggestion: form});
+    }
+  });
+  return out;
 }
 
 /* Adds a new blank voucher line to a category and returns it - shared by
