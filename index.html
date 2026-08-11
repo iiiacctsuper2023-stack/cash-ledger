@@ -6138,14 +6138,16 @@ function renderCategorySummaryCard(){
     const catFilter = { catKeys: summaryFilters.catKeys };
     if(summaryFilters.mode==='month'){
       const f = Object.assign({}, catFilter, summaryFilters.year ? {year:summaryFilters.year} : {});
-      const rows = groupSum(filteredVouchers(f, voucherList), v=>v.date.slice(0,7), k=>{
+      const filtered = filteredVouchers(f, voucherList);
+      const rows = groupSum(filtered, v=>v.date.slice(0,7), k=>{
         const [y,m] = k.split('-');
         return `${MONTHS[parseInt(m,10)-1]} ${y}`;
       });
-      renderSummaryTable(box, rows, 'Month');
+      renderSummaryTable(box, rows, 'Month', filtered, v=>v.date.slice(0,7));
     } else if(summaryFilters.mode==='year'){
-      const rows = groupSum(filteredVouchers(catFilter, voucherList), v=>v.date.slice(0,4));
-      renderSummaryTable(box, rows, 'Year');
+      const filtered = filteredVouchers(catFilter, voucherList);
+      const rows = groupSum(filtered, v=>v.date.slice(0,4));
+      renderSummaryTable(box, rows, 'Year', filtered, v=>v.date.slice(0,4));
     } else {
       const f = Object.assign({}, catFilter, {fromDate:summaryFilters.fromDate, toDate:summaryFilters.toDate});
       const results = filteredVouchers(f, voucherList);
@@ -6161,7 +6163,7 @@ function renderCategorySummaryCard(){
       }
     }
   }
-  function renderSummaryTable(box, rows, groupLabel){
+  function renderSummaryTable(box, rows, groupLabel, sourceVouchers, rowKeyFn){
     if(rows.length===0){ box.appendChild(el(`<p class="empty">No data for ${escapeHtml(selectedLabel())} yet.</p>`)); return; }
     const grand = rows.reduce((s,r)=>s+r.total,0);
     const table = el(`
@@ -6176,8 +6178,29 @@ function renderCategorySummaryCard(){
       </div>
     `);
     const tbody = table.querySelector('tbody');
+    // Clicking a row drills into that month/year's individual vouchers,
+    // largest amount first - same click again collapses it.
     rows.slice().reverse().forEach(r=>{
-      tbody.appendChild(el(`<tr style="border-bottom:1px solid var(--line-soft);"><td style="padding:6px 8px;">${escapeHtml(r.label)}</td><td style="padding:6px 8px; text-align:right;" class="mono">${money(r.total)}</td></tr>`));
+      const tr = el(`<tr style="border-bottom:1px solid var(--line-soft); cursor:pointer;" data-row-key="${escapeHtml(r.key)}"><td style="padding:6px 8px;">${escapeHtml(r.label)} <span style="opacity:.4; font-size:11px;">&#9662;</span></td><td style="padding:6px 8px; text-align:right;" class="mono">${money(r.total)}</td></tr>`);
+      tr.onclick = ()=>{
+        const existing = tr.nextElementSibling;
+        if(existing && existing.dataset.expansionFor===r.key){ existing.remove(); return; }
+        tbody.querySelectorAll('tr[data-expansion-for]').forEach(x=>x.remove());
+        const vouchers = (sourceVouchers||[]).filter(v=>rowKeyFn(v)===r.key).sort((a,b)=>b.amount-a.amount);
+        const detailTr = el(`<tr data-expansion-for="${escapeHtml(r.key)}"><td colspan="2" style="padding:0;background:var(--paper-soft, #f7f6f2);"></td></tr>`);
+        const cell = detailTr.querySelector('td');
+        vouchers.forEach(v=>{
+          cell.appendChild(el(`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 8px 6px 22px;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
+            <span>${dayLabelFull(v.date)} ${v.date.slice(0,4)}${v.cat?' &middot; '+escapeHtml(v.cat.label):''}${v.voucher?' &middot; '+escapeHtml(v.voucher):''}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span>
+            <span class="mono" style="flex:none;">${money(v.amount)}</span>
+          </div>`));
+        });
+        if(!vouchers.length){
+          cell.appendChild(el(`<p class="empty" style="padding:6px 8px 6px 22px;">No vouchers.</p>`));
+        }
+        tr.after(detailTr);
+      };
+      tbody.appendChild(tr);
     });
     box.appendChild(table);
     box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">${escapeHtml(selectedLabel())} grand total</span><span>${money(grand)}</span></div>`));
