@@ -523,6 +523,46 @@ function depreciationForEntry(entry, asOfDate){
   const accumulated = Math.min(value, monthlyDep*months);
   return { value, life, monthlyDep, accumulated, bookValue: value-accumulated, fullyDepreciated: accumulated>=value-0.5 };
 }
+/* Links a Miscellaneous-category voucher to a Fixed Asset Register item:
+   creates (or updates, if already linked) one register entry for that
+   voucher - qtyNew = qty given, qtyOld auto-continues from the item's
+   last entry, value = the voucher's own amount. Moving the link to a
+   different asset item removes the old entry and starts a fresh one on
+   the new item. */
+function ensureAssetLinkForItem(day, item, assetItemId, qty){
+  const regItems = state.fixedAssetRegister.items;
+  const assetItem = regItems.find(a=>a.id===assetItemId);
+  if(!assetItem) return;
+  let entry = item.assetLink ? assetItem.entries.find(e=>e.id===item.assetLink.entryId) : null;
+  if(item.assetLink && item.assetLink.assetItemId!==assetItemId){
+    // moved to a different asset item - drop the old entry first
+    const oldItem = regItems.find(a=>a.id===item.assetLink.assetItemId);
+    if(oldItem) oldItem.entries = oldItem.entries.filter(e=>e.id!==item.assetLink.entryId);
+    entry = null;
+  }
+  if(!entry){
+    const prevTotal = assetItem.entries.length ? assetEntryTotal(assetItem.entries[assetItem.entries.length-1]) : 0;
+    entry = newAssetEntry(prevTotal);
+    assetItem.entries.push(entry);
+    item.assetLink = {assetItemId, entryId: entry.id};
+  }
+  entry.date = day.date;
+  entry.qtyNew = Number(qty)||0;
+  entry.value = Number(item.amount)||0;
+  entry.note = 'Linked voucher: '+(item.voucher||'');
+}
+function removeAssetLinkForItem(item){
+  if(!item.assetLink) return;
+  const assetItem = state.fixedAssetRegister.items.find(a=>a.id===item.assetLink.assetItemId);
+  if(assetItem){
+    const entry = assetItem.entries.find(e=>e.id===item.assetLink.entryId);
+    if(entry){
+      logAuditDelete(`Asset entry (${assetItem.name})`, entry);
+      assetItem.entries = assetItem.entries.filter(e=>e.id!==item.assetLink.entryId);
+    }
+  }
+  item.assetLink = null;
+}
 
 /* ======================================================================
    Ratio Analysis & Cash Flow Statement
@@ -899,6 +939,7 @@ let assetRegisterView = 'register'; // register | depreciation
 let assetRegisterItemId = null;
 let ratioCashFlowOpen = false;
 let ratioCashFlowFilters = { view:'ratio', year:'', month:'' };
+let auditLogOpen = false;
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false;
@@ -1194,6 +1235,8 @@ function nearestEntityLabel(inputEl){
 }
 function wireAmountInput(inputEl, onChange, onPlainEnter){
   const fallbackValue = parseAmountInput(inputEl.value);
+  let auditFocusVal = null;
+  inputEl.addEventListener('focus', ()=>{ auditFocusVal = inputEl.value; });
   inputEl.addEventListener('input', ()=>{
     const raw = inputEl.value.replace(/,/g,'');
     if(looksLikePlainNumber(raw)){
@@ -1235,6 +1278,10 @@ function wireAmountInput(inputEl, onChange, onPlainEnter){
     }
   });
   inputEl.addEventListener('blur', ()=>{ resolveAmountField(inputEl, onChange, fallbackValue); });
+  inputEl.addEventListener('blur', ()=>{
+    if(auditFocusVal!==null) logAuditChange(nearestEntityLabel(inputEl), nearestFieldLabel(inputEl), auditFocusVal, inputEl.value);
+    auditFocusVal = null;
+  });
   inputEl.addEventListener('keydown', (e)=>{
     if(e.key==='Enter'){
       e.preventDefault();
@@ -2237,6 +2284,8 @@ function wirePasswordToggle(inputEl){
 }
 
 function wireLockableTextInput(inputEl){
+  let auditFocusVal = inputEl.value;
+  inputEl.addEventListener('focus', ()=>{ auditFocusVal = inputEl.value; });
   const syncLock = ()=>{
     const hasText = !!inputEl.value.trim();
     inputEl.readOnly = hasText;
@@ -2268,6 +2317,10 @@ function wireLockableTextInput(inputEl){
     }
   });
   inputEl.addEventListener('blur', syncLock);
+  inputEl.addEventListener('blur', ()=>{
+    logAuditChange(nearestEntityLabel(inputEl), nearestFieldLabel(inputEl), auditFocusVal, inputEl.value);
+    auditFocusVal = inputEl.value;
+  });
   // Spell-check suggestion strip - on blur (once the person has finished
   // typing), checks the text against every description word used
   // elsewhere in the tool before and shows any likely typo as a clickable
@@ -2922,6 +2975,7 @@ function renderApp(){
   if(journalOpen) app.appendChild(renderJournalCard());
   if(assetRegisterOpen) app.appendChild(renderAssetRegisterCard());
   if(ratioCashFlowOpen) app.appendChild(renderRatioCashFlowCard());
+  if(auditLogOpen) app.appendChild(renderAuditLogCard());
   if(templatesOpen) app.appendChild(renderTemplatesCard());
   app.appendChild(renderDayTabs());
   const computed = computeAll();
@@ -2972,6 +3026,7 @@ function renderHeader(){
           <button class="secondary" data-action="toggle-journal">&#128209; ${journalOpen?'Hide':''} Journal/Ledger</button>
           <button class="secondary" data-action="toggle-asset-register">&#128188; ${assetRegisterOpen?'Hide':''} Fixed Asset Register</button>
           <button class="secondary" data-action="toggle-ratio-cashflow">&#128200; ${ratioCashFlowOpen?'Hide':''} Ratio &amp; Cash Flow</button>
+          <button class="secondary" data-action="toggle-audit-log">&#128270; ${auditLogOpen?'Hide':''} Audit Trail</button>
           <button class="secondary" data-action="toggle-templates">&#128203; ${templatesOpen?'Hide':''} Templates</button>
         </div>
         <div class="toolbar-divider"></div>` : ''}
@@ -6744,6 +6799,7 @@ function renderAssetRegisterCard(){
     nameRow.querySelector('#ar-item-name').onchange = (e)=>{ item.name = e.target.value.trim()||item.name; saveState(); render(); };
     nameRow.querySelector('#ar-del-item').onclick = ()=>{
       if(!confirm(`Delete the whole "${item.name}" register (${item.entries.length} entries)? This can't be undone.`)) return;
+      logAuditDelete('Fixed Asset item', {name:item.name, entries:item.entries.length});
       state.fixedAssetRegister.items = items.filter(it=>it.id!==item.id);
       assetRegisterItemId = state.fixedAssetRegister.items[0] ? state.fixedAssetRegister.items[0].id : null;
       saveState(); render();
@@ -6789,12 +6845,15 @@ function renderAssetRegisterCard(){
         tr.querySelectorAll('input[data-f]').forEach(inp=>{
           inp.onchange = ()=>{
             const f = inp.dataset.f;
+            const oldVal = e[f];
             e[f] = (f==='date') ? inp.value : (inp.value===''? (f==='value'||f==='usefulLifeYears'? null : 0) : Number(inp.value));
+            logAuditChange(`Asset entry (${item.name})`, f, oldVal, e[f]);
             saveState();
             drawRegister();
           };
         });
         tr.querySelector('[data-del]').onclick = ()=>{
+          logAuditDelete(`Asset entry (${item.name})`, e);
           item.entries = item.entries.filter(x=>x.id!==e.id);
           saveState(); drawRegister();
         };
@@ -7012,6 +7071,88 @@ function renderRatioCashFlowCard(){
   card.querySelector('#rc-view').onchange = (e)=>{ ratioCashFlowFilters.view = e.target.value; render(); };
   card.querySelector('#rc-year').onchange = (e)=>{ ratioCashFlowFilters.year = e.target.value; drawBody(); };
   card.querySelector('#rc-month').onchange = (e)=>{ ratioCashFlowFilters.month = e.target.value; drawBody(); };
+  return card;
+}
+
+/* --- Audit Trail / Edit Log: see pushAuditEntry/logAuditChange/
+   logAuditDelete near the top of the file. Entirely separate view. --- */
+function renderAuditLogCard(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128270;</span> Audit Trail / Edit Log</h3>
+      <p class="subnote">Every field edit and deletion made anywhere in the tool, newest first, with the previous value kept - not a "who did it" log (single-user tool), just "what did this used to say" and "what got deleted". Separate from every other report.</p>
+      <div class="row" style="flex-wrap:wrap; align-items:flex-end;">
+        <div class="field" style="min-width:160px;">
+          <label>Show</label>
+          <select id="al-kind">
+            <option value="">All</option>
+            <option value="edit">Edits only</option>
+            <option value="delete">Deletions only</option>
+          </select>
+        </div>
+        <div class="field" style="flex:1 1 200px; min-width:160px;">
+          <label>Search</label>
+          <input type="text" id="al-search" placeholder="Filter by entity, field, or value&hellip;"/>
+        </div>
+        <div class="field" style="flex:none;">
+          <button type="button" class="danger small" id="al-clear">Clear entire log</button>
+        </div>
+      </div>
+      <div id="al-body"></div>
+    </div>
+  `);
+  function draw(){
+    const box = card.querySelector('#al-body');
+    box.innerHTML = '';
+    const kind = card.querySelector('#al-kind').value;
+    const q = card.querySelector('#al-search').value.trim().toLowerCase();
+    const rows = state.auditLog.filter(e=>{
+      if(kind && e.kind!==kind) return false;
+      if(q){
+        const hay = [e.entity, e.field, e.oldVal, e.newVal, e.snapshot].filter(Boolean).join(' ').toLowerCase();
+        if(!hay.includes(q)) return false;
+      }
+      return true;
+    }).slice().reverse().slice(0,500); // newest first, cap what's rendered at once
+    if(!rows.length){ box.appendChild(el(`<p class="empty" style="margin-top:10px;">No log entries yet${kind||q?' matching this filter':''}.</p>`)); return; }
+    const table = el(`
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+            <th style="padding:5px 6px;">When</th>
+            <th style="padding:5px 6px;">Entity</th>
+            <th style="padding:5px 6px;">What changed</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = table.querySelector('tbody');
+    rows.forEach(e=>{
+      tbody.appendChild(el(`
+        <tr style="border-bottom:1px solid var(--line-soft); vertical-align:top;">
+          <td class="mono" style="padding:5px 6px; white-space:nowrap; opacity:.75;">${escapeHtml(e.at)}</td>
+          <td style="padding:5px 6px;">${escapeHtml(e.entity)}</td>
+          <td style="padding:5px 6px;">
+            ${e.kind==='delete'
+              ? `<span style="color:var(--danger,#B3261E);font-weight:600;">Deleted</span> &mdash; <span style="opacity:.8;">${escapeHtml(e.snapshot||'(no details)')}</span>`
+              : `<strong>${escapeHtml(e.field)}</strong>: <span style="opacity:.6;text-decoration:line-through;">${escapeHtml(e.oldVal||'(empty)')}</span> &rarr; <span>${escapeHtml(e.newVal||'(empty)')}</span>`
+            }
+          </td>
+        </tr>
+      `));
+    });
+    box.appendChild(table);
+    if(state.auditLog.length>500) box.appendChild(el(`<p class="subnote" style="margin-top:6px;">Showing the most recent 500 matching entries (log holds up to 3000 total, oldest trimmed automatically).</p>`));
+  }
+  draw();
+  card.querySelector('#al-kind').onchange = draw;
+  card.querySelector('#al-search').oninput = draw;
+  card.querySelector('#al-clear').onclick = ()=>{
+    if(!confirm('Clear the entire audit log? This cannot be undone.')) return;
+    state.auditLog = [];
+    saveState(); draw();
+  };
   return card;
 }
 
@@ -8720,7 +8861,12 @@ function drawCoaList(container, day, catKey, arr){
     descInp.setAttribute('list', datalistId);
     descInp.oninput = ()=>{ sec0.desc = descInp.value; syncCoaItemFromSections(item); saveState(); };
     wireLockableTextInput(descInp);
-    wireAmountInput(amtInp, (num)=>{ sec0.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); }, ()=>{
+    wireAmountInput(amtInp, (num)=>{
+      sec0.amount = num;
+      syncCoaItemFromSections(item);
+      if(item.assetLink) ensureAssetLinkForItem(day, item, item.assetLink.assetItemId, (state.fixedAssetRegister.items.find(a=>a.id===item.assetLink.assetItemId)||{entries:[]}).entries.find(e=>e.id===item.assetLink.entryId)?.qtyNew || 1);
+      refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount));
+    }, ()=>{
       /* Fires only once the amount box already held a plain resolved
          number when Enter was pressed - i.e. the user is really done
          with this line, not just finishing a calculation. */
@@ -8755,6 +8901,68 @@ function drawCoaList(container, day, catKey, arr){
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
     wireLockableTextInput(noteInp);
     container.appendChild(noteRow);
+
+    // Fixed Asset Register link - Miscellaneous is the category a durable
+    // purchase (computer, furniture, generator...) normally gets booked
+    // under, since there's no dedicated Asset category. Only offered for
+    // single-section vouchers, to keep "which section is the asset" simple.
+    if(catKey==='Misc' && item.sections.length===1){
+      const regItems = state.fixedAssetRegister.items;
+      const linkedItem = item.assetLink ? regItems.find(a=>a.id===item.assetLink.assetItemId) : null;
+      const linkedEntry = linkedItem && item.assetLink ? linkedItem.entries.find(e=>e.id===item.assetLink.entryId) : null;
+      const linkRow = el(`
+        <div style="margin:-4px 0 10px 0;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);cursor:pointer;">
+            <input type="checkbox" class="asset-link-toggle" ${item.assetLink?'checked':''}/>
+            এটি কি একটি স্থায়ী এসেট ক্রয়? (Fixed Asset &mdash; links to the Fixed Asset Register)
+          </label>
+          <div class="asset-link-detail row" style="display:${item.assetLink?'flex':'none'};flex-wrap:wrap;align-items:flex-end;margin-top:6px;gap:8px;">
+            <div class="field" style="min-width:180px;margin-bottom:0;">
+              <label>Asset item</label>
+              <select class="asset-link-select">
+                <option value="">Choose...</option>
+                ${regItems.map(a=>`<option value="${a.id}" ${item.assetLink && item.assetLink.assetItemId===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}
+                <option value="__new__">+ New item&hellip;</option>
+              </select>
+            </div>
+            <div class="field" style="min-width:90px;margin-bottom:0;">
+              <label>Quantity</label>
+              <input type="number" min="1" class="asset-link-qty" value="${linkedEntry?linkedEntry.qtyNew:1}" style="width:70px;"/>
+            </div>
+            <p class="subnote" style="flex-basis:100%;margin:2px 0 0;">Adds to that item's Fixed Asset Register: নতুন = quantity above, মূল্য = this voucher's amount (${money(item.amount)}), পুরাতন/মোট continue automatically from its last entry.</p>
+          </div>
+        </div>
+      `);
+      const toggle = linkRow.querySelector('.asset-link-toggle');
+      const detail = linkRow.querySelector('.asset-link-detail');
+      const select = linkRow.querySelector('.asset-link-select');
+      const qtyInp = linkRow.querySelector('.asset-link-qty');
+      const commitLink = ()=>{
+        let assetItemId = select.value;
+        if(assetItemId==='__new__'){
+          const name = prompt('New asset item name (e.g. Computer, Chair, Generator):');
+          if(!name || !name.trim()){ select.value = item.assetLink?item.assetLink.assetItemId:''; return; }
+          const newItem = newAssetItem(name.trim());
+          state.fixedAssetRegister.items.push(newItem);
+          assetItemId = newItem.id;
+        }
+        if(!assetItemId) return;
+        ensureAssetLinkForItem(day, item, assetItemId, Number(qtyInp.value)||1);
+        saveState(); render();
+      };
+      toggle.onchange = ()=>{
+        if(toggle.checked){
+          detail.style.display = 'flex';
+          if(select.value) commitLink();
+        } else {
+          removeAssetLinkForItem(item);
+          saveState(); render();
+        }
+      };
+      select.onchange = commitLink;
+      qtyInp.onchange = commitLink;
+      container.appendChild(linkRow);
+    }
   });
 }
 
@@ -8920,6 +9128,7 @@ function wireDelegation(){
     if(action==='toggle-journal'){ journalOpen = !journalOpen; render(); return; }
     if(action==='toggle-asset-register'){ assetRegisterOpen = !assetRegisterOpen; render(); return; }
     if(action==='toggle-ratio-cashflow'){ ratioCashFlowOpen = !ratioCashFlowOpen; render(); return; }
+    if(action==='toggle-audit-log'){ auditLogOpen = !auditLogOpen; render(); return; }
     if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
     if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
     if(action==='toggle-monthly-ledger'){
@@ -9265,6 +9474,7 @@ function wireDelegation(){
       showConfirm('Delete '+dayLabel(day.date)+'?', ()=>{
         const i = state.days.findIndex(d=>d.id===dayId);
         const removedDay = state.days[i];
+        logAuditDelete('Day', {date:removedDay.date, serviceRevenue:removedDay.serviceRevenue, miscCollection:removedDay.miscCollection});
         state.days.splice(i,1);
         selectedDayId = state.days.length ? state.days[Math.max(0,i-1)].id : null;
         pushUndo(dayLabel(removedDay.date)+' deleted.', ()=>{
@@ -9333,6 +9543,7 @@ function wireDelegation(){
       if(item){
         if(item.fromDate===day.date){
           const idx = state.iouRegistry.findIndex(x=>x.id===item.id);
+          logAuditDelete('IOU', item);
           state.iouRegistry = state.iouRegistry.filter(x=>x.id!==item.id);
           pushUndo('IOU removed.', ()=>{ state.iouRegistry.splice(idx,0,item); });
         } else {
@@ -9434,6 +9645,8 @@ function wireDelegation(){
     if(action==='remove-misc-collection-section'){
       if(day.locked) return;
       const sections = ensureMiscCollectionSections(day);
+      const removedSec = sections.find(s=>s.id===t.dataset.section);
+      if(removedSec) logAuditDelete('Misc Collection', removedSec);
       day.miscCollectionSections = sections.filter(s=>s.id!==t.dataset.section);
       syncMiscCollectionFromSections(day);
       saveState(); render();
@@ -9454,6 +9667,8 @@ function wireDelegation(){
       const catKey = t.dataset.cat;
       const item = (day.coa[catKey]||[]).find(x=>x.id===t.dataset.item);
       if(item && item.sections && item.sections.length>1){
+        const removedSec = item.sections.find(s=>s.id===t.dataset.section);
+        if(removedSec) logAuditDelete(`${catKey} voucher section`, removedSec);
         item.sections = item.sections.filter(s=>s.id!==t.dataset.section);
         syncCoaItemFromSections(item);
         saveState(); render();
@@ -9465,8 +9680,25 @@ function wireDelegation(){
       const catKey = t.dataset.cat;
       const idx = day.coa[catKey].findIndex(x=>x.id===t.dataset.item);
       const removed = day.coa[catKey][idx];
+      logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount});
+      let removedAssetEntry = null, removedAssetItemId = null;
+      if(removed.assetLink){
+        const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removed.assetLink.assetItemId);
+        const entry = assetItem && assetItem.entries.find(e=>e.id===removed.assetLink.entryId);
+        if(assetItem && entry){
+          logAuditDelete(`Asset entry (${assetItem.name})`, entry);
+          removedAssetEntry = entry; removedAssetItemId = assetItem.id;
+          assetItem.entries = assetItem.entries.filter(e=>e.id!==entry.id);
+        }
+      }
       day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==t.dataset.item);
-      pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{ day.coa[catKey].splice(idx,0,removed); });
+      pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{
+        day.coa[catKey].splice(idx,0,removed);
+        if(removedAssetEntry && removedAssetItemId){
+          const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removedAssetItemId);
+          if(assetItem) assetItem.entries.push(removedAssetEntry);
+        }
+      });
       saveState(); render();
       return;
     }
