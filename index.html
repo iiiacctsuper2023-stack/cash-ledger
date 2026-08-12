@@ -396,6 +396,175 @@ const EXPENDITURE_LABEL_ALIASES = {
   Loan:     ['loan','loan paid','loan refunded'],
 };
 const RECURRING_EXAM_COLUMN = {label:'MT (Monthly Test)', aliases:['mt','monthly test','half yearly','half-yearly','yearly exam']};
+
+/* ======================================================================
+   Journal / General Ledger / Trial Balance (traditional double-entry)
+   ======================================================================
+   A completely separate, read-only view built FROM the existing Daily/
+   Monthly Ledger data - it never writes back to state.days or
+   state.monthlyLedger, and doesn't feed the Monthly Ledger, Balance
+   Sheet, or any export. Purely for double-entry bookkeeping practice
+   alongside the institution's actual (cash-basis, single-entry-style)
+   records.
+   Revenue side: sourced from Monthly Ledger "revenueEntries" (the
+   categorized figures that come from generating a Deposit Notesheet) -
+   NOT from the Daily Ledger's day.serviceRevenue lump sum, which has no
+   category breakdown. Debit Cash, Credit the matching category's Income
+   account.
+   Misc Collection: from each day's miscCollectionSections. Debit Cash,
+   Credit a single pooled "Miscellaneous Collection Income" account.
+   Expenditure side: from allVouchers() (every CoA-categorized withdrawal
+   voucher). Debit the category's Expense account, Credit Cash - matches
+   computeDayChain(), where every CoA voucher reduces Cash directly (bank
+   involvement only happens through the separate deposits/withdrawals
+   transfer records, which this journal does not model).
+   "Loan" is the one CoA category booked as an Asset (Loan Receivable)
+   rather than an Expense, since the money disbursed is still owed back
+   by III Assets Ltd, not spent. */
+const JOURNAL_EXPENSE_ACCOUNTS = Object.fromEntries(COA.map(c=>[c.key,
+  c.key==='Loan'
+    ? {label:'Loan Receivable (III Assets Ltd)', type:'asset'}
+    : {label:c.summaryLabel, type:'expense'}
+]));
+const JOURNAL_REVENUE_ACCOUNTS = Object.fromEntries(REVENUE_CATS.map(c=>[c.key, {label:c.label+' Income', type:'income'}]));
+const JOURNAL_MISC_ACCOUNT = {label:'Miscellaneous Collection Income', type:'income'};
+const JOURNAL_CASH_ACCOUNT = {label:'Cash', type:'asset'};
+/* Every journal entry as one balanced {date, desc, debitAccount,
+   creditAccount, amount} line - built fresh each time from current
+   state, sorted chronologically. Cheap enough to rebuild on demand;
+   not cached or stored. */
+function buildJournalEntries(){
+  const entries = [];
+  Object.keys(state.monthlyLedger.months).forEach(monthKey=>{
+    const rec = state.monthlyLedger.months[monthKey];
+    (rec.revenueEntries||[]).forEach(re=>{
+      if(!re.date) return;
+      REVENUE_CATS.forEach(c=>{
+        const amt = Number(re[c.key])||0;
+        if(amt===0) return;
+        entries.push({date:re.date, desc:(re.desc||'').trim()||c.label, debitAccount:JOURNAL_CASH_ACCOUNT.label, creditAccount:JOURNAL_REVENUE_ACCOUNTS[c.key].label, amount:amt, source:'Revenue (Deposit Notesheet)'});
+      });
+    });
+  });
+  allDaysEverywhere().forEach(day=>{
+    (day.miscCollectionSections||[]).forEach(sec=>{
+      const amt = Number(sec.amount)||0;
+      if(amt===0) return;
+      entries.push({date:day.date, desc:(sec.desc||'').trim()||'Miscellaneous collection', debitAccount:JOURNAL_CASH_ACCOUNT.label, creditAccount:JOURNAL_MISC_ACCOUNT.label, amount:amt, source:'Misc Collection'});
+    });
+  });
+  allVouchers().forEach(v=>{
+    if(v.amount===0) return;
+    const acc = JOURNAL_EXPENSE_ACCOUNTS[v.catKey];
+    entries.push({date:v.date, desc:(v.desc||'').trim()||v.cat.label, debitAccount:acc.label, creditAccount:JOURNAL_CASH_ACCOUNT.label, amount:v.amount, source:'Expenditure Voucher', voucher:v.voucher});
+  });
+  entries.sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1));
+  return entries;
+}
+/* Every account name that appears anywhere in the journal, in a sensible
+   display order: Cash first, then Income accounts, then Expense/Asset
+   accounts - each in the same order as REVENUE_CATS/COA. */
+function journalAccountList(){
+  return [
+    JOURNAL_CASH_ACCOUNT.label,
+    ...REVENUE_CATS.map(c=>JOURNAL_REVENUE_ACCOUNTS[c.key].label),
+    JOURNAL_MISC_ACCOUNT.label,
+    ...COA.map(c=>JOURNAL_EXPENSE_ACCOUNTS[c.key].label),
+  ];
+}
+function journalAccountType(label){
+  if(label===JOURNAL_CASH_ACCOUNT.label) return JOURNAL_CASH_ACCOUNT.type;
+  if(label===JOURNAL_MISC_ACCOUNT.label) return JOURNAL_MISC_ACCOUNT.type;
+  const rev = REVENUE_CATS.find(c=>JOURNAL_REVENUE_ACCOUNTS[c.key].label===label);
+  if(rev) return 'income';
+  const exp = COA.find(c=>JOURNAL_EXPENSE_ACCOUNTS[c.key].label===label);
+  if(exp) return JOURNAL_EXPENSE_ACCOUNTS[exp.key].type;
+  return 'other';
+}
+
+/* ======================================================================
+   Fixed Asset Register + Depreciation
+   ======================================================================
+   Mirrors the institution's own paper register (serial, date, new,
+   old/existing, defective, shortage, total - one row per stock-check/
+   acquisition event per item), plus an optional value + useful-life on
+   any row that added new units, so Straight-Line Depreciation can be
+   calculated on that acquisition batch. Entirely separate from every
+   other report - doesn't touch the Balance Sheet or Monthly Ledger. */
+function newAssetItem(name){
+  return { id:'ai'+Date.now()+Math.random().toString(36).slice(2,7), name, entries:[] };
+}
+function newAssetEntry(prevTotal){
+  return {
+    id:'ae'+Date.now()+Math.random().toString(36).slice(2,7),
+    date: todayDateStr(),
+    qtyNew: 0, qtyOld: prevTotal||0, qtyDefective: 0, qtyShortage: 0,
+    value: null, usefulLifeYears: null, note:''
+  };
+}
+function assetEntryTotal(e){
+  return (Number(e.qtyOld)||0) + (Number(e.qtyNew)||0) - (Number(e.qtyDefective)||0) - (Number(e.qtyShortage)||0);
+}
+/* Straight-Line Depreciation for one acquisition entry (only meaningful
+   when it has both a value and a useful life). asOfDate defaults to
+   today. Depreciation accrues monthly from the entry's date; capped so
+   accumulated depreciation never exceeds the original value. */
+function depreciationForEntry(entry, asOfDate){
+  const value = Number(entry.value)||0;
+  const life = Number(entry.usefulLifeYears)||0;
+  if(!value || !life || !entry.date) return null;
+  const asOf = asOfDate || todayDateStr();
+  const start = new Date(entry.date+'T00:00:00');
+  const end = new Date(asOf+'T00:00:00');
+  let months = (end.getFullYear()-start.getFullYear())*12 + (end.getMonth()-start.getMonth());
+  if(end.getDate()>=start.getDate()) months += 1; // count the current partial month once it's begun
+  months = Math.max(0, months);
+  const monthlyDep = value/(life*12);
+  const accumulated = Math.min(value, monthlyDep*months);
+  return { value, life, monthlyDep, accumulated, bookValue: value-accumulated, fullyDepreciated: accumulated>=value-0.5 };
+}
+
+/* ======================================================================
+   Ratio Analysis & Cash Flow Statement
+   ======================================================================
+   Both read-only, separate views built from buildJournalEntries() plus
+   the Monthly Ledger's own stored Cash-in-Hand/Bank-Balance figures
+   (read via the same lastDayCashInHandInMonth/lastDayBankClosingInMonth
+   helpers the real Balance Sheet uses, so the numbers agree with it).
+   Doesn't touch the Balance Sheet, Monthly Ledger, or any export.
+   Gratuity/Education-Assistance payable balances need the Monthly
+   Ledger's own year-to-date revenue-transfer chain, which isn't
+   duplicated here to avoid quietly getting it wrong - Current
+   Liabilities below is Outstanding Payables (staff dues) only, as of
+   the period's own end date. */
+function outstandingPayablesAsOf(dateISO){
+  return (state.payableRegistry||[]).filter(i=> i.fromDate<=dateISO && (i.toDate===null || i.toDate>dateISO))
+    .reduce((s,i)=>s+(Number(i.amount)||0),0);
+}
+function ratioFiguresForMonth(key){
+  const rec = state.monthlyLedger.months[key];
+  const cash = (rec && rec.balanceSheet && rec.balanceSheet.cashInHandOverride!=null)
+    ? rec.balanceSheet.cashInHandOverride
+    : lastDayCashInHandInMonth(key);
+  let bank = 0, bankKnown = false;
+  state.banks.forEach(b=>{
+    const override = (rec && rec.balanceSheet && rec.balanceSheet.bankBreakdown) ? rec.balanceSheet.bankBreakdown[b.id] : undefined;
+    const v = (override!=null) ? Number(override) : lastDayBankClosingInMonth(key, b.id);
+    if(v!=null){ bank += v; bankKnown = true; }
+  });
+  const [y,m] = key.split('-');
+  const monthEndStr = toLocalDateStr(new Date(Number(y), Number(m), 0));
+  const otherAsset = (rec && rec.balanceSheet && rec.balanceSheet.otherAsset) ? (Number(rec.balanceSheet.otherAsset.amount)||0) : 0;
+  const otherAssetLabel = (rec && rec.balanceSheet && rec.balanceSheet.otherAsset) ? rec.balanceSheet.otherAsset.label : '';
+  return {
+    cash: cash!=null?cash:null,
+    bank: bankKnown?bank:null,
+    payables: outstandingPayablesAsOf(monthEndStr),
+    otherAsset, otherAssetLabel
+  };
+}
+
+
 /* Named quick-jump targets for the Monthly Ledger window's own internal
    "Jump to" row - short labels (not the full on-page heading text) so the
    button row stays compact. */
@@ -722,6 +891,14 @@ let searchOpen = false;
 let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
 let summaryOpen = false;
 let summaryFilters = { type:'expenditure', catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
+let journalOpen = false;
+let journalFilters = { mode:'month', year:'', month:'', view:'journal' }; // view: journal | ledger | trial
+let journalLedgerAccount = null;
+let assetRegisterOpen = false;
+let assetRegisterView = 'register'; // register | depreciation
+let assetRegisterItemId = null;
+let ratioCashFlowOpen = false;
+let ratioCashFlowFilters = { view:'ratio', year:'', month:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false;
@@ -867,6 +1044,50 @@ function toLocalDateStr(d){
 function todayDateStr(){
   return toLocalDateStr(new Date());
 }
+
+/* ======================================================================
+   Audit Trail / Edit Log
+   ======================================================================
+   A single running log of every value change and deletion made anywhere
+   in the tool, with the previous value kept so it can be looked back up.
+   Not for "who did it" (single-user tool) - purely for "what did this
+   used to say" and "what got deleted and when". Capped at the most
+   recent 3000 entries (oldest trimmed silently) so it can't grow
+   unbounded. Entirely separate from every other report/export. */
+function auditTimestamp(){
+  const d = new Date();
+  return toLocalDateStr(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
+}
+function pushAuditEntry(entry){
+  state.auditLog.push(Object.assign({id:'al'+Date.now()+Math.random().toString(36).slice(2,7), at:auditTimestamp()}, entry));
+  if(state.auditLog.length>3000) state.auditLog.splice(0, state.auditLog.length-3000);
+}
+/* Logs a field edit - skipped automatically if the value didn't actually
+   change (e.g. clicking into a field and out again without typing). */
+function logAuditChange(entity, field, oldVal, newVal){
+  const a = (oldVal==null?'':String(oldVal).trim());
+  const b = (newVal==null?'':String(newVal).trim());
+  if(a===b) return;
+  pushAuditEntry({kind:'edit', entity, field, oldVal:a, newVal:b});
+}
+/* Logs a whole record's removal, with a readable snapshot of every field
+   it had (so "what got deleted" can actually be read back later, not
+   just "something was deleted"). */
+function logAuditDelete(entity, snapshotObj){
+  const lines = Object.entries(snapshotObj||{})
+    .filter(([k,v])=> v!==undefined && v!==null && v!=='' && typeof v!=='object')
+    .map(([k,v])=>`${k}: ${v}`);
+  pushAuditEntry({kind:'delete', entity, snapshot:lines.join(' \u00b7 ')});
+}
+/* Best-effort human label for a field, from its own <label> sibling in
+   the same .field wrapper (used by wireLockableTextInput/wireAmountInput
+   below, which don't otherwise know what a given input represents). */
+function nearestFieldLabel(inputEl){
+  const host = inputEl.closest('.field') || inputEl.parentElement;
+  const lbl = host && host.querySelector('label');
+  return lbl ? lbl.textContent.trim().replace(/\s*<.*?>\s*/g,'').trim() : (inputEl.placeholder || inputEl.type || 'field');
+}
+
 function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 function dayLabel(dateStr){
   if(!dateStr) return 'Untitled day';
@@ -955,6 +1176,22 @@ function resolveAmountField(inputEl, onChange, fallbackValue){
    typed looks like an arithmetic expression instead (has a +, *, /, or a
    non-leading -), it's left as raw text while typing and only resolved
    into a final number on blur or Enter. */
+/* Best-effort "what is this field part of" label for the audit log -
+   the category badge if it's a line-item, else the enclosing card's
+   title, else a generic fallback. Imprecise by nature (these two wiring
+   functions are generic and don't know the data model), but good enough
+   to make a log entry readable. */
+function nearestEntityLabel(inputEl){
+  const li = inputEl.closest('.line-item');
+  if(li){
+    const badge = li.querySelector('.voucher-badge');
+    if(badge && badge.textContent.trim()) return badge.textContent.trim()+' voucher';
+  }
+  const card = inputEl.closest('.card');
+  const h3 = card && card.querySelector('h3');
+  if(h3) return h3.textContent.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,'').trim() || 'entry';
+  return 'entry';
+}
 function wireAmountInput(inputEl, onChange, onPlainEnter){
   const fallbackValue = parseAmountInput(inputEl.value);
   inputEl.addEventListener('input', ()=>{
@@ -1778,6 +2015,8 @@ function migrateState(){
   if(!state.templates) state.templates = [];
   if(!state.bankStatements) state.bankStatements = {};
   if(!state.bankHolidays) state.bankHolidays = [];
+  if(!state.fixedAssetRegister) state.fixedAssetRegister = { items: [] };
+  if(!state.auditLog) state.auditLog = [];
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -2680,6 +2919,9 @@ function renderApp(){
   if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
   if(summaryOpen) app.appendChild(renderCategorySummaryCard());
+  if(journalOpen) app.appendChild(renderJournalCard());
+  if(assetRegisterOpen) app.appendChild(renderAssetRegisterCard());
+  if(ratioCashFlowOpen) app.appendChild(renderRatioCashFlowCard());
   if(templatesOpen) app.appendChild(renderTemplatesCard());
   app.appendChild(renderDayTabs());
   const computed = computeAll();
@@ -2727,6 +2969,9 @@ function renderHeader(){
           <button class="secondary" data-action="toggle-dashboard">&#127968; ${dashboardOpen?'Hide':''} Dashboard</button>
           <button class="secondary" data-action="toggle-search">&#128269; ${searchOpen?'Hide':'Advanced'} Search</button>
           <button class="secondary" data-action="toggle-summary">&#128202; ${summaryOpen?'Hide':'Category'} Summary</button>
+          <button class="secondary" data-action="toggle-journal">&#128209; ${journalOpen?'Hide':''} Journal/Ledger</button>
+          <button class="secondary" data-action="toggle-asset-register">&#128188; ${assetRegisterOpen?'Hide':''} Fixed Asset Register</button>
+          <button class="secondary" data-action="toggle-ratio-cashflow">&#128200; ${ratioCashFlowOpen?'Hide':''} Ratio &amp; Cash Flow</button>
           <button class="secondary" data-action="toggle-templates">&#128203; ${templatesOpen?'Hide':''} Templates</button>
         </div>
         <div class="toolbar-divider"></div>` : ''}
@@ -6257,6 +6502,519 @@ function renderCategorySummaryCard(){
   return card;
 }
 
+/* --- Journal / General Ledger / Trial Balance: a separate double-entry
+   practice view built from buildJournalEntries() (see definition near
+   COA/REVENUE_CATS above). Read-only, doesn't affect any real report. --- */
+function renderJournalCard(){
+  const allEntries = buildJournalEntries();
+  const years = [...new Set(allEntries.map(e=>e.date.slice(0,4)))].sort().reverse();
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128209;</span> Journal / Ledger / Trial Balance</h3>
+      <p class="subnote">A separate, traditional double-entry practice view built from your existing vouchers and Deposit-Notesheet revenue figures &mdash; for learning alongside the institution's actual records. Doesn't feed the Monthly Ledger, Balance Sheet, or any export, and changes nothing there.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:220px;">
+          <label>View</label>
+          <select id="jr-view">
+            <option value="journal" ${journalFilters.view==='journal'?'selected':''}>Journal (day book)</option>
+            <option value="ledger" ${journalFilters.view==='ledger'?'selected':''}>General Ledger</option>
+            <option value="trial" ${journalFilters.view==='trial'?'selected':''}>Trial Balance</option>
+          </select>
+        </div>
+        <div class="field" style="min-width:120px;">
+          <label>Year <span class="tag">optional</span></label>
+          <select id="jr-year">
+            <option value="">All years</option>
+            ${years.map(y=>`<option value="${y}" ${journalFilters.year===y?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="min-width:140px;">
+          <label>Month <span class="tag">optional</span></label>
+          <select id="jr-month">
+            <option value="">All months</option>
+            ${MONTHS.map((m,i)=>{const v=String(i+1).padStart(2,'0'); return `<option value="${v}" ${journalFilters.month===v?'selected':''}>${m}</option>`;}).join('')}
+          </select>
+        </div>
+        ${journalFilters.view==='ledger' ? `
+        <div class="field" style="min-width:220px;">
+          <label>Account</label>
+          <select id="jr-account">
+            ${journalAccountList().map(a=>`<option value="${escapeHtml(a)}" ${(journalLedgerAccount||JOURNAL_CASH_ACCOUNT.label)===a?'selected':''}>${escapeHtml(a)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+      </div>
+      <div id="jr-body"></div>
+    </div>
+  `);
+  function filteredEntries(){
+    return allEntries.filter(e=>{
+      if(journalFilters.year && e.date.slice(0,4)!==journalFilters.year) return false;
+      if(journalFilters.month && e.date.slice(5,7)!==journalFilters.month) return false;
+      return true;
+    });
+  }
+  function drawBody(){
+    const box = card.querySelector('#jr-body');
+    box.innerHTML = '';
+    const entries = filteredEntries();
+    if(journalFilters.view==='journal'){
+      if(!entries.length){ box.appendChild(el(`<p class="empty">No journal entries for this period yet.</p>`)); return; }
+      const table = el(`
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+            <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+              <th style="padding:6px 8px;">Date</th>
+              <th style="padding:6px 8px;">Particulars</th>
+              <th style="padding:6px 8px; text-align:right;">Debit</th>
+              <th style="padding:6px 8px; text-align:right;">Credit</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      `);
+      const tbody = table.querySelector('tbody');
+      let totalDr = 0, totalCr = 0;
+      entries.forEach(e=>{
+        totalDr += e.amount; totalCr += e.amount;
+        tbody.appendChild(el(`
+          <tr style="border-bottom:1px solid var(--line-soft); vertical-align:top;">
+            <td class="mono" style="padding:6px 8px; white-space:nowrap;">${dayLabel(e.date)} ${e.date.slice(0,4)}</td>
+            <td style="padding:6px 8px;">
+              <div>${escapeHtml(e.debitAccount)} <span style="opacity:.5;">Dr</span></div>
+              <div style="padding-left:18px;">${escapeHtml(e.creditAccount)} <span style="opacity:.5;">Cr</span></div>
+              <div style="opacity:.65; font-size:11.5px; margin-top:2px;">${escapeHtml(e.desc)}${e.voucher?' &middot; '+escapeHtml(e.voucher):''} <span style="opacity:.7;">(${escapeHtml(e.source)})</span></div>
+            </td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${money(e.amount)}</td>
+            <td class="mono" style="padding:6px 8px; text-align:right;"></td>
+          </tr>
+        `));
+      });
+      box.appendChild(table);
+      box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">Total (Debit = Credit)</span><span>${money(totalDr)} = ${money(totalCr)}</span></div>`));
+    } else if(journalFilters.view==='ledger'){
+      const account = journalLedgerAccount || JOURNAL_CASH_ACCOUNT.label;
+      const type = journalAccountType(account);
+      const rows = entries.filter(e=>e.debitAccount===account || e.creditAccount===account)
+        .sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1));
+      if(!rows.length){ box.appendChild(el(`<p class="empty">No entries in ${escapeHtml(account)} for this period yet.</p>`)); return; }
+      const table = el(`
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+            <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+              <th style="padding:6px 8px;">Date</th>
+              <th style="padding:6px 8px;">Particulars</th>
+              <th style="padding:6px 8px; text-align:right;">Debit</th>
+              <th style="padding:6px 8px; text-align:right;">Credit</th>
+              <th style="padding:6px 8px; text-align:right;">Balance</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      `);
+      const tbody = table.querySelector('tbody');
+      // Asset/Expense accounts grow on the Debit side; Income/Liability
+      // accounts grow on the Credit side - the running balance follows
+      // whichever side is this account's natural side.
+      const growsOnDebit = (type==='asset' || type==='expense');
+      let bal = 0;
+      rows.forEach(e=>{
+        const isDr = e.debitAccount===account;
+        bal += (isDr ? e.amount : -e.amount) * (growsOnDebit ? 1 : -1);
+        tbody.appendChild(el(`
+          <tr style="border-bottom:1px solid var(--line-soft);">
+            <td class="mono" style="padding:6px 8px; white-space:nowrap;">${dayLabel(e.date)} ${e.date.slice(0,4)}</td>
+            <td style="padding:6px 8px;">${escapeHtml(e.desc)}<div style="opacity:.6; font-size:11.5px;">${escapeHtml(isDr ? e.creditAccount : e.debitAccount)}</div></td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${isDr?money(e.amount):''}</td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${!isDr?money(e.amount):''}</td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${money(Math.abs(bal))} ${bal<0?'(Cr)':'(Dr)'}</td>
+          </tr>
+        `));
+      });
+      box.appendChild(table);
+      box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">${escapeHtml(account)} closing balance</span><span>${money(Math.abs(bal))} ${bal<0?'Cr':'Dr'}</span></div>`));
+    } else {
+      const totals = new Map(); // account -> {dr, cr}
+      entries.forEach(e=>{
+        if(!totals.has(e.debitAccount)) totals.set(e.debitAccount, {dr:0, cr:0});
+        if(!totals.has(e.creditAccount)) totals.set(e.creditAccount, {dr:0, cr:0});
+        totals.get(e.debitAccount).dr += e.amount;
+        totals.get(e.creditAccount).cr += e.amount;
+      });
+      const rows = journalAccountList().filter(a=>totals.has(a)).map(a=>{
+        const t = totals.get(a);
+        const net = t.dr - t.cr;
+        return {account:a, drCol: net>0?net:0, crCol: net<0?-net:0};
+      });
+      if(!rows.length){ box.appendChild(el(`<p class="empty">No entries for this period yet.</p>`)); return; }
+      const table = el(`
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+            <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+              <th style="padding:6px 8px;">Account</th>
+              <th style="padding:6px 8px; text-align:right;">Debit</th>
+              <th style="padding:6px 8px; text-align:right;">Credit</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      `);
+      const tbody = table.querySelector('tbody');
+      let totalDr = 0, totalCr = 0;
+      rows.forEach(r=>{
+        totalDr += r.drCol; totalCr += r.crCol;
+        tbody.appendChild(el(`
+          <tr style="border-bottom:1px solid var(--line-soft); cursor:pointer;">
+            <td style="padding:6px 8px;">${escapeHtml(r.account)}</td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${r.drCol?money(r.drCol):''}</td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${r.crCol?money(r.crCol):''}</td>
+          </tr>
+        `)).onclick = ()=>{
+          journalLedgerAccount = r.account; journalFilters.view = 'ledger'; render();
+        };
+      });
+      box.appendChild(table);
+      box.appendChild(el(`
+        <div class="computed total" style="margin-top:10px; ${Math.round(totalDr*100)===Math.round(totalCr*100)?'':'color:var(--danger,#B3261E);'}">
+          <span class="lbl">Total ${Math.round(totalDr*100)===Math.round(totalCr*100)?'(balanced &#10003;)':'(NOT balanced - check entries)'}</span><span>${money(totalDr)} = ${money(totalCr)}</span>
+        </div>
+      `));
+      box.appendChild(el(`<p class="subnote" style="margin-top:4px;">Click any account to open its General Ledger.</p>`));
+    }
+  }
+  drawBody();
+  card.querySelector('#jr-view').onchange = (e)=>{ journalFilters.view = e.target.value; render(); };
+  card.querySelector('#jr-year').onchange = (e)=>{ journalFilters.year = e.target.value; drawBody(); };
+  card.querySelector('#jr-month').onchange = (e)=>{ journalFilters.month = e.target.value; drawBody(); };
+  const acctSel = card.querySelector('#jr-account');
+  if(acctSel) acctSel.onchange = (e)=>{ journalLedgerAccount = e.target.value; drawBody(); };
+  return card;
+}
+
+/* --- Fixed Asset Register + Depreciation: see newAssetItem/newAssetEntry/
+   depreciationForEntry above. Entirely separate view, doesn't touch the
+   Balance Sheet or any export. --- */
+function renderAssetRegisterCard(){
+  const items = state.fixedAssetRegister.items;
+  if(!assetRegisterItemId && items.length) assetRegisterItemId = items[0].id;
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128188;</span> Fixed Asset Register</h3>
+      <p class="subnote">Mirrors your paper register (serial, date, new, old, defective, shortage, total) with an optional value + useful life per acquisition, so Straight-Line Depreciation can be practiced. Separate from the Balance Sheet - doesn't change any real report.</p>
+      <div class="row" style="flex-wrap:wrap; align-items:flex-end;">
+        <div class="field" style="min-width:200px;">
+          <label>View</label>
+          <select id="ar-view">
+            <option value="register" ${assetRegisterView==='register'?'selected':''}>Item Register</option>
+            <option value="depreciation" ${assetRegisterView==='depreciation'?'selected':''}>Depreciation Summary</option>
+          </select>
+        </div>
+        ${assetRegisterView==='register' ? `
+        <div class="field" style="min-width:200px;">
+          <label>Item</label>
+          <select id="ar-item">
+            ${items.length ? items.map(it=>`<option value="${it.id}" ${it.id===assetRegisterItemId?'selected':''}>${escapeHtml(it.name)}</option>`).join('') : `<option value="">No items yet</option>`}
+          </select>
+        </div>
+        <div class="field" style="flex:none;">
+          <button type="button" class="secondary small" id="ar-new-item">+ New item</button>
+        </div>` : ''}
+      </div>
+      <div id="ar-body"></div>
+    </div>
+  `);
+  const body = card.querySelector('#ar-body');
+
+  function drawRegister(){
+    body.innerHTML = '';
+    const item = items.find(it=>it.id===assetRegisterItemId);
+    if(!item){
+      body.appendChild(el(`<p class="empty">No item selected yet - click "+ New item" above to start a register for something like Chair, Table, or Generator.</p>`));
+      return;
+    }
+    const nameRow = el(`<div class="row" style="align-items:flex-end;margin-top:6px;">
+      <div class="field" style="min-width:220px;">
+        <label>Item name</label>
+        <input type="text" id="ar-item-name" value="${escapeHtml(item.name)}"/>
+      </div>
+      <div class="field" style="flex:none;">
+        <button type="button" class="danger small" id="ar-del-item">Delete this item</button>
+      </div>
+    </div>`);
+    body.appendChild(nameRow);
+    nameRow.querySelector('#ar-item-name').onchange = (e)=>{ item.name = e.target.value.trim()||item.name; saveState(); render(); };
+    nameRow.querySelector('#ar-del-item').onclick = ()=>{
+      if(!confirm(`Delete the whole "${item.name}" register (${item.entries.length} entries)? This can't be undone.`)) return;
+      state.fixedAssetRegister.items = items.filter(it=>it.id!==item.id);
+      assetRegisterItemId = state.fixedAssetRegister.items[0] ? state.fixedAssetRegister.items[0].id : null;
+      saveState(); render();
+    };
+
+    if(item.entries.length){
+      const table = el(`
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+            <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+              <th style="padding:6px 6px;">ক্রমিক</th>
+              <th style="padding:6px 6px;">তারিখ</th>
+              <th style="padding:6px 6px; text-align:right;">নতুন</th>
+              <th style="padding:6px 6px; text-align:right;">পুরাতন</th>
+              <th style="padding:6px 6px; text-align:right;">অকেজো</th>
+              <th style="padding:6px 6px; text-align:right;">ঘাটতি</th>
+              <th style="padding:6px 6px; text-align:right;">মোট</th>
+              <th style="padding:6px 6px; text-align:right;">মূল্য/দাম</th>
+              <th style="padding:6px 6px; text-align:right;">Useful life (yr)</th>
+              <th style="padding:6px 6px;"></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      `);
+      const tbody = table.querySelector('tbody');
+      item.entries.forEach((e,i)=>{
+        e.qtyTotal = assetEntryTotal(e); // always kept in sync, shown read-only
+        const tr = el(`
+          <tr style="border-bottom:1px solid var(--line-soft);">
+            <td class="mono" style="padding:5px 6px;">${i+1}</td>
+            <td style="padding:5px 6px;"><input type="date" data-f="date" value="${e.date||''}" style="width:128px;"/></td>
+            <td style="padding:5px 6px;"><input type="number" data-f="qtyNew" value="${e.qtyNew||0}" style="width:60px;text-align:right;"/></td>
+            <td style="padding:5px 6px;"><input type="number" data-f="qtyOld" value="${e.qtyOld||0}" style="width:60px;text-align:right;"/></td>
+            <td style="padding:5px 6px;"><input type="number" data-f="qtyDefective" value="${e.qtyDefective||0}" style="width:60px;text-align:right;"/></td>
+            <td style="padding:5px 6px;"><input type="number" data-f="qtyShortage" value="${e.qtyShortage||0}" style="width:60px;text-align:right;"/></td>
+            <td class="mono" style="padding:5px 6px; text-align:right; font-weight:600;">${e.qtyTotal}</td>
+            <td style="padding:5px 6px;"><input type="number" data-f="value" placeholder="&#2661;" value="${e.value==null?'':e.value}" style="width:90px;text-align:right;"/></td>
+            <td style="padding:5px 6px;"><input type="number" data-f="usefulLifeYears" placeholder="yr" value="${e.usefulLifeYears==null?'':e.usefulLifeYears}" style="width:60px;text-align:right;"/></td>
+            <td style="padding:5px 6px;"><button type="button" class="danger small" data-del="1">&times;</button></td>
+          </tr>
+        `);
+        tr.querySelectorAll('input[data-f]').forEach(inp=>{
+          inp.onchange = ()=>{
+            const f = inp.dataset.f;
+            e[f] = (f==='date') ? inp.value : (inp.value===''? (f==='value'||f==='usefulLifeYears'? null : 0) : Number(inp.value));
+            saveState();
+            drawRegister();
+          };
+        });
+        tr.querySelector('[data-del]').onclick = ()=>{
+          item.entries = item.entries.filter(x=>x.id!==e.id);
+          saveState(); drawRegister();
+        };
+        tbody.appendChild(tr);
+      });
+      body.appendChild(table);
+    } else {
+      body.appendChild(el(`<p class="empty" style="margin-top:10px;">No entries yet for "${escapeHtml(item.name)}".</p>`));
+    }
+    const addBtn = el(`<button type="button" class="secondary small" style="margin-top:10px;">+ Add entry</button>`);
+    addBtn.onclick = ()=>{
+      const prevTotal = item.entries.length ? assetEntryTotal(item.entries[item.entries.length-1]) : 0;
+      item.entries.push(newAssetEntry(prevTotal));
+      saveState(); drawRegister();
+    };
+    body.appendChild(addBtn);
+  }
+
+  function drawDepreciation(){
+    body.innerHTML = '';
+    const asOf = todayDateStr();
+    const rows = [];
+    items.forEach(item=>{
+      item.entries.forEach(e=>{
+        const dep = depreciationForEntry(e, asOf);
+        if(dep) rows.push({item:item.name, date:e.date, ...dep});
+      });
+    });
+    if(!rows.length){
+      body.appendChild(el(`<p class="empty" style="margin-top:10px;">No depreciable entries yet - add a value and useful life (years) to an acquisition row in the Item Register.</p>`));
+      return;
+    }
+    rows.sort((a,b)=> a.date===b.date?0:(a.date<b.date?-1:1));
+    const table = el(`
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+          <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+            <th style="padding:6px 8px;">Item</th>
+            <th style="padding:6px 8px;">Acquired</th>
+            <th style="padding:6px 8px; text-align:right;">Value</th>
+            <th style="padding:6px 8px; text-align:right;">Life (yr)</th>
+            <th style="padding:6px 8px; text-align:right;">Accum. Dep.</th>
+            <th style="padding:6px 8px; text-align:right;">Book Value</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = table.querySelector('tbody');
+    let totalValue=0, totalAccum=0, totalBook=0;
+    rows.forEach(r=>{
+      totalValue += r.value; totalAccum += r.accumulated; totalBook += r.bookValue;
+      tbody.appendChild(el(`
+        <tr style="border-bottom:1px solid var(--line-soft);">
+          <td style="padding:6px 8px;">${escapeHtml(r.item)}</td>
+          <td class="mono" style="padding:6px 8px;">${dayLabel(r.date)} ${r.date.slice(0,4)}</td>
+          <td class="mono" style="padding:6px 8px; text-align:right;">${money(r.value)}</td>
+          <td class="mono" style="padding:6px 8px; text-align:right;">${r.life}</td>
+          <td class="mono" style="padding:6px 8px; text-align:right;">${money(r.accumulated)}</td>
+          <td class="mono" style="padding:6px 8px; text-align:right; ${r.fullyDepreciated?'opacity:.6;':''}">${money(r.bookValue)}${r.fullyDepreciated?' (fully dep.)':''}</td>
+        </tr>
+      `));
+    });
+    body.appendChild(table);
+    body.appendChild(el(`
+      <div class="computed total" style="margin-top:10px;">
+        <span class="lbl">Total original value / accumulated dep. / book value (as of ${dayLabel(asOf)} ${asOf.slice(0,4)})</span>
+        <span>${money(totalValue)} / ${money(totalAccum)} / ${money(totalBook)}</span>
+      </div>
+    `));
+    body.appendChild(el(`<p class="subnote" style="margin-top:4px;">Straight-Line method: value &divide; useful life (years), accrued monthly from the acquisition date.</p>`));
+  }
+
+  function draw(){ assetRegisterView==='register' ? drawRegister() : drawDepreciation(); }
+  draw();
+  card.querySelector('#ar-view').onchange = (e)=>{ assetRegisterView = e.target.value; render(); };
+  const itemSel = card.querySelector('#ar-item');
+  if(itemSel) itemSel.onchange = (e)=>{ assetRegisterItemId = e.target.value; drawRegister(); };
+  const newItemBtn = card.querySelector('#ar-new-item');
+  if(newItemBtn) newItemBtn.onclick = ()=>{
+    const name = prompt('Item name (e.g. Chair, Table, Generator):');
+    if(!name || !name.trim()) return;
+    const it = newAssetItem(name.trim());
+    state.fixedAssetRegister.items.push(it);
+    assetRegisterItemId = it.id;
+    saveState(); render();
+  };
+  return card;
+}
+
+/* --- Ratio Analysis & Cash Flow Statement: see ratioFiguresForMonth/
+   outstandingPayablesAsOf above. Entirely separate view, doesn't touch
+   the Balance Sheet, Monthly Ledger, or any export. --- */
+function renderRatioCashFlowCard(){
+  const allEntries = buildJournalEntries();
+  const years = [...new Set([
+    ...allEntries.map(e=>e.date.slice(0,4)),
+    ...Object.keys(state.monthlyLedger.months).map(k=>k.slice(0,4))
+  ])].sort().reverse();
+  if(!ratioCashFlowFilters.year && years.length) ratioCashFlowFilters.year = years[0];
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128200;</span> Ratio Analysis &amp; Cash Flow Statement</h3>
+      <p class="subnote">Two more separate, traditional-accounting practice views &mdash; Current/Cash Ratio and an Operating/Investing/Financing Cash Flow Statement, built from your existing vouchers and Monthly Ledger figures. Doesn't feed the Balance Sheet, Monthly Ledger, or any export.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:220px;">
+          <label>View</label>
+          <select id="rc-view">
+            <option value="ratio" ${ratioCashFlowFilters.view==='ratio'?'selected':''}>Ratio Analysis</option>
+            <option value="cashflow" ${ratioCashFlowFilters.view==='cashflow'?'selected':''}>Cash Flow Statement</option>
+          </select>
+        </div>
+        <div class="field" style="min-width:120px;">
+          <label>Year</label>
+          <select id="rc-year">
+            ${years.map(y=>`<option value="${y}" ${ratioCashFlowFilters.year===y?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="min-width:140px;">
+          <label>Month <span class="tag">${ratioCashFlowFilters.view==='ratio'?'as-of':'optional'}</span></label>
+          <select id="rc-month">
+            ${ratioCashFlowFilters.view==='cashflow' ? `<option value="">Whole year</option>` : ''}
+            ${MONTHS.map((m,i)=>{const v=String(i+1).padStart(2,'0'); return `<option value="${v}" ${ratioCashFlowFilters.month===v?'selected':''}>${m}</option>`;}).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="rc-body"></div>
+    </div>
+  `);
+  function drawBody(){
+    const box = card.querySelector('#rc-body');
+    box.innerHTML = '';
+    const year = ratioCashFlowFilters.year;
+    if(ratioCashFlowFilters.view==='ratio'){
+      const month = ratioCashFlowFilters.month || (()=>{
+        const keysThisYear = Object.keys(state.monthlyLedger.months).filter(k=>k.startsWith(year+'-')).sort();
+        return keysThisYear.length ? keysThisYear[keysThisYear.length-1].slice(5,7) : '';
+      })();
+      if(!month){ box.appendChild(el(`<p class="empty">Pick a month to see its ratios (Current Ratio is a snapshot "as of" a date, not a period total).</p>`)); return; }
+      const key = `${year}-${month}`;
+      const fig = ratioFiguresForMonth(key);
+      const periodEntries = allEntries.filter(e=>e.date.slice(0,7)===key);
+      const revenue = periodEntries.filter(e=>e.source!=='Expenditure Voucher').reduce((s,e)=>s+e.amount,0);
+      const expenditure = periodEntries.filter(e=>e.source==='Expenditure Voucher').reduce((s,e)=>s+e.amount,0);
+      const currentAssets = (fig.cash||0) + (fig.bank||0);
+      const currentLiabilities = fig.payables;
+      const anyUnknown = fig.cash==null || fig.bank==null;
+      const rows = [
+        {label:'Current Ratio', formula:'(Cash + Bank) &divide; Outstanding Payables', value: currentLiabilities>0 ? (currentAssets/currentLiabilities) : null, suffix:'', note: currentLiabilities>0 ? '' : 'No outstanding payables this month - ratio undefined (treat as strong).'},
+        {label:'Cash Ratio', formula:'Cash in Hand &divide; Outstanding Payables', value: currentLiabilities>0 ? ((fig.cash||0)/currentLiabilities) : null, suffix:'', note: currentLiabilities>0 ? '' : 'No outstanding payables this month - ratio undefined.'},
+        {label:'Net Surplus Margin', formula:'(Revenue &minus; Expenditure) &divide; Revenue &times; 100', value: revenue>0 ? ((revenue-expenditure)/revenue*100) : null, suffix:'%', note: revenue>0?'':'No revenue recorded this month.'},
+        {label:'Expense Ratio', formula:'Expenditure &divide; Revenue &times; 100', value: revenue>0 ? (expenditure/revenue*100) : null, suffix:'%', note: revenue>0?'':'No revenue recorded this month.'},
+      ];
+      box.appendChild(el(`
+        <div class="row" style="flex-wrap:wrap; margin-top:8px;">
+          <div class="summary-box"><div class="lbl">Cash in Hand</div><div class="val">${fig.cash!=null?money(fig.cash):'&mdash;'}</div></div>
+          <div class="summary-box"><div class="lbl">Bank Balance</div><div class="val">${fig.bank!=null?money(fig.bank):'&mdash;'}</div></div>
+          <div class="summary-box"><div class="lbl">Outstanding Payables</div><div class="val">${money(fig.payables)}</div></div>
+        </div>
+      `));
+      if(anyUnknown) box.appendChild(el(`<p class="subnote" style="color:var(--danger,#B3261E);">Cash/Bank figure not available for this month yet (no day-chain data and no manual figure saved in the Monthly Ledger's Balance Sheet) - ratios below may be incomplete.</p>`));
+      const table = el(`
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+            <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+              <th style="padding:6px 8px;">Ratio</th>
+              <th style="padding:6px 8px;">Formula</th>
+              <th style="padding:6px 8px; text-align:right;">Value</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      `);
+      const tbody = table.querySelector('tbody');
+      rows.forEach(r=>{
+        tbody.appendChild(el(`
+          <tr style="border-bottom:1px solid var(--line-soft);">
+            <td style="padding:6px 8px; font-weight:600;">${r.label}</td>
+            <td style="padding:6px 8px; opacity:.7; font-size:11.5px;">${r.formula}</td>
+            <td class="mono" style="padding:6px 8px; text-align:right;">${r.value!=null ? (r.suffix==='%' ? r.value.toFixed(1)+'%' : r.value.toFixed(2)) : `<span style="opacity:.5;">${r.note}</span>`}</td>
+          </tr>
+        `));
+      });
+      box.appendChild(table);
+    } else {
+      const month = ratioCashFlowFilters.month;
+      const periodEntries = allEntries.filter(e=> month ? e.date.slice(0,7)===`${year}-${month}` : e.date.slice(0,4)===year);
+      const operatingIn = periodEntries.filter(e=>e.debitAccount===JOURNAL_CASH_ACCOUNT.label).reduce((s,e)=>s+e.amount,0);
+      const operatingOut = periodEntries.filter(e=>e.creditAccount===JOURNAL_CASH_ACCOUNT.label && e.source==='Expenditure Voucher' && journalAccountType(e.debitAccount)==='expense').reduce((s,e)=>s+e.amount,0);
+      const investingOut = periodEntries.filter(e=>e.creditAccount===JOURNAL_CASH_ACCOUNT.label && e.source==='Expenditure Voucher' && journalAccountType(e.debitAccount)==='asset').reduce((s,e)=>s+e.amount,0);
+      const netOperating = operatingIn - operatingOut;
+      const netInvesting = -investingOut;
+      const netFinancing = 0;
+      const netChange = netOperating + netInvesting + netFinancing;
+      const periodLabel = month ? `${MONTHS[Number(month)-1]} ${year}` : `Full year ${year}`;
+      box.appendChild(el(`
+        <div style="margin-top:10px;">
+          <div class="computed"><span class="lbl">Cash from Operating Activities</span><span></span></div>
+          <div class="computed" style="padding-left:16px;"><span class="lbl">Cash received (revenue + misc collection)</span><span>${money(operatingIn)}</span></div>
+          <div class="computed" style="padding-left:16px;"><span class="lbl">Cash paid for operating expenses</span><span>(${money(operatingOut)})</span></div>
+          <div class="computed total"><span class="lbl">Net cash from Operating</span><span>${money(netOperating)}</span></div>
+          <div class="computed" style="margin-top:10px;"><span class="lbl">Cash from Investing Activities</span><span></span></div>
+          <div class="computed" style="padding-left:16px;"><span class="lbl">Loan disbursed (III Assets Ltd)</span><span>(${money(investingOut)})</span></div>
+          <div class="computed total"><span class="lbl">Net cash from Investing</span><span>${money(netInvesting)}</span></div>
+          <div class="computed" style="margin-top:10px;"><span class="lbl">Cash from Financing Activities</span><span></span></div>
+          <div class="computed" style="padding-left:16px;"><span class="lbl">None recorded</span><span>${money(0)}</span></div>
+          <div class="computed total"><span class="lbl">Net cash from Financing</span><span>${money(netFinancing)}</span></div>
+          <div class="computed total" style="margin-top:10px; border-top:2px solid var(--line); padding-top:6px;"><span class="lbl">Net change in cash &mdash; ${escapeHtml(periodLabel)}</span><span>${money(netChange)}</span></div>
+        </div>
+      `));
+      box.appendChild(el(`<p class="subnote" style="margin-top:8px;">Built only from vouchers and Deposit-Notesheet revenue figures - internal cash&harr;bank transfers, bank fees, and salary paid directly from a bank account aren't modelled here, so this won't exactly match the real change in Cash + Bank for the period.</p>`));
+    }
+  }
+  drawBody();
+  card.querySelector('#rc-view').onchange = (e)=>{ ratioCashFlowFilters.view = e.target.value; render(); };
+  card.querySelector('#rc-year').onchange = (e)=>{ ratioCashFlowFilters.year = e.target.value; drawBody(); };
+  card.querySelector('#rc-month').onchange = (e)=>{ ratioCashFlowFilters.month = e.target.value; drawBody(); };
+  return card;
+}
+
 /* --- Recurring Entry Templates: save a category+description+amount combo
    once, then add it as a new voucher with one click - handy for monthly
    recurring costs like rent, internet, or a fixed salary top-up. --- */
@@ -8159,6 +8917,9 @@ function wireDelegation(){
     if(action==='edit-setup'){ state.setupDone=false; render(); return; }
     if(action==='toggle-search'){ searchOpen = !searchOpen; render(); return; }
     if(action==='toggle-summary'){ summaryOpen = !summaryOpen; render(); return; }
+    if(action==='toggle-journal'){ journalOpen = !journalOpen; render(); return; }
+    if(action==='toggle-asset-register'){ assetRegisterOpen = !assetRegisterOpen; render(); return; }
+    if(action==='toggle-ratio-cashflow'){ ratioCashFlowOpen = !ratioCashFlowOpen; render(); return; }
     if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
     if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
     if(action==='toggle-monthly-ledger'){
