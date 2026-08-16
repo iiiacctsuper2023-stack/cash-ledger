@@ -15,8 +15,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --paper:#EEF0E6;
-    --card:#FBFAF5;
+    --paper:#F3F7F0;
+    --card:#FFFFFF;
     --ink:#1F2A23;
     --ink-soft:#5B6459;
     --primary:#1B4B43;
@@ -27,8 +27,8 @@
     --accent-soft:#EADFC5;
     --danger:#A23B2E;
     --danger-soft:#F3DFDA;
-    --line:#D7D2C0;
-    --line-soft:#E6E2D3;
+    --line:#D9E4D5;
+    --line-soft:#E9F0E4;
     --radius:12px;
     --ease:cubic-bezier(.19,.85,.32,1.05);
     --shadow-sm:0 1px 2px rgba(15,51,44,.05), 0 1px 1px rgba(15,51,44,.04);
@@ -39,11 +39,10 @@
   html{scroll-behavior:smooth;}
   html,body{margin:0;padding:0;color:var(--ink);font-family:'IBM Plex Sans',sans-serif;}
   body{
-    padding:32px 18px 90px;
     background:
-      radial-gradient(1100px 520px at 12% -8%, rgba(184,134,59,.07), transparent 55%),
-      radial-gradient(900px 480px at 100% 0%, rgba(27,75,67,.06), transparent 50%),
-      var(--paper);
+      radial-gradient(1100px 520px at 12% -8%, rgba(184,134,59,.06), transparent 55%),
+      radial-gradient(1000px 620px at 100% 0%, rgba(27,75,67,.08), transparent 55%),
+      linear-gradient(180deg, #EFF6ED 0%, var(--paper) 320px);
     min-height:100vh;
   }
   body::before{
@@ -53,7 +52,8 @@
     animation:sheen 9s linear infinite;
   }
   @keyframes sheen{0%{background-position:0% 0;}100%{background-position:200% 0;}}
-  .wrap{max-width:980px;margin:0 auto;}
+  .app-shell{display:flex;align-items:flex-start;min-height:100vh;}
+  .wrap{flex:1 1 auto;min-width:0;max-width:980px;margin:0 auto;padding:32px 18px 90px;}
 
   h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;color:var(--primary-dark);letter-spacing:-.01em;}
   .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-deep);font-weight:600;display:inline-flex;align-items:center;gap:7px;}
@@ -62,8 +62,13 @@
 
   header.top{display:flex;flex-direction:column;gap:14px;margin-bottom:26px;padding-bottom:18px;position:relative;animation:fadeDown .5s var(--ease) both;}
   header.top::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg, var(--primary-dark) 0%, var(--line) 65%, transparent 100%);}
+  .top-title-row{display:flex;align-items:flex-start;gap:12px;}
   .top-title h1{font-size:27px;margin-top:3px;}
   .top-title p{margin:5px 0 0;color:var(--ink-soft);font-size:13.5px;}
+
+  .settings-panel-group{margin-bottom:14px;}
+  .settings-panel-group:last-child{margin-bottom:0;}
+  .settings-panel-label{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-deep);font-weight:600;margin-bottom:7px;}
 
   .toolbar{display:flex;align-items:center;gap:2px;flex-wrap:wrap;background:#fff;border:1px solid var(--line-soft);border-radius:12px;padding:6px;box-shadow:var(--shadow-sm);width:fit-content;max-width:100%;}
   .toolbar-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
@@ -73,6 +78,70 @@
   .toolbar button.secondary:hover{background:var(--paper);border-color:var(--line-soft);box-shadow:none;transform:none;}
   .toolbar .tag{margin-left:2px;}
   @media (max-width:640px){ .toolbar{width:100%;} }
+
+  /* ============================ Left Sidebar ============================ */
+  --sidebar-w: 250px;
+  .app-shell{display:flex;align-items:flex-start;min-height:100vh;}
+  .app-sidebar{
+    position:sticky;top:0;align-self:flex-start;height:100vh;flex:0 0 var(--sidebar-w);width:var(--sidebar-w);z-index:600;
+    display:flex;flex-direction:column;
+    padding:26px 16px 16px;
+    background:
+      radial-gradient(220px 160px at 100% 0%, rgba(184,134,59,.16), transparent 60%),
+      linear-gradient(165deg, #133730 0%, #1B4B43 46%, #0C2B25 100%);
+    color:#DCE7DF;
+    box-shadow:6px 0 28px rgba(15,51,44,.16);
+    overflow-y:auto;
+    transition:transform .32s var(--ease);
+  }
+  .app-sidebar::before{
+    content:'';position:absolute;inset:0;pointer-events:none;opacity:.05;
+    background-image:
+      repeating-linear-gradient(45deg, #EADFC5 0 1px, transparent 1px 30px),
+      repeating-linear-gradient(-45deg, #EADFC5 0 1px, transparent 1px 30px);
+  }
+  .sidebar-brand{position:relative;padding:2px 6px 20px;margin-bottom:14px;border-bottom:1px solid rgba(234,223,197,.16);}
+  .sidebar-brand-ar{font-family:'Fraunces',serif;font-size:15.5px;color:var(--accent-soft);line-height:1.3;}
+  .sidebar-brand-title{font-family:'Fraunces',serif;font-weight:600;font-size:15.5px;color:#fff;margin-top:4px;line-height:1.3;}
+  .sidebar-brand-sub{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-soft);margin-top:7px;display:flex;align-items:center;gap:6px;}
+  .sidebar-brand-sub::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(184,134,59,.28);}
+  .sidebar-nav{position:relative;display:flex;flex-direction:column;gap:3px;}
+  .sidebar-label{position:relative;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:rgba(220,231,223,.5);padding:14px 10px 6px;}
+  .nav-item{
+    position:relative;display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+    background:transparent;border:1px solid transparent;color:#CBD8CF;
+    padding:10px 11px;border-radius:10px;font-size:13px;font-weight:600;font-family:'IBM Plex Sans',sans-serif;
+    box-shadow:none;transition:background-color .15s var(--ease), color .15s var(--ease), transform .12s var(--ease), border-color .15s var(--ease);
+  }
+  .nav-item:hover{background:rgba(255,255,255,.07);color:#fff;transform:translateX(2px);box-shadow:none;}
+  .nav-item:active{transform:translateX(2px) scale(.98);}
+  .nav-item .nav-icon{width:30px;height:30px;flex:none;border-radius:8px;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;transition:background-color .15s ease,color .15s ease;}
+  .nav-item .nav-icon svg{width:16px;height:16px;}
+  .nav-item .nav-text{flex:1;line-height:1.25;}
+  .nav-item.active{background:linear-gradient(90deg, rgba(184,134,59,.32), rgba(184,134,59,.08));border-color:rgba(184,134,59,.55);color:#fff;box-shadow:inset 0 0 0 1px rgba(184,134,59,.12);}
+  .nav-item.active .nav-icon{background:var(--accent);color:#2A1D0B;}
+  .nav-item.active::before{content:'';position:absolute;left:-16px;top:6px;bottom:6px;width:4px;border-radius:0 4px 4px 0;background:var(--accent);}
+  .sidebar-divider{height:1px;background:rgba(234,223,197,.14);margin:14px 4px;}
+  .sidebar-utility{position:relative;display:flex;align-items:center;gap:8px;padding:12px 6px 2px;}
+  .sidebar-icon-btn{width:32px;height:32px;flex:none;border-radius:9px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#DCE7DF;display:inline-flex;align-items:center;justify-content:center;padding:0;box-shadow:none;}
+  .sidebar-icon-btn svg{width:15px;height:15px;}
+  .sidebar-icon-btn:hover{background:rgba(255,255,255,.16);color:#fff;transform:none;box-shadow:none;}
+  .sidebar-icon-btn.danger{color:#F0C3B8;border-color:rgba(240,140,110,.25);}
+  .sidebar-icon-btn.danger:hover{background:rgba(162,59,46,.35);}
+  .sidebar-footer{position:relative;margin-top:auto;padding:14px 8px 2px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:rgba(220,231,223,.45);border-top:1px solid rgba(234,223,197,.1);}
+  .sidebar-close{display:none;}
+  .sidebar-toggle{display:none;background:var(--card);color:var(--primary-dark);border-color:var(--line);width:38px;height:38px;padding:0;align-items:center;justify-content:center;flex:none;}
+  .sidebar-toggle svg{width:18px;height:18px;}
+  .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(15,32,27,.45);backdrop-filter:blur(1px);z-index:590;}
+
+  .app-shell.no-sidebar .app-sidebar, .app-shell.no-sidebar .sidebar-overlay{display:none;}
+  @media (max-width:900px){
+    .app-sidebar{position:fixed;top:0;left:0;bottom:0;height:100vh;transform:translateX(-100%);}
+    .app-sidebar.open{transform:translateX(0);}
+    .sidebar-toggle{display:inline-flex;}
+    .sidebar-close{display:inline-flex;position:absolute;top:16px;right:14px;background:rgba(255,255,255,.08);border-color:transparent;color:#fff;width:30px;height:30px;padding:0;align-items:center;justify-content:center;border-radius:8px;}
+    .sidebar-overlay.open{display:block;}
+  }
 
   button{font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:600;border-radius:8px;border:1px solid var(--primary-dark);padding:8px 14px;cursor:pointer;background:var(--primary);color:#fff;transition:transform .16s var(--ease), background-color .18s ease, box-shadow .18s ease, border-color .18s ease;box-shadow:var(--shadow-sm);}
   button:hover{background:var(--primary-dark);box-shadow:var(--shadow-md);transform:translateY(-1px);}
@@ -317,7 +386,11 @@
 </style>
 </head>
 <body>
+<div class="app-shell" id="app-shell">
+<nav class="app-sidebar" id="app-sidebar"></nav>
 <div class="wrap" id="app"></div>
+</div>
+<div class="sidebar-overlay" id="sidebar-overlay" data-action="close-sidebar"></div>
 
 <script>
 /* Bumped by hand whenever a meaningfully new copy of this file is shipped.
@@ -980,6 +1053,8 @@ let vaultError = '';
 let pendingVaultEnvelope = null; // raw {salt,iv,data} read from storage, awaiting passphrase
 let vaultSetupFormOpen = false; // true = show the "Enable Data Encryption" mini form
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
+let sidebarOpen = false;        // mobile: true = the left nav drawer is pulled out over the content
+let settingsPanelOpen = false;  // true = show the "Data, Backup & Security" card (old header toolbar's backup/security/encryption controls)
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
 let lastUndoTimer = null;
 let duplicateWarning = null;   // string message, or null - shown as a dismissible toast
@@ -2959,6 +3034,19 @@ function renderApp(){
      iframe/artifact preview) clamp scroll to the top; swapping the
      whole subtree in one step avoids that empty in-between state. */
   const app = document.createDocumentFragment();
+  const shellEl = document.getElementById('app-shell');
+  if(vaultLocked || (state.lockPasswordHash && locked)){
+    // Screen is locked - no nav needed until it's unlocked, and no reason
+    // to leave the sidebar's fixed-width gutter reserved on desktop.
+    shellEl.classList.add('no-sidebar');
+    document.getElementById('app-sidebar').replaceChildren();
+  } else {
+    shellEl.classList.remove('no-sidebar');
+    const sidebarEl = document.getElementById('app-sidebar');
+    sidebarEl.classList.toggle('open', sidebarOpen);
+    sidebarEl.replaceChildren(renderSidebar());
+    document.getElementById('sidebar-overlay').classList.toggle('open', sidebarOpen);
+  }
   if(vaultLocked){
     app.appendChild(renderVaultUnlockScreen());
     document.getElementById('app').replaceChildren(app);
@@ -2986,6 +3074,7 @@ function renderApp(){
   if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
   if(securityFormOpen) app.appendChild(renderSecurityQuestionForm());
   if(vaultSetupFormOpen && !vaultEnabled) app.appendChild(renderVaultSetupForm());
+  if(settingsPanelOpen) app.appendChild(renderSettingsPanelCard());
   if(dashboardOpen) app.appendChild(renderDashboardCard());
   if(searchOpen) app.appendChild(renderSearchCard());
   if(summaryOpen) app.appendChild(renderCategorySummaryCard());
@@ -3025,30 +3114,120 @@ function renderApp(){
   document.getElementById('app').replaceChildren(app);
 }
 
+/* Small line-style SVG icons (stroke, currentColor) used in the sidebar
+   nav and a couple of header/card buttons. Kept as one lookup so every
+   icon stays visually consistent (same stroke width, same viewBox). */
+function navIcon(name){
+  const ICONS = {
+    menu:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
+    close:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2"/><path d="M3 9.5h18M8 4v5.5M16 4v5.5"/></svg>',
+    search:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.2 20.2l-4.6-4.6"/></svg>',
+    summary:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>',
+    journal:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V5.2A2.2 2.2 0 0 1 7.2 3H20v17"/><path d="M5 20a2 2 0 0 0 2 2h13"/><path d="M5 20a2 2 0 0 1 2-2h13"/><path d="M8.5 8h8M8.5 11.5h8"/></svg>',
+    asset:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-4.5L19 8v13"/><path d="M9.5 21v-6.5h5V21"/></svg>',
+    ratio:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 3.5v17h17"/><path d="M7 15.5l4-4.2 3 3 5.5-6.3"/></svg>',
+    audit:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.2" cy="10.2" r="6.7"/><path d="M20.2 20.2l-5.1-5.1"/><path d="M7.3 10.2h5.8"/></svg>',
+    ssl:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="5" width="19.6" height="14" rx="2.2"/><path d="M2.2 9.8h19.6"/><path d="M6 15h4"/></svg>',
+    templates: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2"/><path d="M9.5 3.2v17.6"/><path d="M3.2 9h6.3"/></svg>',
+    setup:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.1a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.1a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.1a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.1a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    backup:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16"/><path d="M6 5.5V19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5.5"/><path d="M9.5 5.5V4a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 15.5 4v1.5"/><path d="M12 9.5v6M9.3 12.2 12 9.5l2.7 2.7"/></svg>',
+    download:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 18.5h16"/></svg>',
+    lock:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>'
+  };
+  return ICONS[name] || '';
+}
+
+/* Left-hand sidebar navigation - the main way to open the app's report/
+   settings cards (previously a wrapping row of buttons in the header).
+   Rebuilt on every render() alongside the header, and swapped into the
+   #app-sidebar element (which sits outside #app so it stays fixed
+   in place while the main content scrolls). */
+function renderSidebar(){
+  const nav = document.createDocumentFragment();
+  const brand = el(`
+    <div class="sidebar-brand">
+      <button type="button" class="sidebar-close" data-action="close-sidebar" aria-label="Close menu">${navIcon('close')}</button>
+      <div class="sidebar-brand-ar">&#1575;&#1604;&#1605;&#1593;&#1607;&#1583; &#1575;&#1604;&#1573;&#1587;&#1604;&#1575;&#1605;&#1610; &#1575;&#1604;&#1593;&#1575;&#1604;&#1605;&#1610;</div>
+      <div class="sidebar-brand-title">Daily Cash &amp; Bank Ledger</div>
+      <div class="sidebar-brand-sub">International Islamic Institute</div>
+    </div>
+  `);
+  nav.appendChild(brand);
+
+  if(!state.setupDone){
+    nav.appendChild(el(`<div class="sidebar-footer">v${APP_BUILD}</div>`));
+    return nav;
+  }
+
+  const items = [
+    ['dashboard',   'toggle-dashboard',        'Dashboard',                dashboardOpen],
+    ['search',      'toggle-search',           'Advanced Search',          searchOpen],
+    ['summary',     'toggle-summary',          'Category Summary',         summaryOpen],
+    ['journal',     'toggle-journal',          'Journal / Ledger',         journalOpen],
+    ['asset',       'toggle-asset-register',   'Fixed Asset Register',     assetRegisterOpen],
+    ['ratio',       'toggle-ratio-cashflow',   'Ratio &amp; Cash Flow',    ratioCashFlowOpen],
+    ['audit',       'toggle-audit-log',        'Audit Trail',              auditLogOpen],
+    ['ssl',         'toggle-ssl-report',       'SSL Commerz Entries',      sslReportOpen],
+    ['templates',   'toggle-templates',        'Templates',                templatesOpen],
+  ];
+  const navList = el(`<div class="sidebar-nav">
+    ${items.map(([icon,action,label,active])=>`
+      <button type="button" class="nav-item${active?' active':''}" data-action="${action}">
+        <span class="nav-icon">${navIcon(icon)}</span>
+        <span class="nav-text">${label}</span>
+      </button>
+    `).join('')}
+  </div>`);
+  nav.appendChild(navList);
+  nav.appendChild(el(`<div class="sidebar-divider"></div>`));
+  const navList2 = el(`<div class="sidebar-nav">
+    <button type="button" class="nav-item" data-action="edit-setup">
+      <span class="nav-icon">${navIcon('setup')}</span>
+      <span class="nav-text">Edit Setup</span>
+    </button>
+    <button type="button" class="nav-item${settingsPanelOpen?' active':''}" data-action="toggle-settings-panel">
+      <span class="nav-icon">${navIcon('backup')}</span>
+      <span class="nav-text">Data, Backup &amp; Security</span>
+    </button>
+  </div>`);
+  nav.appendChild(navList2);
+  const utilityIcons = [];
+  if(deferredInstallPrompt) utilityIcons.push(`<button type="button" class="sidebar-icon-btn" data-action="install-app" title="Install App" aria-label="Install App">${navIcon('download')}</button>`);
+  if(state.lockPasswordHash) utilityIcons.push(`<button type="button" class="sidebar-icon-btn danger" data-action="lock-now" title="Lock now" aria-label="Lock now">${navIcon('lock')}</button>`);
+  if(utilityIcons.length) nav.appendChild(el(`<div class="sidebar-utility">${utilityIcons.join('')}</div>`));
+  nav.appendChild(el(`<div class="sidebar-footer">v${APP_BUILD} &middot; ${state.month} ${state.year}</div>`));
+  return nav;
+}
+
 function renderHeader(){
   const header = el(`
     <header class="top">
-      <div class="top-title">
-        <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
-        <h1>Daily Cash &amp; Bank Ledger</h1>
-        <p>${state.setupDone ? `Recording for <strong>${state.month} ${state.year}</strong>` : 'Set up the month before recording daily entries'}</p>
-        <p style="font-size:10.5px;color:var(--ink-soft);opacity:.65;margin-top:2px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</p>
-      </div>
-      <div class="toolbar">
-        ${state.setupDone ? `
-        <div class="toolbar-group">
-          <button class="secondary" data-action="edit-setup">&#9881; Edit setup</button>
-          <button class="secondary" data-action="toggle-dashboard">&#127968; ${dashboardOpen?'Hide':''} Dashboard</button>
-          <button class="secondary" data-action="toggle-search">&#128269; ${searchOpen?'Hide':'Advanced'} Search</button>
-          <button class="secondary" data-action="toggle-summary">&#128202; ${summaryOpen?'Hide':'Category'} Summary</button>
-          <button class="secondary" data-action="toggle-journal">&#128209; ${journalOpen?'Hide':''} Journal/Ledger</button>
-          <button class="secondary" data-action="toggle-asset-register">&#128188; ${assetRegisterOpen?'Hide':''} Fixed Asset Register</button>
-          <button class="secondary" data-action="toggle-ratio-cashflow">&#128200; ${ratioCashFlowOpen?'Hide':''} Ratio &amp; Cash Flow</button>
-          <button class="secondary" data-action="toggle-audit-log">&#128270; ${auditLogOpen?'Hide':''} Audit Trail</button>
-          <button class="secondary" data-action="toggle-ssl-report">&#128179; ${sslReportOpen?'Hide':''} SSL Commerz Entries</button>
-          <button class="secondary" data-action="toggle-templates">&#128203; ${templatesOpen?'Hide':''} Templates</button>
+      <div class="top-title-row">
+        <button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-label="Open menu">${navIcon('menu')}</button>
+        <div class="top-title">
+          <h1>Daily Cash &amp; Bank Ledger</h1>
+          <p>${state.setupDone ? `Recording for <strong>${state.month} ${state.year}</strong>` : 'Set up the month before recording daily entries'}</p>
         </div>
-        <div class="toolbar-divider"></div>` : ''}
+      </div>
+    </header>
+  `);
+  return header;
+}
+
+/* "Data, Backup & Security" card - holds everything that used to live in
+   the header's second/third/fourth toolbar groups (export/import backup,
+   file connect, screen-lock & day/month-lock passwords, security question,
+   data encryption, install-app). Shown as a togglable card when
+   settingsPanelOpen is true, reached from the header button or the
+   sidebar's "Data, Backup & Security" nav item. */
+function renderSettingsPanelCard(){
+  const card = el(`
+    <div class="card settings-panel">
+      <h3><span class="num">${navIcon('backup')}</span> Data, Backup &amp; Security</h3>
+      <p class="subnote">Export or import a full backup, connect this app to a file for auto-saving, and manage screen-lock passwords and data encryption.</p>
+      <div class="settings-panel-group">
+        <div class="settings-panel-label">Backup</div>
         <div class="toolbar-group">
           <button class="secondary" data-action="export-backup">&#11015; Export backup</button>
           <button class="secondary" data-action="import-backup">&#11014; Import backup</button>
@@ -3059,7 +3238,9 @@ function renderHeader(){
               : `<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
           ) : ''}
         </div>
-        <div class="toolbar-divider"></div>
+      </div>
+      <div class="settings-panel-group">
+        <div class="settings-panel-label">Screen Lock &amp; Passwords</div>
         <div class="toolbar-group">
           ${!state.lockPasswordHash ? '<button class="secondary" data-action="toggle-password-form">&#128274; Set password</button>' : '<button class="secondary" data-action="toggle-password-form">&#128274; Change password</button>'}
           ${state.lockPasswordHash ? '<button class="secondary" data-action="lock-now">&#128274; Lock now</button>' : ''}
@@ -3067,7 +3248,9 @@ function renderHeader(){
           ${!state.monthLockPasswordHash ? '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Set month-lock password</button>' : '<button class="secondary" data-action="toggle-monthlock-password-form">&#128273; Change month-lock password</button>'}
           ${!state.securityAnswerHash ? '<button class="secondary" data-action="toggle-security-form">&#10067; Set security question</button>' : '<button class="secondary" data-action="toggle-security-form">&#10067; Change security question</button>'}
         </div>
-        <div class="toolbar-divider"></div>
+      </div>
+      <div class="settings-panel-group">
+        <div class="settings-panel-label">Data Encryption</div>
         <div class="toolbar-group">
           ${!vaultEnabled ? '<button class="secondary" data-action="toggle-vault-form">&#128272; Enable data encryption</button>' : `
             <span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Saved data is encrypted (AES-256) with your passphrase before it leaves this browser">&#128272; Data encrypted</span>
@@ -3077,15 +3260,15 @@ function renderHeader(){
           ${deferredInstallPrompt ? '<button data-action="install-app">&#11015; Install App</button>' : ''}
         </div>
       </div>
-    </header>
+    </div>
   `);
-  const fileInput = header.querySelector('#import-file-input');
+  const fileInput = card.querySelector('#import-file-input');
   fileInput.onchange = ()=>{
     const file = fileInput.files[0];
     if(file) importBackupJson(file);
     fileInput.value = '';
   };
-  return header;
+  return card;
 }
 
 /* Inline mini-form for setting, changing, or removing the screen-lock
@@ -9218,12 +9401,21 @@ function renderFooter(){
    for a stale handler to fire on the wrong row.
    ====================================================================== */
 function wireDelegation(){
-  document.getElementById('app').addEventListener('click', (e)=>{
+  document.addEventListener('click', (e)=>{
     const t = e.target.closest('[data-action]');
     if(!t) return;
     const action = t.dataset.action;
     const dayId = t.dataset.day;
     const day = dayId ? findDay(dayId) : null;
+
+    // Any nav-item click on the narrow/mobile layout should close the
+    // slide-out drawer, whatever action it triggers - otherwise the menu
+    // stays covering the screen after the user picked something from it.
+    if(t.classList.contains('nav-item') && window.innerWidth<=900) sidebarOpen = false;
+
+    if(action==='toggle-sidebar'){ sidebarOpen = !sidebarOpen; render(); return; }
+    if(action==='close-sidebar'){ sidebarOpen = false; render(); return; }
+    if(action==='toggle-settings-panel'){ settingsPanelOpen = !settingsPanelOpen; render(); return; }
 
     if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
     if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
