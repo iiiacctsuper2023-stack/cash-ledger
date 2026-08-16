@@ -955,6 +955,8 @@ let assetRegisterItemId = null;
 let ratioCashFlowOpen = false;
 let ratioCashFlowFilters = { view:'ratio', year:'', month:'' };
 let auditLogOpen = false;
+let sslReportOpen = false;
+let sslReportFilters = { year:'', month:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false;
@@ -2991,6 +2993,7 @@ function renderApp(){
   if(assetRegisterOpen) app.appendChild(renderAssetRegisterCard());
   if(ratioCashFlowOpen) app.appendChild(renderRatioCashFlowCard());
   if(auditLogOpen) app.appendChild(renderAuditLogCard());
+  if(sslReportOpen) app.appendChild(renderSslReportCard());
   if(templatesOpen) app.appendChild(renderTemplatesCard());
   app.appendChild(renderDayTabs());
   const computed = computeAll();
@@ -3042,6 +3045,7 @@ function renderHeader(){
           <button class="secondary" data-action="toggle-asset-register">&#128188; ${assetRegisterOpen?'Hide':''} Fixed Asset Register</button>
           <button class="secondary" data-action="toggle-ratio-cashflow">&#128200; ${ratioCashFlowOpen?'Hide':''} Ratio &amp; Cash Flow</button>
           <button class="secondary" data-action="toggle-audit-log">&#128270; ${auditLogOpen?'Hide':''} Audit Trail</button>
+          <button class="secondary" data-action="toggle-ssl-report">&#128179; ${sslReportOpen?'Hide':''} SSL Commerz Entries</button>
           <button class="secondary" data-action="toggle-templates">&#128203; ${templatesOpen?'Hide':''} Templates</button>
         </div>
         <div class="toolbar-divider"></div>` : ''}
@@ -7192,6 +7196,83 @@ function renderAuditLogCard(){
   return card;
 }
 
+/* --- SSL Commerz Entry Report: which dates had an SSL Commerz figure
+   hand-entered in the Daily Ledger's Bank section, for a chosen month -
+   a plain on-screen list, no export/print. --- */
+function renderSslReportCard(){
+  const allKeys = [...new Set(allDaysEverywhere().map(d=>d.date.slice(0,7)))].sort().reverse();
+  const years = [...new Set(allKeys.map(k=>k.slice(0,4)))];
+  if(!sslReportFilters.year && years.length) sslReportFilters.year = years[0];
+  if(!sslReportFilters.month){
+    const inYear = allKeys.filter(k=>k.startsWith(sslReportFilters.year+'-'));
+    if(inYear.length) sslReportFilters.month = inYear[0].slice(5,7);
+  }
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128179;</span> SSL Commerz Entries</h3>
+      <p class="subnote">Just a list, on screen only - which dates this month have an SSL Commerz figure entered in the Daily Ledger's Bank section. No print, no export.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div class="field" style="min-width:120px;">
+          <label>Year</label>
+          <select id="ssl-year">
+            ${years.map(y=>`<option value="${y}" ${sslReportFilters.year===y?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="min-width:140px;">
+          <label>Month</label>
+          <select id="ssl-month">
+            ${MONTHS.map((m,i)=>{const v=String(i+1).padStart(2,'0'); return `<option value="${v}" ${sslReportFilters.month===v?'selected':''}>${m}</option>`;}).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="ssl-body"></div>
+    </div>
+  `);
+  function draw(){
+    const box = card.querySelector('#ssl-body');
+    box.innerHTML = '';
+    const key = `${sslReportFilters.year}-${sslReportFilters.month}`;
+    const rows = [];
+    allDaysEverywhere().filter(d=>d.date.slice(0,7)===key).sort((a,b)=>a.date.localeCompare(b.date)).forEach(day=>{
+      state.banks.forEach(b=>{
+        const amt = Number((day.banksDaily && day.banksDaily[b.id] && day.banksDaily[b.id].sslDeposit) || 0);
+        if(amt>0) rows.push({date:day.date, bank:b.name, amount:amt});
+      });
+    });
+    if(!rows.length){ box.appendChild(el(`<p class="empty" style="margin-top:10px;">No SSL Commerz entries found for ${MONTHS[Number(sslReportFilters.month)-1]} ${sslReportFilters.year}.</p>`)); return; }
+    const table = el(`
+      <div style="overflow-x:auto; margin-top:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+            <th style="padding:6px 8px;">Date</th>
+            <th style="padding:6px 8px;">Bank</th>
+            <th style="padding:6px 8px; text-align:right;">Amount</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = table.querySelector('tbody');
+    let total = 0;
+    rows.forEach(r=>{
+      total += r.amount;
+      tbody.appendChild(el(`
+        <tr style="border-bottom:1px solid var(--line-soft);">
+          <td class="mono" style="padding:6px 8px;">${dayLabel(r.date)} ${r.date.slice(0,4)}</td>
+          <td style="padding:6px 8px;">${escapeHtml(r.bank)}</td>
+          <td class="mono" style="padding:6px 8px; text-align:right;">${money(r.amount)}</td>
+        </tr>
+      `));
+    });
+    box.appendChild(table);
+    box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">${rows.length} ${rows.length===1?'entry':'entries'} &mdash; total</span><span>${money(total)}</span></div>`));
+  }
+  draw();
+  card.querySelector('#ssl-year').onchange = (e)=>{ sslReportFilters.year = e.target.value; sslReportFilters.month = ''; render(); };
+  card.querySelector('#ssl-month').onchange = (e)=>{ sslReportFilters.month = e.target.value; draw(); };
+  return card;
+}
+
 /* --- Recurring Entry Templates: save a category+description+amount combo
    once, then add it as a new voucher with one click - handy for monthly
    recurring costs like rent, internet, or a fixed salary top-up. --- */
@@ -9195,6 +9276,7 @@ function wireDelegation(){
     if(action==='toggle-asset-register'){ assetRegisterOpen = !assetRegisterOpen; render(); return; }
     if(action==='toggle-ratio-cashflow'){ ratioCashFlowOpen = !ratioCashFlowOpen; render(); return; }
     if(action==='toggle-audit-log'){ auditLogOpen = !auditLogOpen; render(); return; }
+    if(action==='toggle-ssl-report'){ sslReportOpen = !sslReportOpen; render(); return; }
     if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
     if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
     if(action==='toggle-monthly-ledger'){
