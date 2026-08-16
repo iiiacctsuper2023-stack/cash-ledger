@@ -54,6 +54,14 @@
   @keyframes sheen{0%{background-position:0% 0;}100%{background-position:200% 0;}}
   .app-shell{display:flex;align-items:flex-start;min-height:100vh;}
   .wrap{flex:1 1 auto;min-width:0;max-width:980px;margin:0 auto;padding:22px 18px 90px;}
+  /* Shift the middle ledger content ~2 inches (192px) toward the sidebar,
+     but only as much room as is actually free - clamped so it never
+     slides under the sidebar or off the right edge on narrower desktop
+     widths. No shift below the 901px breakpoint (mobile/tablet), where
+     the sidebar is an off-canvas overlay rather than reserved space. */
+  @media (min-width:901px){
+    .wrap{ transform:translateX(calc(-1 * min(192px, max(0px, calc(50vw - 594px))))); }
+  }
 
   h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;color:var(--primary-dark);letter-spacing:-.01em;}
   .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-deep);font-weight:600;display:inline-flex;align-items:center;gap:7px;}
@@ -197,7 +205,20 @@
   .status-badge.status-approved{background:#DDEEE3;color:var(--primary-dark);border-color:#BFE0CC;}
   input.locked-text{background:var(--card-alt,#F7F8F4);cursor:default;color:var(--ink-soft);}
 
-  .section-nav{position:fixed;right:10px;top:50%;transform:translateY(-50%);z-index:420;display:flex;flex-direction:column;gap:12px;align-items:flex-end;}
+  .section-nav{
+    position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:420;
+    display:flex;flex-direction:column;gap:5px;align-items:stretch;
+    padding:12px 9px;border-radius:20px;
+    background:
+      radial-gradient(140px 100px at 100% 0%, rgba(184,134,59,.20), transparent 65%),
+      linear-gradient(165deg, #163d35 0%, #1B4B43 48%, #0C2B25 100%);
+    box-shadow:0 18px 44px rgba(15,51,44,.32), 0 4px 12px rgba(15,51,44,.18), inset 0 0 0 1px rgba(234,223,197,.14);
+    backdrop-filter:blur(6px);
+  }
+  .section-nav-label{
+    font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--accent-soft);text-align:center;padding:0 6px 6px;opacity:.8;white-space:nowrap;
+  }
   .desc-input.input-missing{border-color:var(--danger,#B3261E);box-shadow:0 0 0 1px var(--danger,#B3261E) inset;}
   .flash-highlight{animation:flashHighlight 2.2s ease-out;}
   @keyframes flashHighlight{
@@ -269,20 +290,27 @@
   }
   .section-nav-item{position:relative;}
   .section-nav-dot{
-    height:64px;min-width:64px;border-radius:32px;
-    background:var(--primary-dark);color:#fff;border:3px solid #fff;
-    font-family:'IBM Plex Sans',sans-serif;font-size:15px;font-weight:600;
-    display:flex;align-items:center;justify-content:flex-start;gap:8px;
-    box-shadow:var(--shadow-md,0 2px 8px rgba(0,0,0,.18));
-    cursor:pointer;opacity:.88;transition:opacity .15s var(--ease),transform .12s var(--ease);
-    padding:0 20px;white-space:nowrap;
+    height:auto;min-width:0;width:100%;border-radius:12px;
+    background:rgba(255,255,255,.06);color:#EAF1EC;border:1px solid rgba(255,255,255,.07);
+    font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;font-weight:600;
+    display:flex;align-items:center;justify-content:flex-start;gap:9px;
+    box-shadow:none;
+    cursor:pointer;opacity:1;transition:background-color .15s var(--ease),color .15s var(--ease),transform .12s var(--ease),border-color .15s var(--ease);
+    padding:9px 12px;white-space:nowrap;
   }
-  .section-nav-dot .num{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;opacity:.85;}
-  .section-nav-dot:hover, .section-nav-item.open .section-nav-dot{opacity:1;transform:scale(1.04);}
+  .section-nav-dot .num{
+    font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;
+    width:20px;height:20px;flex:none;border-radius:6px;
+    background:rgba(255,255,255,.12);color:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;opacity:1;
+  }
+  .section-nav-dot:hover{background:rgba(255,255,255,.13);transform:translateX(-2px);border-color:rgba(255,255,255,.14);}
+  .section-nav-item.open .section-nav-dot{background:var(--accent);color:#2A1D0B;border-color:var(--accent);transform:translateX(-2px);}
+  .section-nav-item.open .section-nav-dot .num{background:rgba(0,0,0,.16);color:#2A1D0B;}
   .section-nav-flyout{
-    display:none;position:absolute;right:calc(100% + 10px);top:50%;transform:translateY(-50%);
-    background:#fff;border:1px solid var(--line-soft);border-radius:10px;
-    box-shadow:var(--shadow-lg);padding:6px;min-width:220px;max-height:65vh;overflow-y:auto;
+    display:none;position:absolute;right:calc(100% + 12px);top:50%;transform:translateY(-50%);
+    background:#fff;border:1px solid var(--line-soft);border-radius:12px;
+    box-shadow:var(--shadow-lg);padding:6px;min-width:230px;max-height:65vh;overflow-y:auto;
   }
   .section-nav-item.open .section-nav-flyout{display:block;}
   .section-nav-flyout-title{font-size:12.5px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;padding:5px 10px 7px;}
@@ -292,10 +320,52 @@
   }
   .section-nav-flyout-item:hover{background:var(--card-alt,#F7F8F4);}
   @media (max-width: 480px){
-    .section-nav-dot{height:56px;min-width:56px;font-size:13px;padding:0 16px;}
-    .section-nav-dot .num{font-size:13px;}
-    .section-nav{right:6px;gap:10px;}
+    .section-nav{right:6px;padding:9px 6px;border-radius:16px;gap:4px;}
+    .section-nav-label{display:none;}
+    .section-nav-dot{font-size:11.5px;padding:8px 8px;gap:6px;}
+    .section-nav-dot .num{width:17px;height:17px;font-size:10px;}
   }
+  /* ============================ Login / Lock screen ============================ */
+  .lock-screen{
+    position:fixed;inset:0;z-index:800;
+    display:flex;align-items:center;justify-content:center;
+    padding:24px;overflow-y:auto;
+    background:
+      radial-gradient(900px 480px at 12% -10%, rgba(184,134,59,.20), transparent 55%),
+      radial-gradient(820px 620px at 100% 6%, rgba(84,148,133,.28), transparent 55%),
+      linear-gradient(165deg, #133730 0%, #1B4B43 46%, #0C2B25 100%);
+  }
+  .lock-screen::before{
+    content:'';position:absolute;inset:0;pointer-events:none;opacity:.05;
+    background-image:
+      repeating-linear-gradient(45deg, #EADFC5 0 1px, transparent 1px 32px),
+      repeating-linear-gradient(-45deg, #EADFC5 0 1px, transparent 1px 32px);
+  }
+  .lock-card{
+    position:relative;width:100%;max-width:420px;margin:40px 0;
+    background:#fff;border-radius:20px;
+    padding:34px 30px 28px;
+    box-shadow:0 34px 80px rgba(0,0,0,.38), 0 10px 26px rgba(0,0,0,.2);
+    animation:cardRise .55s var(--ease) both;
+  }
+  .lock-icon{
+    width:58px;height:58px;border-radius:16px;margin:0 auto 16px;
+    background:linear-gradient(150deg, var(--primary) 0%, var(--primary-dark) 100%);
+    display:flex;align-items:center;justify-content:center;
+    font-size:26px;box-shadow:0 12px 26px rgba(15,51,44,.35), inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  .lock-card .eyebrow{display:flex;justify-content:center;margin-bottom:10px;}
+  .lock-card h1{text-align:center;font-size:21px;margin-bottom:8px;}
+  .lock-card .subnote{text-align:center;margin:0 0 16px;}
+  .lock-card .build-tag{text-align:center;font-size:10.5px;color:var(--ink-soft);opacity:.65;margin:-10px 0 16px;}
+  .lock-card .divider{margin:18px 0 14px;border:none;border-top:1px dashed var(--line);}
+  .lock-card button[type=button]#unlock-btn,
+  .lock-card button[type=button]#vault-unlock-btn{width:100%;padding:11px 14px;font-size:14px;border-radius:10px;margin-top:2px;}
+  .lock-card .field input{padding:10px 12px;}
+  @media (max-width:480px){
+    .lock-card{padding:26px 20px 22px;border-radius:16px;}
+  }
+
   .corner-nav-panel{
     position:fixed;right:14px;bottom:16px;z-index:430;
     display:flex;flex-direction:column;
@@ -3599,12 +3669,13 @@ function renderMonthLockPasswordForm(){
 /* Full-screen password prompt shown instead of the app while locked. */
 function renderLockScreen(){
   const wrap = el(`
-    <div style="max-width:420px; margin:80px auto 0;">
-      <div class="card">
+    <div class="lock-screen">
+      <div class="lock-card">
+        <div class="lock-icon">&#128274;</div>
         <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
-        <h1 style="margin-bottom:14px;">&#128274; ${lockScreenChangeMode ? 'Change Password' : 'Locked'}</h1>
+        <h1>${lockScreenChangeMode ? 'Change Password' : 'Welcome back'}</h1>
         <p class="subnote">${lockScreenChangeMode ? 'Enter the current password and your security answer, then choose a new password.' : 'Enter the password to open the Daily Cash &amp; Bank Ledger.'}</p>
-        <p style="font-size:10.5px;color:var(--ink-soft);opacity:.65;margin:-8px 0 14px;">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</p>
+        <p class="build-tag">v${APP_BUILD} &middot; updated ${APP_UPDATED_LABEL}</p>
         <div class="field">
           <label>${lockScreenChangeMode ? 'Current password' : 'Password'}</label>
           <input type="password" id="unlock-pw" autocomplete="current-password">
@@ -3626,12 +3697,12 @@ function renderLockScreen(){
         </div>` : ''}
         <div id="unlock-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;">${escapeHtml(lockError)}</div>
         <button type="button" id="unlock-btn">${lockScreenChangeMode ? 'Change password &amp; unlock' : 'Unlock'}</button>
-        <div style="margin-top:10px;">
+        <div style="margin-top:10px;text-align:center;">
           ${state.securityAnswerHash ? `<button class="secondary small" type="button" id="unlock-toggle-change">${lockScreenChangeMode ? 'Back to unlock' : 'Change password instead'}</button>` : ''}
         </div>
         <div class="divider"></div>
-        <p class="subnote" style="margin-bottom:6px;">Forgotten the password? There's no reset here &mdash; the only way back in is a backup file exported earlier.</p>
-        <button class="secondary small" type="button" id="lock-import-backup">Import a backup file instead</button>
+        <p class="subnote" style="margin-bottom:10px;">Forgotten the password? There's no reset here &mdash; the only way back in is a backup file exported earlier.</p>
+        <button class="secondary small" type="button" id="lock-import-backup" style="width:100%;">Import a backup file instead</button>
         <input type="file" id="lock-import-file-input" accept="application/json,.json" style="display:none;">
       </div>
     </div>
@@ -3693,10 +3764,11 @@ function renderLockScreen(){
    a screen lock over already-readable data; this is the real thing). */
 function renderVaultUnlockScreen(){
   const wrap = el(`
-    <div style="max-width:420px; margin:80px auto 0;">
-      <div class="card">
+    <div class="lock-screen">
+      <div class="lock-card">
+        <div class="lock-icon">&#128272;</div>
         <div class="eyebrow">Financial Administration &middot; International Islamic Institute</div>
-        <h1 style="margin-bottom:14px;">&#128272; Data Encrypted</h1>
+        <h1>Data Encrypted</h1>
         <p class="subnote">This ledger's saved data is encrypted. Enter the encryption passphrase to open it.</p>
         <div class="field">
           <label>Encryption passphrase</label>
@@ -3705,8 +3777,8 @@ function renderVaultUnlockScreen(){
         <div id="vault-unlock-error" style="color:var(--danger); font-size:12.5px; margin:-4px 0 10px;">${escapeHtml(vaultError)}</div>
         <button type="button" id="vault-unlock-btn">Unlock</button>
         <div class="divider"></div>
-        <p class="subnote" style="margin-bottom:6px;">Forgotten the passphrase? There's no reset &mdash; the data cannot be decrypted without it. If you have an older unencrypted (or differently-encrypted) backup file, you can import that instead; it will replace what's here.</p>
-        <button class="secondary small" type="button" id="vault-lock-import-backup">Import a backup file instead</button>
+        <p class="subnote" style="margin-bottom:10px;">Forgotten the passphrase? There's no reset &mdash; the data cannot be decrypted without it. If you have an older unencrypted (or differently-encrypted) backup file, you can import that instead; it will replace what's here.</p>
+        <button class="secondary small" type="button" id="vault-lock-import-backup" style="width:100%;">Import a backup file instead</button>
         <input type="file" id="vault-lock-import-file-input" accept="application/json,.json" style="display:none;">
       </div>
     </div>
@@ -4261,7 +4333,7 @@ function renderSectionNav(day){
       {id:'__open-monthly-ledger__', num:'', label:'Monthly Ledger'},
     ]},
   ];
-  const nav = el(`<nav class="section-nav" aria-label="Jump to section"></nav>`);
+  const nav = el(`<nav class="section-nav" aria-label="Jump to section"><div class="section-nav-label">&#9673; Jump to</div></nav>`);
   sections.forEach(sec=>{
     const dot = el(`
       <div class="section-nav-item">
