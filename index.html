@@ -837,22 +837,37 @@ function yearlyCoaExpenditureBefore(coaKey, key){
   });
   return total;
 }
+/* Running total of each revenue category's contribution to its Payable,
+   for every month strictly before `key`. Most categories reset every
+   January (a fresh Jan-Dec cycle each year) - but Gratuity and Education
+   Assistance Fund are ongoing liabilities that keep accruing regardless
+   of calendar year, so those two are summed across every month ever
+   recorded, not just the current year. */
+const YEARLY_RESET_EXEMPT_CATS = ['gratuity', 'eduAssist'];
 function yearlyRunningTotalBefore(key){
   const [yearStr, monStr] = key.split('-');
   const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
   const seed = state.monthlyLedger.seed;
-  if(seed && seed.year===yearStr) REVENUE_CATS.forEach(c=>{ totals[c.key] += Number(seed.revenue[c.key])||0; });
+  if(seed){
+    REVENUE_CATS.forEach(c=>{
+      if(YEARLY_RESET_EXEMPT_CATS.includes(c.key) || seed.year===yearStr){
+        totals[c.key] += Number(seed.revenue[c.key])||0;
+      }
+    });
+  }
   Object.keys(state.monthlyLedger.months).forEach(k=>{
     const [ky,km] = k.split('-');
-    if(ky===yearStr && Number(km) < Number(monStr)){
-      const rec = state.monthlyLedger.months[k];
-      const monthTotals = monthRevenueTotals(rec);
-      REVENUE_CATS.forEach(c=>{
-        let contrib = monthTotals[c.key] + effectiveRevenueTransfer(rec, c.key);
-        if(c.key==='eduAssist') contrib -= monthExpenditureColTotalForCoa(k, 'EduAssist');
-        totals[c.key] += contrib;
-      });
-    }
+    const beforeKey = (ky<yearStr) || (ky===yearStr && Number(km)<Number(monStr));
+    if(!beforeKey) return;
+    const rec = state.monthlyLedger.months[k];
+    const monthTotals = monthRevenueTotals(rec);
+    REVENUE_CATS.forEach(c=>{
+      const exempt = YEARLY_RESET_EXEMPT_CATS.includes(c.key);
+      if(!exempt && ky!==yearStr) return; // non-exempt categories only accumulate within the same year
+      let contrib = monthTotals[c.key] + effectiveRevenueTransfer(rec, c.key);
+      if(c.key==='eduAssist') contrib -= monthExpenditureColTotalForCoa(k, 'EduAssist');
+      totals[c.key] += contrib;
+    });
   });
   return totals;
 }
@@ -4229,13 +4244,29 @@ function buildSparklineSvg(values, labels){
    used elsewhere) - works for the live month (via the cached computeAll())
    and for archived months too (via a fresh chain scoped to that month's
    own days, since archived days aren't part of state.days). */
+/* Cumulative day-chain result as of a month's own last recorded day - NOT
+   just that month's own days in isolation. Bug fixed: this used to filter
+   to only the target month's days and start the chain fresh from
+   state.banks[].opening for every archived month, silently dropping every
+   prior month's contribution (beyond the Monthly Ledger's one-time
+   "seed" starting point) from the running Cash/Bank balance. Now it
+   chains through every day ever recorded up to the end of that month, so
+   an archived month's auto Cash-in-Hand/Bank-Balance actually reflects
+   everything before it, not just its own days in a vacuum. */
 function lastDayComputedInMonth(monthKey){
   const [y, m] = monthKey.split('-');
-  const days = allDaysEverywhere().filter(d=>d.date.startsWith(`${y}-${m}`)).slice().sort((a,b)=>a.date.localeCompare(b.date));
-  if(days.length===0) return null;
+  const monthEnd = `${y}-${m}-31`; // safe upper bound - date strings compare lexicographically
+  const daysThisMonth = allDaysEverywhere().filter(d=>d.date.startsWith(`${y}-${m}`)).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  if(daysThisMonth.length===0) return null;
   const isLive = monthKey === monthKeyFor(state.month, state.year);
-  const computed = isLive ? computeAll() : computeDayChain(days);
-  const last = days[days.length-1];
+  if(isLive){
+    const computed = computeAll();
+    const last = daysThisMonth[daysThisMonth.length-1];
+    return computed[last.id] || null;
+  }
+  const daysThroughMonth = allDaysEverywhere().filter(d=>d.date<=monthEnd).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const computed = computeDayChain(daysThroughMonth);
+  const last = daysThisMonth[daysThisMonth.length-1];
   return computed[last.id] || null;
 }
 function lastDayCashInHandInMonth(monthKey){
@@ -4252,14 +4283,19 @@ function lastDayBankClosingInMonth(monthKey, bankId){
 }
 /* Same day-chain machinery, but for one specific date rather than "the
    last day of a month" - used by the TBL statement cross-check to verify
-   the app's own closing balance as of the statement's own last date. */
+   the app's own closing balance as of the statement's own last date.
+   Same cumulative-from-the-start fix as lastDayComputedInMonth above. */
 function computedForDate(dateISO){
   const monthKey = dateISO.slice(0,7);
   const isLive = monthKey === monthKeyFor(state.month, state.year);
-  const days = allDaysEverywhere().filter(d=>d.date.startsWith(monthKey)).slice().sort((a,b)=>a.date.localeCompare(b.date));
-  const day = days.find(d=>d.date===dateISO);
+  const day = allDaysEverywhere().find(d=>d.date===dateISO);
   if(!day) return null;
-  const computed = isLive ? computeAll() : computeDayChain(days);
+  if(isLive){
+    const computed = computeAll();
+    return computed[day.id] || null;
+  }
+  const daysThroughDate = allDaysEverywhere().filter(d=>d.date<=dateISO).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const computed = computeDayChain(daysThroughDate);
   return computed[day.id] || null;
 }
 
@@ -8591,21 +8627,38 @@ function drawBankTransferList(container, day){
 /* Every description ever typed for a given CoA category, so the browser's
    native autocomplete can suggest it again - e.g. type "b" in Transport
    and "Bank conveyance bill" shows up if it's been used before. */
+/* Splits old free-typed multi-item description text into individual
+   suggestion candidates, and strips a trailing amount if one was typed
+   inline (a habit from before per-item description+amount sections
+   existed) - e.g. "১. গ্যাস লোড ৫০০/-  ২. পানির বিল ৩০০/-" becomes
+   ["গ্যাস লোড", "পানির বিল"], not one unmatchable blob with numbers and
+   money baked in that a suggestion box could never match against. */
+function splitDescIntoSuggestionParts(raw){
+  if(!raw) return [];
+  let text = raw;
+  if(text.includes(',')){
+    return text.split(',').map(p=>p.trim()).filter(Boolean);
+  }
+  // Normalize numbered-list markers (Bengali or English digits + "." or
+  // "।"), whether at a line start or inline, to one delimiter.
+  text = text.replace(/(^|\n|\s)([0-9\u09E6-\u09EF]+)\s*[.।]\s*/g, '$1\u0001');
+  let parts = text.split('\u0001');
+  if(parts.length===1 && text.includes('\n')) parts = text.split('\n');
+  return parts
+    .map(p=>p.replace(/[৳৲]?\s*[0-9\u09E6-\u09EF][0-9\u09E6-\u09EF,]*\s*\/?-\s*(?:টাকা|taka)?\s*$/i, ''))
+    .map(p=>p.trim())
+    .filter(Boolean);
+}
 function descriptionSuggestions(catKey){
   const seen = new Set();
   allVouchers().forEach(v=>{
     if(v.catKey===catKey && v.desc && v.desc.trim()){
-      const raw = v.desc.trim();
-      if(raw.includes(',')){
-        raw.split(',').forEach(part=>{ const t = part.trim(); if(t) seen.add(t); });
-      } else {
-        seen.add(raw);
-      }
+      splitDescIntoSuggestionParts(v.desc.trim()).forEach(t=>seen.add(t));
     }
   });
   return Array.from(seen).sort((a,b)=>a.localeCompare(b));
 }
-/* Same comma-aware suggestion logic as descriptionSuggestions(), but
+/* Same suggestion-splitting logic as descriptionSuggestions(), but
    sourced from every "Collected from (head)" ever typed under Misc
    Collection, across every day - this box had no suggestions at all
    before. */
@@ -8614,12 +8667,7 @@ function miscCollectionDescSuggestions(){
   allDaysEverywhere().forEach(d=>{
     (d.miscCollectionSections||[]).forEach(sec=>{
       if(sec.desc && sec.desc.trim()){
-        const raw = sec.desc.trim();
-        if(raw.includes(',')){
-          raw.split(',').forEach(part=>{ const t = part.trim(); if(t) seen.add(t); });
-        } else {
-          seen.add(raw);
-        }
+        splitDescIntoSuggestionParts(sec.desc.trim()).forEach(t=>seen.add(t));
       }
     });
   });
@@ -8737,12 +8785,30 @@ function nextStatus(s){
 function addCoaVoucher(day, catKey){
   const cat = COA.find(c=>c.key===catKey);
   state.voucherCounters[catKey] += 1;
-  const yearShort = String(state.year).slice(-2);
-  const monthNum = MONTHS.indexOf(state.month)+1;
+  // The month/year in a voucher number are the DAY's own date, not the
+  // global "live" Setup month - a day can be entered before the live
+  // month gets switched over (see Daily Ledger month-filter), and the
+  // voucher number must still reflect its own actual month.
+  const [yy,mm] = (day.date||todayDateStr()).split('-');
+  const yearShort = yy.slice(-2);
+  const monthNum = Number(mm);
   const voucher = `${cat.short}${state.voucherCounters[catKey]}/${monthNum}/${yearShort}`;
-  const item = {id:uid(), voucher, desc:'', note:'', amount:0, status:'draft', sections:[{id:uid(), desc:'', amount:0}]};
+  const item = {id:uid(), voucher, voucherSeq:state.voucherCounters[catKey], desc:'', note:'', amount:0, status:'draft', sections:[{id:uid(), desc:'', amount:0}]};
   day.coa[catKey].push(item);
   return item;
+}
+/* If the voucher being removed was the most recently issued number in
+   its category (and nothing newer has been added since), gives that
+   number back so the next "+ Add voucher" reuses it instead of skipping
+   ahead - covers both "added a blank line then deleted it without
+   filling it in" and "filled one in, then deleted it right after". If a
+   newer voucher already exists, the number stays retired (reusing it
+   then would collide with that newer voucher). */
+function reclaimVoucherNumberIfLast(catKey, removedItem){
+  if(!removedItem || removedItem.voucherSeq==null) return;
+  if(state.voucherCounters[catKey]===removedItem.voucherSeq){
+    state.voucherCounters[catKey] -= 1;
+  }
 }
 /* Keeps item.desc/item.amount (used everywhere - totals, exports, search)
    in sync with item.sections. One section behaves exactly like the plain
@@ -9609,10 +9675,11 @@ function wireDelegation(){
       if(!tpl) return;
       const cat = COA.find(c=>c.key===tpl.catKey);
       state.voucherCounters[tpl.catKey] += 1;
-      const yearShort = String(state.year).slice(-2);
-      const monthNum = MONTHS.indexOf(state.month)+1;
+      const [yy,mm] = (day.date||todayDateStr()).split('-');
+      const yearShort = yy.slice(-2);
+      const monthNum = Number(mm);
       const voucher = `${cat.short}${state.voucherCounters[tpl.catKey]}/${monthNum}/${yearShort}`;
-      day.coa[tpl.catKey].push({id:uid(), voucher, desc:tpl.desc, amount:tpl.amount, status:'draft'});
+      day.coa[tpl.catKey].push({id:uid(), voucher, voucherSeq:state.voucherCounters[tpl.catKey], desc:tpl.desc, amount:tpl.amount, status:'draft'});
       render();
       return;
     }
@@ -9692,8 +9759,16 @@ function wireDelegation(){
         }
       }
       day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==t.dataset.item);
+      const reclaimedSeq = (removed.voucherSeq!=null && state.voucherCounters[catKey]===removed.voucherSeq) ? removed.voucherSeq : null;
+      reclaimVoucherNumberIfLast(catKey, removed);
       pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{
         day.coa[catKey].splice(idx,0,removed);
+        // If the delete had freed up this number and nothing new has
+        // claimed it since, put the counter back too - otherwise the
+        // restored voucher and the next new one would collide.
+        if(reclaimedSeq!=null && state.voucherCounters[catKey]===reclaimedSeq-1){
+          state.voucherCounters[catKey] = reclaimedSeq;
+        }
         if(removedAssetEntry && removedAssetItemId){
           const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removedAssetItemId);
           if(assetItem) assetItem.entries.push(removedAssetEntry);
