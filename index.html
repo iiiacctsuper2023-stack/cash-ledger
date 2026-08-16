@@ -54,13 +54,15 @@
   @keyframes sheen{0%{background-position:0% 0;}100%{background-position:200% 0;}}
   .app-shell{display:flex;align-items:flex-start;min-height:100vh;}
   .wrap{flex:1 1 auto;min-width:0;max-width:980px;margin:0 auto;padding:22px 18px 90px;}
-  /* Shift the middle ledger content ~2 inches (192px) toward the sidebar,
-     but only as much room as is actually free - clamped so it never
-     slides under the sidebar or off the right edge on narrower desktop
-     widths. No shift below the 901px breakpoint (mobile/tablet), where
-     the sidebar is an off-canvas overlay rather than reserved space. */
+  /* Shift the middle ledger ~2in (192px) left of true-center, using
+     margin (not transform) so it doesn't disturb position:fixed
+     descendants like the right-side "Jump to" panel (which lives
+     inside .wrap - a transform on this element would drag it along
+     and off the visible viewport). Clamped to 0 so it can never push
+     the ledger under the sidebar on narrower desktop widths; only
+     active from the 901px breakpoint up (desktop, sidebar reserved). */
   @media (min-width:901px){
-    .wrap{ transform:translateX(calc(-1 * min(192px, max(0px, calc(50vw - 594px))))); }
+    .wrap{ margin-left:max(0px, calc(max(0px, 50vw - 594px) - 192px)); margin-right:auto; }
   }
 
   h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;color:var(--primary-dark);letter-spacing:-.01em;}
