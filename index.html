@@ -283,13 +283,61 @@
   /* Monthly Ledger's own "Jump to" row - sticks to the top of the
      floating window's scroll area (not the page) so it stays clickable
      no matter how far down the window itself has been scrolled. */
-  .ml-jump-nav{position:sticky;top:0;z-index:6;background:linear-gradient(180deg,#fff 0%, var(--paper) 100%);border:1px solid var(--line-soft);border-radius:10px;padding:8px 9px;margin:0 0 12px;box-shadow:0 3px 10px rgba(15,51,44,.08);}
-  .ml-jump-nav .ml-jump-label{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--accent-deep);align-self:center;margin-right:2px;}
-  .ml-jump-btn{border-radius:20px!important;}
-  .floating-window-body .card{box-shadow:none;border:none;margin:0;padding:6px 0 0;}
-  @media (max-width:900px){
-    .floating-window{top:2vh;right:1vw;left:1vw;width:auto;height:96vh;}
+  .ml-jump-nav{
+    position:sticky;top:0;z-index:6;
+    background:
+      radial-gradient(180px 100px at 100% 0%, rgba(184,134,59,.24), transparent 65%),
+      linear-gradient(165deg, #163d35 0%, #1B4B43 50%, #0C2B25 100%);
+    border:1px solid rgba(234,223,197,.16);
+    border-radius:14px;
+    padding:10px 12px;
+    margin:0 0 14px;
+    box-shadow:0 14px 34px rgba(15,51,44,.26), 0 4px 10px rgba(15,51,44,.15);
   }
+  .ml-jump-nav .ml-jump-label{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--accent-soft);align-self:center;margin-right:2px;opacity:.85;}
+  .ml-jump-btn{
+    border-radius:20px!important;
+    background:rgba(255,255,255,.08)!important;
+    color:#EAF1EC!important;
+    border:1px solid rgba(255,255,255,.10)!important;
+    box-shadow:none!important;
+    transition:background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease)!important;
+  }
+  .ml-jump-btn:hover{
+    background:var(--accent)!important;
+    color:#2A1D0B!important;
+    border-color:var(--accent)!important;
+    transform:translateY(-1px);
+  }
+  /* Monthly Ledger section zones - each divider-bounded block gets a
+     faint, alternating tint so sections read as distinct at a glance
+     without needing hard borders everywhere. */
+  .ml-zone{border-radius:14px;padding:14px 16px;margin:0 0 6px;}
+  .ml-zone-a{background:linear-gradient(180deg, rgba(84,148,133,.08) 0%, rgba(84,148,133,.02) 100%);}
+  .ml-zone-b{background:linear-gradient(180deg, rgba(184,134,59,.08) 0%, rgba(184,134,59,.02) 100%);}
+  .floating-window-body .card{box-shadow:none;border:none;margin:0;padding:6px 0 0;}
+  /* Top-level Daily Ledger / Monthly Ledger tab switcher - the two are
+     mutually exclusive full-width views (Monthly Ledger used to open as
+     a small floating window on top of the Daily Ledger; it's now a
+     proper docked tab instead, so it gets the same reading width as the
+     Daily Ledger rather than a cramped resizable box). */
+  .ml-view-tabs{display:flex;gap:6px;background:var(--card-alt,#F7F8F4);border:1px solid var(--line-soft);border-radius:14px;padding:5px;margin:0 0 16px;max-width:440px;}
+  .ml-view-tab{flex:1 1 0;background:transparent;color:var(--ink-soft);border:1px solid transparent;box-shadow:none;padding:9px 14px;border-radius:10px;font-weight:700;font-size:13px;}
+  .ml-view-tab:hover{background:rgba(0,0,0,.04);transform:none;}
+  .ml-view-tab.active{background:linear-gradient(165deg,#163d35 0%, #1B4B43 55%, #0C2B25 100%);color:#EAF1EC;box-shadow:0 6px 16px rgba(15,51,44,.25);}
+  /* Docked Monthly Ledger panel (replaces the old draggable/resizable
+     floating-window look for this same #ml-floating-window /
+     #ml-floating-body pair - kept the same element ids so every
+     existing in-place refresh call (renderMonthlyLedgerWindowInPlace,
+     refreshMonthlyLedgerComputedOnly, etc.) keeps working unchanged). */
+  .floating-window.docked{
+    position:static;top:auto;right:auto;left:auto;bottom:auto;
+    width:100%;height:auto;min-width:0;min-height:0;max-width:none;max-height:none;
+    resize:none;overflow:visible;
+    background:transparent;border:none;box-shadow:none;border-radius:0;
+  }
+  .floating-window.docked .floating-window-header{display:none;}
+  .floating-window.docked .floating-window-body{overflow:visible;padding:0;}
   .section-nav-item{position:relative;}
   .section-nav-dot{
     height:auto;min-width:0;width:100%;border-radius:12px;
@@ -1095,7 +1143,8 @@ let selectedDayId = null;
 // renderDayTabs first runs.
 let dayTabsViewMonth = null;
 let dlMonthKey = null; // "YYYY-MM" chosen in the footer's "Download whole month" selector - defaults to the selected day's month
-let notesheetRange = null; // {start, end} - lazily defaulted to the full recorded month
+let notesheetRange = null; // {start, end} - lazily defaulted to the currently viewed month's recorded days
+let notesheetRangeMonthKey = null; // which month's days notesheetRange was last defaulted from - lets it re-default when the Daily Ledger switches to a different month, instead of staying stuck on whichever month it first saw
 let notesheetSettingsOpen = false;
 let reconDetailOpen = {};
 let voucherCounterSettingsOpen = false;
@@ -1116,9 +1165,8 @@ let sslReportOpen = false;
 let sslReportFilters = { year:'', month:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
-let monthlyLedgerOpen = false;
+let monthlyLedgerOpen = false; // also doubles as "which top-level tab is active" (Daily Ledger vs Monthly Ledger)
 let mlSettingsOpen = false;
-let monthlyLedgerMinimized = false;
 let monthlyLedgerViewKey = null; // "YYYY-MM" currently being edited/viewed - defaults to state.month/year
 let depositHistoryMonthKey = null;  // "YYYY-MM" the Deposit Notesheet card's "Saved history" list is showing - defaults to currentSelectedMonthKey(), but is pinned to whichever month was just generated into so a fresh entry is never hidden by an unrelated month selection elsewhere in the app
 let withdrawHistoryMonthKey = null; // same, for the Withdraw Notesheet card
@@ -3168,34 +3216,52 @@ function renderApp(){
   if(auditLogOpen) app.appendChild(renderAuditLogCard());
   if(sslReportOpen) app.appendChild(renderSslReportCard());
   if(templatesOpen) app.appendChild(renderTemplatesCard());
-  app.appendChild(renderDayTabs());
-  const computed = computeAll();
-  if(state.days.length===0){
-    app.appendChild(el(`<div class="card"><p class="empty">No days added yet. Click "+ Add day" above to start entering the first day of ${state.month} ${state.year}.</p></div>`));
+  app.appendChild(renderMainViewTabs());
+  if(monthlyLedgerOpen){
+    app.appendChild(renderMonthlyLedgerWindow());
   } else {
-    if(!selectedDayId || !findDay(selectedDayId)){
-      const todayDay = state.days.find(d=>d.date===todayDateStr());
-      selectedDayId = todayDay ? todayDay.id : state.days[state.days.length-1].id;
+    app.appendChild(renderDayTabs());
+    const computed = computeAll();
+    if(state.days.length===0){
+      app.appendChild(el(`<div class="card"><p class="empty">No days added yet. Click "+ Add day" above to start entering the first day of ${state.month} ${state.year}.</p></div>`));
+    } else {
+      if(!selectedDayId || !findDay(selectedDayId)){
+        const todayDay = state.days.find(d=>d.date===todayDateStr());
+        selectedDayId = todayDay ? todayDay.id : state.days[state.days.length-1].id;
+      }
+      app.appendChild(renderDayPanel(selectedDayId, computed));
+      app.appendChild(renderNotesheetCard());
+      app.appendChild(renderDepositNotesheetCard());
+      app.appendChild(el(`
+        <div class="card" id="section-monthly-ledger-launch">
+          <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
+          <p class="subnote">Pulls together this month's Revenue, Expenditure and Balance Sheet in one place — Withdraw Notesheet totals feed the Expenditure columns automatically, and Deposit Notesheet totals feed Revenue, so most of it fills itself in as you generate notesheets above.</p>
+          <button type="button" data-action="toggle-monthly-ledger">Go to Monthly Ledger tab</button>
+          <button type="button" class="secondary" data-action="toggle-ml-settings" style="margin-left:8px;">&#9881; Data Links &amp; Export Format</button>
+        </div>
+      `));
+      app.appendChild(renderAnnualSummaryCard());
     }
-    app.appendChild(renderDayPanel(selectedDayId, computed));
-    app.appendChild(renderNotesheetCard());
-    app.appendChild(renderDepositNotesheetCard());
-    app.appendChild(el(`
-      <div class="card" id="section-monthly-ledger-launch">
-        <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
-        <p class="subnote">Pulls together this month's Revenue, Expenditure and Balance Sheet in one place — Withdraw Notesheet totals feed the Expenditure columns automatically, and Deposit Notesheet totals feed Revenue, so most of it fills itself in as you generate notesheets above.</p>
-        <button type="button" data-action="toggle-monthly-ledger">Open Monthly Ledger</button>
-        <button type="button" class="secondary" data-action="toggle-ml-settings" style="margin-left:8px;">&#9881; Data Links &amp; Export Format</button>
-      </div>
-    `));
-    app.appendChild(renderAnnualSummaryCard());
   }
   app.appendChild(renderFooter());
-  if(monthlyLedgerOpen) app.appendChild(renderMonthlyLedgerWindow());
   if(mlSettingsOpen) app.appendChild(renderMlSettingsModal());
   if(lastUndo) app.appendChild(renderUndoToast());
   if(duplicateWarning) app.appendChild(renderDuplicateWarningToast());
   document.getElementById('app').replaceChildren(app);
+}
+
+/* The Daily Ledger and Monthly Ledger are mutually-exclusive full-width
+   views under this tab switcher (Monthly Ledger previously opened as a
+   small floating window on top of the Daily Ledger instead - see
+   renderMonthlyLedgerWindow). monthlyLedgerOpen doubles as "which tab
+   is active" (true = Monthly Ledger tab). */
+function renderMainViewTabs(){
+  return el(`
+    <div class="ml-view-tabs" role="tablist">
+      <button type="button" class="ml-view-tab ${!monthlyLedgerOpen?'active':''}" data-action="view-daily-ledger" role="tab" aria-selected="${!monthlyLedgerOpen}">Daily Ledger</button>
+      <button type="button" class="ml-view-tab ${monthlyLedgerOpen?'active':''}" data-action="toggle-monthly-ledger" role="tab" aria-selected="${monthlyLedgerOpen}">Monthly Ledger</button>
+    </div>
+  `);
 }
 
 /* Small line-style SVG icons (stroke, currentColor) used in the sidebar
@@ -4355,13 +4421,11 @@ function renderSectionNav(day){
         subBtn.onclick = ()=>{
           if(sub.id==='__open-monthly-ledger__'){
             monthlyLedgerOpen = true;
-            monthlyLedgerMinimized = false;
             if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
             render();
           } else if(sub.id.startsWith('ml:')){
             const realId = sub.id.slice(3);
             monthlyLedgerOpen = true;
-            monthlyLedgerMinimized = false;
             if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
             render();
             requestAnimationFrame(()=> scrollToId(realId));
@@ -4956,7 +5020,7 @@ function refreshMonthlyLedgerComputedOnly(){
 }
 
 function renderMonthlyLedgerWindowInPlace(){
-  if(!monthlyLedgerOpen || monthlyLedgerMinimized) return;
+  if(!monthlyLedgerOpen) return;
   const body = document.getElementById('ml-floating-body');
   if(!body) return;
   const scrollTop = body.scrollTop;
@@ -4967,42 +5031,15 @@ function renderMonthlyLedgerWindowInPlace(){
 
 function renderMonthlyLedgerWindow(){
   const win = el(`
-    <div class="floating-window" id="ml-floating-window">
+    <div class="floating-window docked" id="ml-floating-window">
       <div class="floating-window-header" id="ml-floating-header">
         <span class="floating-window-title">&#128220; Monthly Ledger</span>
-        <div class="floating-window-controls">
-          <button type="button" class="secondary small" data-action="minimize-monthly-ledger" title="${monthlyLedgerMinimized?'Restore':'Minimize'}">${monthlyLedgerMinimized?'&#9723;':'&#8212;'}</button>
-          <button type="button" class="secondary small" data-action="close-monthly-ledger" title="Close">&#10005;</button>
-        </div>
+        <div class="floating-window-controls"></div>
       </div>
-      <div class="floating-window-body" id="ml-floating-body" style="${monthlyLedgerMinimized?'display:none;':''}"></div>
+      <div class="floating-window-body" id="ml-floating-body"></div>
     </div>
   `);
-  if(!monthlyLedgerMinimized){
-    win.querySelector('#ml-floating-body').appendChild(renderMonthlyLedgerCard());
-  }
-  // Drag by header (skip if the click originated on a control button)
-  const header = win.querySelector('#ml-floating-header');
-  header.addEventListener('mousedown', (e)=>{
-    if(e.target.closest('button')) return;
-    const rect = win.getBoundingClientRect();
-    win.style.left = rect.left + 'px';
-    win.style.top = rect.top + 'px';
-    win.style.right = 'auto';
-    win.style.bottom = 'auto';
-    const startX = e.clientX, startY = e.clientY;
-    const origLeft = rect.left, origTop = rect.top;
-    const onMove = (ev)=>{
-      win.style.left = Math.max(0, origLeft + (ev.clientX - startX)) + 'px';
-      win.style.top = Math.max(0, origTop + (ev.clientY - startY)) + 'px';
-    };
-    const onUp = ()=>{
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
+  win.querySelector('#ml-floating-body').appendChild(renderMonthlyLedgerCard());
   return win;
 }
 
@@ -5089,6 +5126,7 @@ function renderMonthlyLedgerCard(){
       <div class="${rec.locked?'locked-day':''}">
       ${mandatoryIssues.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Required before this month is complete: ${mandatoryIssues.map(escapeHtml).join(', ')}.</p>` : ''}
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-a">
       <h3 id="ml-section-revenue" style="font-size:14px;">Revenue</h3>
       <div class="row">
         ${state.banks.map(b=>{
@@ -5110,19 +5148,25 @@ function renderMonthlyLedgerCard(){
         ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtBefore[c.key])}</div>`).join('')}
       </div>
 
+      </div>
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-b">
       <label>Revenue entries</label>
       <div id="ml-revenue-list"></div>
       <button class="secondary small" type="button" data-action="ml-add-revenue">+ Add revenue entry</button>
 
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Income</span><span id="ml-total-income">${money(revTotalIncome)}</span></div>
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-a">
       <label id="ml-section-total-due">Total Due (per category, manual)</label>
       <div id="ml-total-due-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Due (sum)</span><span id="ml-total-due-sum">${money(totalDueSum)}</span></div>
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-b">
       <label id="ml-section-transfer">Transfer between categories (e.g. Admission Fee &rarr; Gratuity/Education Assistance Fund)</label>
       <div id="ml-transfer-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
 
@@ -5131,8 +5175,10 @@ function renderMonthlyLedgerCard(){
         ${REVENUE_CATS.map(c=>`<div><span style="opacity:.75;">${escapeHtml(c.label)}:</span> ${money(yrtNew[c.key])}</div>`).join('')}
       </div>
       <div class="computed total"><span class="lbl">Total Amount (Beginning Balance + Total Income + House Rent Deposit)</span><span id="ml-total-amount">${money(totalAmount)}</span></div>
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-a">
       <h3 id="ml-section-expenditure" style="font-size:14px;">Expenditure</h3>
       <div class="row">
         <div class="field">
@@ -5156,8 +5202,10 @@ function renderMonthlyLedgerCard(){
       <label style="font-size:12px;margin-top:8px;">Expenditure entries (day-by-day, for columns above marked "auto, from entries below")</label>
       <div id="ml-expenditure-entry-list"></div>
       <button class="secondary small" type="button" data-action="ml-add-expentry">+ Add expenditure entry</button>
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-b">
       <h3 id="ml-section-balance-sheet" style="font-size:14px;">Balance Sheet</h3>
       <div class="row">
         <div class="field">
@@ -5199,14 +5247,19 @@ function renderMonthlyLedgerCard(){
         </div>
       </div>
 
+      </div>
+
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-a">
       <label id="ml-section-bank-breakdown">Bank Balance breakdown</label>
       <div id="ml-bank-breakdown-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:6px;"></div>
       <div class="computed"><span class="lbl">Total Balance</span><span id="ml-bank-breakdown-sum">${money(bankBreakdownSum)}</span></div>
       <p id="ml-warn-bank-breakdown" class="subnote" style="color:#B3261E;${bankBreakdownMismatch?'':'display:none;'}">&#9888; Bank breakdown total doesn't match Balance in Bank Account above.</p>
       <p class="subnote" style="margin-top:2px;">A one-time opening amount per bank can be set in "Set starting point" above (applies to the earliest tracked month only).</p>
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-b">
       <label id="ml-section-statement-check">Bank Statement Cross-Check <span class="tag" style="background:var(--danger-soft);color:var(--danger);">mandatory &mdash; both banks</span></label>
       <p class="subnote" style="margin-top:-4px;">Upload each bank's real statement (Excel export: Date, Deposit, Withdrawal, Balance columns) for this month. It's checked date-by-date and as totals &mdash; deposits, withdrawals and closing balance &mdash; against everything recorded in the Daily Ledger, including online-payment (SSL Commerz) deposits.</p>
       ${state.banks.length===0 ? `<p class="empty">No bank accounts set up yet.</p>` : state.banks.map(b=>{
@@ -5244,8 +5297,10 @@ function renderMonthlyLedgerCard(){
           </div>
         `;
       }).join('')}
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-a">
       <label id="ml-section-headwise">Note: Head wise distribution of Balance in Account</label>
       <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span id="ml-note-gratuity">${money(gratuityPayable)}</span></div>
       <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span id="ml-note-eduassist">${money(eduAssistPayable)}</span></div>
@@ -5256,14 +5311,17 @@ function renderMonthlyLedgerCard(){
       <div class="computed total" style="margin-top:10px;"><span class="lbl">Total Assets</span><span id="ml-total-assets">${money(totalAssets)}</span></div>
       <div class="computed total"><span class="lbl">Equity (balancing figure)</span><span id="ml-equity">${money(equity)}</span></div>
       <p id="ml-warn-asset-liability" class="subnote" style="color:#B3261E;${assetLiabilityMismatch?'':'display:none;'}">&#9888; Asset total and Liability total don't match. Check the figures above.</p>
+      </div>
 
       <div class="divider"></div>
+      <div class="ml-zone ml-zone-b">
       <label id="ml-section-custom-rows">Extra rows <span class="tag">optional</span></label>
       <p class="subnote" style="margin-top:-4px;">Add any row your Excel sheet has that isn't already covered above (colour it green or yellow to match) - map it to a figure already tracked in this month (so it updates itself), or leave it as a manual number.</p>
       <div id="ml-custom-rows-list"></div>
       <div class="row">
         <button class="secondary small" type="button" data-action="ml-add-custom-row" data-color="green">+ Add green row</button>
         <button class="secondary small" type="button" data-action="ml-add-custom-row" data-color="yellow">+ Add yellow row</button>
+      </div>
       </div>
       </div>
     </div>
@@ -7632,10 +7690,25 @@ function renderAnnualSummaryCard(){
 function renderNotesheetCard(){
   const sortedDates = state.days.map(d=>d.date).sort();
   const minDate = sortedDates[0], maxDate = sortedDates[sortedDates.length-1];
-  if(!notesheetRange) notesheetRange = {start:minDate, end:maxDate};
+  // Default (and re-default) the range to the currently-viewed month's own
+  // days, not the oldest/newest day ever entered across all history - a
+  // freshly-added day in a new month should make the notesheet range
+  // follow it here, instead of staying stuck on whatever month it was
+  // first opened in during this session.
+  const curMonthKey = currentSelectedMonthKey();
+  if(!notesheetRange || notesheetRangeMonthKey !== curMonthKey){
+    const monthDates = state.days.map(d=>d.date).filter(d=>d.slice(0,7)===curMonthKey).sort();
+    notesheetRange = {
+      start: monthDates[0] || minDate,
+      end: monthDates[monthDates.length-1] || maxDate,
+    };
+    notesheetRangeMonthKey = curMonthKey;
+  }
   if(notesheetRange.start < minDate) notesheetRange.start = minDate;
   if(notesheetRange.end > maxDate) notesheetRange.end = maxDate;
-  if(!notesheetRange.attrib) notesheetRange.attrib = notesheetRange.end;
+  // "Post to Monthly Ledger as of" defaults to the generation date (today),
+  // not the last date of the range - it's editable either way.
+  if(!notesheetRange.attrib) notesheetRange.attrib = todayDateStr();
 
   const {cats, grandTotal} = collectNotesheetRange(notesheetRange.start, notesheetRange.end);
 
@@ -7691,11 +7764,7 @@ function renderNotesheetCard(){
 
   card.querySelector('#ns-start').onchange = (e)=>{ notesheetRange.start = e.target.value; drawPreview(); };
   card.querySelector('#ns-end').onchange = (e)=>{
-    const prevEnd = notesheetRange.end;
     notesheetRange.end = e.target.value;
-    // keep the attribution date following the To-date until the user picks their own
-    if(notesheetRange.attrib === prevEnd) notesheetRange.attrib = notesheetRange.end;
-    card.querySelector('#ns-attrib').value = notesheetRange.attrib;
     drawPreview();
   };
   card.querySelector('#ns-attrib').onchange = (e)=>{ notesheetRange.attrib = e.target.value; };
@@ -7882,8 +7951,8 @@ function renderDepositNotesheetCard(){
           <input type="date" id="dns-end-date">
         </div>
         <div class="field" style="max-width:170px;">
-          <label>Post to Monthly Ledger as of <span class="tag" title="Which month this counts toward in Monthly Ledger - defaults to the collection end date, but you can pick any date">editable</span></label>
-          <input type="date" id="dns-attrib-date">
+          <label>Post to Monthly Ledger as of <span class="tag" title="Which month this counts toward in Monthly Ledger - defaults to today (the generation date), but you can pick any date">editable</span></label>
+          <input type="date" id="dns-attrib-date" value="${todayDateStr()}">
         </div>
         <div class="field" style="flex:1 1 260px;">
           <label>Raw Collection Register file (.xlsx)</label>
@@ -7936,9 +8005,6 @@ function renderDepositNotesheetCard(){
   const endInp = card.querySelector('#dns-end-date');
   const attribInp = card.querySelector('#dns-attrib-date');
   const statusEl = card.querySelector('#dns-status');
-  let attribTouched = false;
-  attribInp.onchange = ()=>{ attribTouched = true; };
-  endInp.onchange = ()=>{ if(!attribTouched) attribInp.value = endInp.value; };
   fileInp.onchange = async ()=>{
     const file = fileInp.files && fileInp.files[0];
     if(!file) return;
@@ -7953,7 +8019,10 @@ function renderDepositNotesheetCard(){
       if(iso){
         if(!startInp.value) startInp.value = iso.start;
         if(!endInp.value) endInp.value = iso.end;
-        if(!attribTouched && !attribInp.value) attribInp.value = iso.end;
+        // attrib deliberately NOT set from the file here - it defaults to
+        // today's date (the generation date) instead, set once above when
+        // the card was built; the file's collection-range end date isn't
+        // necessarily when this gets posted/generated.
       }
     }catch(e){ /* auto-fill is best-effort; user can still type the dates in manually */ }
   };
@@ -9562,20 +9631,15 @@ function wireDelegation(){
     if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
     if(action==='toggle-monthly-ledger'){
       monthlyLedgerOpen = true;
-      monthlyLedgerMinimized = false;
       if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
+      render(); return;
+    }
+    if(action==='view-daily-ledger'){
+      monthlyLedgerOpen = false;
       render(); return;
     }
     if(action==='toggle-ml-settings'){
       mlSettingsOpen = !mlSettingsOpen;
-      render(); return;
-    }
-    if(action==='minimize-monthly-ledger'){
-      monthlyLedgerMinimized = !monthlyLedgerMinimized;
-      render(); return;
-    }
-    if(action==='close-monthly-ledger'){
-      monthlyLedgerOpen = false;
       render(); return;
     }
     if(action==='toggle-withdraw-files-hidden'){
