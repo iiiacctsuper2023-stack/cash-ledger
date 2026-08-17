@@ -131,6 +131,29 @@
   .nav-item.active{background:linear-gradient(90deg, rgba(184,134,59,.32), rgba(184,134,59,.08));border-color:rgba(184,134,59,.55);color:#fff;box-shadow:inset 0 0 0 1px rgba(184,134,59,.12);}
   .nav-item.active .nav-icon{background:var(--accent);color:#2A1D0B;}
   .nav-item.active::before{content:'';position:absolute;left:-12px;top:6px;bottom:6px;width:3px;border-radius:0 4px 4px 0;background:var(--accent);}
+  /* .current = this section is the one actually on screen right now (a
+     stronger fill than .active, which just means "open in the background,
+     hidden"), so the two states read differently at a glance. */
+  .nav-item.current{background:linear-gradient(90deg, rgba(184,134,59,.55), rgba(184,134,59,.18));border-color:var(--accent);}
+  .nav-item.current .nav-icon{background:var(--accent);color:#2A1D0B;}
+  /* Full-page view for a sidebar section (Dashboard, Search, Journal, ...) -
+     replaces the main ledger in-place; Hide keeps the section's data alive
+     in the background (its sidebar nav item stays lit) while Close resets
+     it. */
+  .panel-page{animation:fadeDown .4s var(--ease) both;}
+  .panel-page-bar{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+    position:sticky;top:0;z-index:50;
+    padding:11px 16px;margin:0 0 16px;border-radius:12px;
+    background:linear-gradient(165deg,#163d35 0%, #1B4B43 55%, #0C2B25 100%);
+    color:#EAF1EC;box-shadow:0 10px 26px rgba(15,51,44,.22), 0 2px 6px rgba(15,51,44,.15);
+  }
+  .panel-page-title{font-family:'Fraunces',serif;font-weight:600;font-size:17px;}
+  .panel-page-controls{display:flex;gap:8px;}
+  .panel-page-controls button{padding:7px 14px;font-size:12.5px;border-radius:8px;background:rgba(255,255,255,.08);color:#EAF1EC;border:1px solid rgba(255,255,255,.16);box-shadow:none;}
+  .panel-page-controls button:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.3);transform:none;}
+  .panel-page-controls button:not(.secondary){background:var(--accent);color:#2A1D0B;border-color:var(--accent);}
+  .panel-page-controls button:not(.secondary):hover{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff;}
   .sidebar-divider{height:1px;background:rgba(234,223,197,.14);margin:10px 2px;}
   .sidebar-utility{position:relative;display:flex;align-items:center;gap:7px;padding:10px 4px 2px;}
   .sidebar-icon-btn{width:28px;height:28px;flex:none;border-radius:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#DCE7DF;display:inline-flex;align-items:center;justify-content:center;padding:0;box-shadow:none;}
@@ -1152,6 +1175,7 @@ let searchOpen = false;
 let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
 let summaryOpen = false;
 let summaryFilters = { type:'expenditure', catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
+let historicalImportOpen = false;
 let journalOpen = false;
 let journalFilters = { mode:'month', year:'', month:'', view:'journal' }; // view: journal | ledger | trial
 let journalLedgerAccount = null;
@@ -1187,6 +1211,59 @@ let vaultSetupFormOpen = false; // true = show the "Enable Data Encryption" mini
 let deferredInstallPrompt = null; // captured 'beforeinstallprompt' event, if the browser offers one
 let sidebarOpen = false;        // mobile: true = the left nav drawer is pulled out over the content
 let settingsPanelOpen = false;  // true = show the "Data, Backup & Security" card (old header toolbar's backup/security/encryption controls)
+/* --- Sidebar sections as full pages -------------------------------------
+   viewingPanel is null when the main ledger ("Home") is showing, or one of
+   the panel keys below when a sidebar section is being shown as a full
+   page in place of the ledger. Each section also keeps its own *Open
+   boolean (dashboardOpen, searchOpen, ...) - that flag now means "this
+   section is still active in the background" (so its sidebar nav item
+   stays highlighted and "Hide" can bring it straight back), independent
+   of whether it's the one currently on screen. "Close" clears both. */
+let viewingPanel = null;
+function panelRegistry(){
+  return [
+    ['settings',           ()=>settingsPanelOpen,      v=>{settingsPanelOpen=v;},      'Data, Backup &amp; Security', renderSettingsPanelCard],
+    ['dashboard',          ()=>dashboardOpen,          v=>{dashboardOpen=v;},          'Dashboard',                    renderDashboardCard],
+    ['search',             ()=>searchOpen,             v=>{searchOpen=v;},             'Advanced Search',              renderSearchCard],
+    ['summary',            ()=>summaryOpen,            v=>{summaryOpen=v;},            'Category Summary',             renderCategorySummaryCard],
+    ['historical-import',  ()=>historicalImportOpen,   v=>{historicalImportOpen=v;},   'Historical Notesheet Import',  renderHistoricalImportCard],
+    ['journal',            ()=>journalOpen,            v=>{journalOpen=v;},            'Journal / Ledger',             renderJournalCard],
+    ['asset-register',     ()=>assetRegisterOpen,      v=>{assetRegisterOpen=v;},      'Fixed Asset Register',         renderAssetRegisterCard],
+    ['ratio-cashflow',     ()=>ratioCashFlowOpen,      v=>{ratioCashFlowOpen=v;},      'Ratio &amp; Cash Flow',        renderRatioCashFlowCard],
+    ['audit-log',          ()=>auditLogOpen,           v=>{auditLogOpen=v;},           'Audit Trail',                  renderAuditLogCard],
+    ['ssl-report',         ()=>sslReportOpen,          v=>{sslReportOpen=v;},          'SSL Commerz Entries',          renderSslReportCard],
+    ['templates',          ()=>templatesOpen,          v=>{templatesOpen=v;},          'Templates',                    renderTemplatesCard],
+  ];
+}
+function panelInfo(key){ return panelRegistry().find(p=>p[0]===key) || null; }
+/* Open (or re-focus) a sidebar section as a full page. Clicking the same
+   section that's already on screen closes it instead (old toggle habit). */
+function openPanel(key){
+  const p = panelInfo(key);
+  if(!p) return;
+  if(viewingPanel===key){ p[2](false); viewingPanel=null; }
+  else { p[2](true); viewingPanel=key; }
+}
+/* Renders the sticky title bar + Hide/Close controls that wrap every
+   sidebar section when it's shown as its own page. */
+function renderPanelPage(key){
+  const p = panelInfo(key);
+  if(!p) return el('<div></div>');
+  const [,,,title,renderFn] = p;
+  const page = el(`
+    <div class="panel-page">
+      <div class="panel-page-bar">
+        <div class="panel-page-title">${title}</div>
+        <div class="panel-page-controls">
+          <button type="button" class="secondary" data-action="hide-panel-page">Hide</button>
+          <button type="button" data-action="close-panel-page">&#10005; Close</button>
+        </div>
+      </div>
+    </div>
+  `);
+  page.appendChild(renderFn());
+  return page;
+}
 let lastUndo = null;      // {label, restore} - the most recent undoable delete
 let lastUndoTimer = null;
 let duplicateWarning = null;   // string message, or null - shown as a dismissible toast
@@ -1227,6 +1304,12 @@ function defaultState(){
     securityAnswerHash:null,
     archive:[],
     templates:[],
+    /* Historical Withdraw Notesheets imported from old .xlsx files purely
+       so their line items show up in Advanced Search / Category Summary -
+       see allHistoricalVouchers(). Deliberately kept OUT of allVouchers()
+       and everything that feeds real accounting (Monthly Ledger,
+       reconciliation, Annual Summary export) - these are lookup-only. */
+    historicalImports:[],
     /* User-editable "data link" and "export formatting" knobs, so small
        fixes (a deposit description that should map to a different
        revenue category, or an export border/row-height that looks off)
@@ -1362,6 +1445,14 @@ function dayLabel(dateStr){
 function dayLabelFull(dateStr){
   const d = new Date(dateStr+'T00:00:00');
   return ordinal(d.getDate())+' '+MONTHS[d.getMonth()];
+}
+/* Date label for a voucher row in Search/Category Summary results - a
+   real voucher shows its exact day; an imported historical voucher (see
+   allHistoricalVouchers()) has no real day, so it shows the notesheet's
+   own written date range instead, tagged so it's clearly not exact. */
+function voucherDateLabel(v){
+  if(v.historical) return `${v.rangeLabel} <span class="tag" title="From an imported historical notesheet - exact day unknown">imported</span>`;
+  return `${dayLabelFull(v.date)} ${v.date.slice(0,4)}`;
 }
 function money(n){
   n = Number(n)||0;
@@ -1670,14 +1761,108 @@ function allVouchers(){
   allDaysEverywhere().forEach(day=>{
     COA.forEach(cat=>{
       (day.coa[cat.key]||[]).forEach(item=>{
-        const amt = Number(item.amount)||0;
-        if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:item.desc||'', note:item.note||'', amount:amt});
+        // A voucher with 2+ sections holds several separate amounts under
+        // one voucher no. - Search and Category Summary should list each
+        // section as its own row with its own amount, not the voucher's
+        // summed total, so one big multi-section voucher doesn't inflate
+        // a single search hit into one lump sum.
+        const secs = (item.sections && item.sections.length) ? item.sections : [{desc:item.desc, amount:item.amount}];
+        secs.forEach(sec=>{
+          const amt = Number(sec.amount)||0;
+          if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:sec.desc||'', note:item.note||'', amount:amt});
+        });
       });
     });
   });
   out.push(...monthlyLedgerImportedVouchers());
   out.sort((a,b)=>a.date.localeCompare(b.date));
   return out;
+}
+/* Flattens every imported historical Withdraw Notesheet (see
+   parseHistoricalNotesheetFile / state.historicalImports) into the same
+   {date, cat, catKey, voucher, desc, note, amount} shape as allVouchers(),
+   so Search and Category Summary can filter/group them exactly like real
+   vouchers. date is the notesheet's FROM date (day is a rough stand-in -
+   the month/year are what's reliable, since the source notesheet only
+   ever gave a date range in words, never a per-item date); rangeLabel and
+   historical:true are carried along so the UI can show the written range
+   instead of a fake precise date and mark the row as imported. This list
+   is intentionally never mixed into allVouchers() itself. */
+function allHistoricalVouchers(){
+  const out = [];
+  (state.historicalImports||[]).forEach(imp=>{
+    const cat = COA.find(c=>c.key===imp.catKey);
+    if(!cat) return;
+    (imp.items||[]).forEach(it=>{
+      const amt = Number(it.amount)||0;
+      if(amt<=0) return;
+      out.push({date:imp.fromDate, cat, catKey:imp.catKey, voucher:it.voucher||'', desc:it.desc||'', note:'', amount:amt, historical:true, rangeLabel:imp.rangeLabel, importId:imp.id});
+    });
+  });
+  out.sort((a,b)=>a.date.localeCompare(b.date));
+  return out;
+}
+/* Reads one previously-generated Withdraw Notesheet .xlsx (the exact
+   layout writeNotesheet() produces: B3 = "III/Acct/Madrasa/Withdraw/
+   <Category>/<Number>", B5 = the "Following amount... disbursed from
+   <date> - <date> (voucher no: X - Y) as..." sentence, then an S/no |
+   Description | Amount table) and pulls out just what Search/Category
+   Summary need: category, an approximate from/to date, the written date
+   range as text, and each line item's own description+amount (not the
+   voucher's summed total). Throws a plain Error with a human message on
+   anything unrecognized, for the import UI to show as-is. */
+async function parseHistoricalNotesheetFile(file){
+  await loadExcelJS();
+  const buf = await file.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  const ws = wb.worksheets[0];
+  if(!ws) throw new Error('Could not read this workbook - no sheet found.');
+
+  const cellText = addr => {
+    const v = ws.getCell(addr).value;
+    if(v==null) return '';
+    if(typeof v==='object' && 'richText' in v) return v.richText.map(rt=>rt.text).join('');
+    if(typeof v==='object' && 'result' in v) return String(v.result||'');
+    return String(v);
+  };
+
+  const b3 = cellText('B3').trim();
+  const parts = b3.split('/');
+  if(parts.length<6) throw new Error(`Unrecognized notesheet header in B3: "${b3}"`);
+  const catLabelRaw = parts[4].trim();
+  const cat = COA.find(c=>normalizeCatLabel(c.notesheetLabel)===normalizeCatLabel(catLabelRaw))
+           || COA.find(c=>normalizeCatLabel(c.label)===normalizeCatLabel(catLabelRaw));
+  if(!cat) throw new Error(`Unrecognized category "${catLabelRaw}" in the notesheet header.`);
+
+  const b5 = cellText('B5').trim();
+  const m = b5.match(/from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*-\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*\(voucher no:\s*([^-]+?)\s*-\s*([^)]+?)\)/i);
+  if(!m) throw new Error('Could not read the date-range sentence (row 5) in this notesheet.');
+  const monthIdx = name => MONTHS.findIndex(mm=>mm.toLowerCase()===name.toLowerCase());
+  const fMonth = monthIdx(m[2]), tMonth = monthIdx(m[5]);
+  if(fMonth<0 || tMonth<0) throw new Error(`Unrecognized month name in the date range: "${m[2]}" / "${m[5]}".`);
+  const fromDate = `${m[3]}-${String(fMonth+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  const toDate = `${m[6]}-${String(tMonth+1).padStart(2,'0')}-${m[4].padStart(2,'0')}`;
+  const rangeLabel = `${m[1]} ${MONTHS[fMonth].slice(0,3)} - ${m[4]} ${MONTHS[tMonth].slice(0,3)} ${m[6]}`;
+
+  let headerRow = null;
+  for(let r=1;r<=15;r++){ if(cellText('C'+r).trim()==='S/no'){ headerRow = r; break; } }
+  if(!headerRow) throw new Error('Could not find the item table (S/no header) in this notesheet.');
+
+  const items = [];
+  for(let r=headerRow+1; r<headerRow+500; r++){
+    const cVal = cellText('C'+r).trim();
+    const dVal = cellText('D'+r).trim();
+    const eVal = cellText('E'+r).trim();
+    if(cVal==='Total Amount') break;
+    if(cVal==='' && dVal==='' && eVal==='') break;
+    const amt = Number(eVal.replace(/,/g,''))||0;
+    if(amt>0) items.push({voucher:cVal, desc:dVal, amount:amt});
+  }
+  if(items.length===0) throw new Error('No line items found in this notesheet.');
+  const total = items.reduce((s,it)=>s+it.amount,0);
+
+  return {id:uid(), fileName:file.name, catKey:cat.key, fromDate, toDate, rangeLabel, items, total, importedAt:new Date().toISOString()};
 }
 function voucherYearsPresent(list){
   const years = new Set((list || allVouchers()).map(v=>v.date.slice(0,4)));
@@ -2288,6 +2473,7 @@ function migrateState(){
   if(!state.bankHolidays) state.bankHolidays = [];
   if(!state.fixedAssetRegister) state.fixedAssetRegister = { items: [] };
   if(!state.auditLog) state.auditLog = [];
+  if(!state.historicalImports) state.historicalImports = [];
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -3206,41 +3392,42 @@ function renderApp(){
   if(monthLockPasswordFormOpen) app.appendChild(renderMonthLockPasswordForm());
   if(securityFormOpen) app.appendChild(renderSecurityQuestionForm());
   if(vaultSetupFormOpen && !vaultEnabled) app.appendChild(renderVaultSetupForm());
-  if(settingsPanelOpen) app.appendChild(renderSettingsPanelCard());
-  if(dashboardOpen) app.appendChild(renderDashboardCard());
-  if(searchOpen) app.appendChild(renderSearchCard());
-  if(summaryOpen) app.appendChild(renderCategorySummaryCard());
-  if(journalOpen) app.appendChild(renderJournalCard());
-  if(assetRegisterOpen) app.appendChild(renderAssetRegisterCard());
-  if(ratioCashFlowOpen) app.appendChild(renderRatioCashFlowCard());
-  if(auditLogOpen) app.appendChild(renderAuditLogCard());
-  if(sslReportOpen) app.appendChild(renderSslReportCard());
-  if(templatesOpen) app.appendChild(renderTemplatesCard());
-  app.appendChild(renderMainViewTabs());
-  if(monthlyLedgerOpen){
-    app.appendChild(renderMonthlyLedgerWindow());
+  // A sidebar section that's currently a stale key (its flag got cleared
+  // some other way) shouldn't strand the user on a blank page - fall back
+  // to Home in that case.
+  if(viewingPanel){
+    const p = panelInfo(viewingPanel);
+    if(!p || !p[1]()) viewingPanel = null;
+  }
+  if(viewingPanel){
+    app.appendChild(renderPanelPage(viewingPanel));
   } else {
-    app.appendChild(renderDayTabs());
-    const computed = computeAll();
-    if(state.days.length===0){
-      app.appendChild(el(`<div class="card"><p class="empty">No days added yet. Click "+ Add day" above to start entering the first day of ${state.month} ${state.year}.</p></div>`));
+    app.appendChild(renderMainViewTabs());
+    if(monthlyLedgerOpen){
+      app.appendChild(renderMonthlyLedgerWindow());
     } else {
-      if(!selectedDayId || !findDay(selectedDayId)){
-        const todayDay = state.days.find(d=>d.date===todayDateStr());
-        selectedDayId = todayDay ? todayDay.id : state.days[state.days.length-1].id;
+      app.appendChild(renderDayTabs());
+      const computed = computeAll();
+      if(state.days.length===0){
+        app.appendChild(el(`<div class="card"><p class="empty">No days added yet. Click "+ Add day" above to start entering the first day of ${state.month} ${state.year}.</p></div>`));
+      } else {
+        if(!selectedDayId || !findDay(selectedDayId)){
+          const todayDay = state.days.find(d=>d.date===todayDateStr());
+          selectedDayId = todayDay ? todayDay.id : state.days[state.days.length-1].id;
+        }
+        app.appendChild(renderDayPanel(selectedDayId, computed));
+        app.appendChild(renderNotesheetCard());
+        app.appendChild(renderDepositNotesheetCard());
+        app.appendChild(el(`
+          <div class="card" id="section-monthly-ledger-launch">
+            <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
+            <p class="subnote">Pulls together this month's Revenue, Expenditure and Balance Sheet in one place — Withdraw Notesheet totals feed the Expenditure columns automatically, and Deposit Notesheet totals feed Revenue, so most of it fills itself in as you generate notesheets above.</p>
+            <button type="button" data-action="toggle-monthly-ledger">Go to Monthly Ledger tab</button>
+            <button type="button" class="secondary" data-action="toggle-ml-settings" style="margin-left:8px;">&#9881; Data Links &amp; Export Format</button>
+          </div>
+        `));
+        app.appendChild(renderAnnualSummaryCard());
       }
-      app.appendChild(renderDayPanel(selectedDayId, computed));
-      app.appendChild(renderNotesheetCard());
-      app.appendChild(renderDepositNotesheetCard());
-      app.appendChild(el(`
-        <div class="card" id="section-monthly-ledger-launch">
-          <h3><span class="num">&#128220;</span> Monthly Ledger</h3>
-          <p class="subnote">Pulls together this month's Revenue, Expenditure and Balance Sheet in one place — Withdraw Notesheet totals feed the Expenditure columns automatically, and Deposit Notesheet totals feed Revenue, so most of it fills itself in as you generate notesheets above.</p>
-          <button type="button" data-action="toggle-monthly-ledger">Go to Monthly Ledger tab</button>
-          <button type="button" class="secondary" data-action="toggle-ml-settings" style="margin-left:8px;">&#9881; Data Links &amp; Export Format</button>
-        </div>
-      `));
-      app.appendChild(renderAnnualSummaryCard());
     }
   }
   app.appendChild(renderFooter());
@@ -3270,6 +3457,7 @@ function renderMainViewTabs(){
 function navIcon(name){
   const ICONS = {
     menu:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
+    home:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v10a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9"/><path d="M9.5 20v-6h5v6"/></svg>',
     close:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2"/><path d="M3 9.5h18M8 4v5.5M16 4v5.5"/></svg>',
     search:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.2 20.2l-4.6-4.6"/></svg>',
@@ -3310,20 +3498,29 @@ function renderSidebar(){
     return nav;
   }
 
+  const homeList = el(`<div class="sidebar-nav">
+    <button type="button" class="nav-item${!viewingPanel?' active':''}" data-action="go-home">
+      <span class="nav-icon">${navIcon('home')}</span>
+      <span class="nav-text">Home</span>
+    </button>
+  </div>`);
+  nav.appendChild(homeList);
+  nav.appendChild(el(`<div class="sidebar-divider"></div>`));
   const items = [
-    ['dashboard',   'toggle-dashboard',        'Dashboard',                dashboardOpen],
-    ['search',      'toggle-search',           'Advanced Search',          searchOpen],
-    ['summary',     'toggle-summary',          'Category Summary',         summaryOpen],
-    ['journal',     'toggle-journal',          'Journal / Ledger',         journalOpen],
-    ['asset',       'toggle-asset-register',   'Fixed Asset Register',     assetRegisterOpen],
-    ['ratio',       'toggle-ratio-cashflow',   'Ratio &amp; Cash Flow',    ratioCashFlowOpen],
-    ['audit',       'toggle-audit-log',        'Audit Trail',              auditLogOpen],
-    ['ssl',         'toggle-ssl-report',       'SSL Commerz Entries',      sslReportOpen],
-    ['templates',   'toggle-templates',        'Templates',                templatesOpen],
+    ['dashboard',   'dashboard',           'Dashboard',                dashboardOpen],
+    ['search',      'search',              'Advanced Search',          searchOpen],
+    ['summary',     'summary',             'Category Summary',         summaryOpen],
+    ['backup',      'historical-import',   'Historical Notesheet Import', historicalImportOpen],
+    ['journal',     'journal',             'Journal / Ledger',         journalOpen],
+    ['asset',       'asset-register',      'Fixed Asset Register',     assetRegisterOpen],
+    ['ratio',       'ratio-cashflow',      'Ratio &amp; Cash Flow',    ratioCashFlowOpen],
+    ['audit',       'audit-log',           'Audit Trail',              auditLogOpen],
+    ['ssl',         'ssl-report',          'SSL Commerz Entries',      sslReportOpen],
+    ['templates',   'templates',           'Templates',                templatesOpen],
   ];
   const navList = el(`<div class="sidebar-nav">
-    ${items.map(([icon,action,label,active])=>`
-      <button type="button" class="nav-item${active?' active':''}" data-action="${action}">
+    ${items.map(([icon,key,label,active])=>`
+      <button type="button" class="nav-item${active?' active':''}${viewingPanel===key?' current':''}" data-action="open-panel" data-panel="${key}">
         <span class="nav-icon">${navIcon(icon)}</span>
         <span class="nav-text">${label}</span>
       </button>
@@ -3336,7 +3533,7 @@ function renderSidebar(){
       <span class="nav-icon">${navIcon('setup')}</span>
       <span class="nav-text">Edit Setup</span>
     </button>
-    <button type="button" class="nav-item${settingsPanelOpen?' active':''}" data-action="toggle-settings-panel">
+    <button type="button" class="nav-item${settingsPanelOpen?' active':''}${viewingPanel==='settings'?' current':''}" data-action="open-panel" data-panel="settings">
       <span class="nav-icon">${navIcon('backup')}</span>
       <span class="nav-text">Data, Backup &amp; Security</span>
     </button>
@@ -4350,12 +4547,23 @@ function renderHomeEndNav(){
 }
 function scrollPageToTop(){ window.scrollTo({top:0, left:0, behavior:'smooth'}); }
 function scrollPageToBottom(){ window.scrollTo({top:document.documentElement.scrollHeight, left:0, behavior:'smooth'}); }
-/* Same idea as scrollPageToTop/Bottom, but for the Monthly Ledger floating
-   window's own inner scroll area (#ml-floating-body has overflow:auto -
-   it's a separate scroll container from the main page, so scrolling the
-   page wouldn't move it at all). */
-function scrollMlToTop(){ const b = document.getElementById('ml-floating-body'); if(b) b.scrollTo({top:0, left:0, behavior:'smooth'}); }
-function scrollMlToBottom(){ const b = document.getElementById('ml-floating-body'); if(b) b.scrollTo({top:b.scrollHeight, left:0, behavior:'smooth'}); }
+/* Same idea as scrollPageToTop/Bottom, for the Monthly Ledger section.
+   The Monthly Ledger used to be a real floating window with its own
+   scrollable body (#ml-floating-body, overflow:auto) - now it's "docked"
+   into the normal page flow instead (see .floating-window.docked in the
+   stylesheet), so that element no longer scrolls on its own; the whole
+   page scrolls instead. Check which case we're in rather than assuming,
+   so these buttons work in both. */
+function scrollMlToTop(){
+  const b = document.getElementById('ml-floating-body');
+  if(b && b.scrollHeight > b.clientHeight + 1){ b.scrollTo({top:0, left:0, behavior:'smooth'}); }
+  else { scrollPageToTop(); }
+}
+function scrollMlToBottom(){
+  const b = document.getElementById('ml-floating-body');
+  if(b && b.scrollHeight > b.clientHeight + 1){ b.scrollTo({top:b.scrollHeight, left:0, behavior:'smooth'}); }
+  else { scrollPageToBottom(); }
+}
 
 /* Shared jump-to-element helper: waits a frame (twice, to survive a
    re-render that's still settling - e.g. right after opening the Monthly
@@ -6677,11 +6885,12 @@ async function exportMonthlyLedger(key, previewOnly){
 }
 
 function renderSearchCard(){
-  const years = voucherYearsPresent();
+  const searchList = allVouchers().concat(allHistoricalVouchers());
+  const years = voucherYearsPresent(searchList);
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128269;</span> Advanced Search</h3>
-      <p class="subnote">Search every Cash Disbursed voucher ever recorded (this month and archived months) by category, year/month, a date range, description or voucher text, and amount.</p>
+      <p class="subnote">Search every Cash Disbursed voucher ever recorded (this month and archived months), plus any imported historical notesheets, by category, year/month, a date range, description or voucher text, and amount.</p>
       <div class="row" style="flex-wrap:wrap;">
         <div class="field" style="min-width:160px;">
           <label>Category</label>
@@ -6720,7 +6929,7 @@ function renderSearchCard(){
   `);
   function drawResults(){
     const box = card.querySelector('#srch-results');
-    const results = filteredVouchers(searchFilters);
+    const results = filteredVouchers(searchFilters, searchList);
     const total = results.reduce((s,v)=>s+v.amount,0);
     box.innerHTML = '';
     box.appendChild(el(`<div class="computed total"><span class="lbl">${results.length} voucher${results.length===1?'':'s'} found</span><span>${money(total)}</span></div>`));
@@ -6747,7 +6956,7 @@ function renderSearchCard(){
     results.slice().reverse().forEach(v=>{
       tbody.appendChild(el(`
         <tr style="border-bottom:1px solid var(--line-soft);">
-          <td style="padding:6px 8px; white-space:nowrap;" class="mono">${dayLabelFull(v.date)} ${v.date.slice(0,4)}</td>
+          <td style="padding:6px 8px; white-space:nowrap;" class="mono">${voucherDateLabel(v)}</td>
           <td style="padding:6px 8px;">${escapeHtml(v.cat.label)}</td>
           <td style="padding:6px 8px;" class="mono">${highlightMatches(v.voucher, searchFilters.text)}</td>
           <td style="padding:6px 8px;">${highlightMatches(v.desc, searchFilters.text)}</td>
@@ -6777,13 +6986,13 @@ function renderCategorySummaryCard(){
   if(!summaryFilters.catKeys || summaryFilters.catKeys.length===0 || !summaryFilters.catKeys.every(k=>catList.some(c=>c.key===k))){
     summaryFilters.catKeys = [catList[0].key];
   }
-  const voucherList = summaryFilters.type==='income' ? allRevenueVouchers() : allVouchers();
+  const voucherList = summaryFilters.type==='income' ? allRevenueVouchers() : allVouchers().concat(allHistoricalVouchers());
   const years = voucherYearsPresent(voucherList);
   const selectedLabel = ()=> summaryFilters.catKeys.map(k=>catList.find(c=>c.key===k).label).join(' + ');
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128202;</span> Category-wise Summary</h3>
-      <p class="subnote">Tick one category to see it alone, or several to see their combined total &mdash; grouped by month or year, or totalled over any custom date range.</p>
+      <p class="subnote">Tick one category to see it alone, or several to see their combined total &mdash; grouped by month or year, or totalled over any custom date range. Expenditure totals include any imported historical notesheets alongside real Daily Ledger vouchers.</p>
       <div class="row" style="flex-wrap:wrap; align-items:flex-start;">
         <div class="field" style="min-width:160px;">
           <label>Type</label>
@@ -6857,7 +7066,7 @@ function renderCategorySummaryCard(){
       } else {
         box.appendChild(el(`<p class="subnote" style="margin-top:8px;">${results.length} voucher${results.length===1?'':'s'}:</p>`));
         results.forEach(v=>{
-          box.appendChild(el(`<div class="computed"><span class="lbl">${dayLabelFull(v.date)} ${v.date.slice(0,4)} &middot; ${escapeHtml(v.cat.label)}${v.voucher?' &middot; '+escapeHtml(v.voucher):''}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span><span>${money(v.amount)}</span></div>`));
+          box.appendChild(el(`<div class="computed"><span class="lbl">${voucherDateLabel(v)} &middot; ${escapeHtml(v.cat.label)}${v.voucher?' &middot; '+escapeHtml(v.voucher):''}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span><span>${money(v.amount)}</span></div>`));
         });
       }
     }
@@ -6890,7 +7099,7 @@ function renderCategorySummaryCard(){
         const cell = detailTr.querySelector('td');
         vouchers.forEach(v=>{
           cell.appendChild(el(`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 8px 6px 22px;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
-            <span>${dayLabelFull(v.date)} ${v.date.slice(0,4)}${v.cat?' &middot; '+escapeHtml(v.cat.label):''}${v.voucher?' &middot; '+escapeHtml(v.voucher):''}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span>
+            <span>${voucherDateLabel(v)}${v.cat?' &middot; '+escapeHtml(v.cat.label):''}${v.voucher?' &middot; '+escapeHtml(v.voucher):''}${v.desc?' &mdash; '+escapeHtml(v.desc):''}</span>
             <span class="mono" style="flex:none;">${money(v.amount)}</span>
           </div>`));
         });
@@ -6924,6 +7133,91 @@ function renderCategorySummaryCard(){
   const toInp = card.querySelector('#sum-to');
   if(fromInp) fromInp.onchange = (e)=>{ summaryFilters.fromDate = e.target.value; drawResults(); };
   if(toInp) toInp.onchange = (e)=>{ summaryFilters.toDate = e.target.value; drawResults(); };
+  return card;
+}
+
+/* --- Historical Withdraw Notesheet Import: upload old .xlsx notesheets
+   (this app's own generated format) purely so they're findable in
+   Advanced Search / Category Summary - see allHistoricalVouchers() and
+   parseHistoricalNotesheetFile() above. Never touches real accounting. --- */
+function historicalImportListHtml(){
+  const imports = (state.historicalImports||[]).slice().sort((a,b)=>(b.importedAt||'').localeCompare(a.importedAt||''));
+  if(!imports.length) return `<p class="empty" style="margin-top:10px;">No historical notesheets imported yet.</p>`;
+  return `
+    <div style="overflow-x:auto; margin-top:14px;">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+          <th style="padding:6px 8px;">File</th>
+          <th style="padding:6px 8px;">Category</th>
+          <th style="padding:6px 8px;">Date range (as written)</th>
+          <th style="padding:6px 8px; text-align:right;">Items</th>
+          <th style="padding:6px 8px; text-align:right;">Total</th>
+          <th style="padding:6px 8px;"></th>
+        </tr></thead>
+        <tbody>
+          ${imports.map(imp=>{
+            const cat = COA.find(c=>c.key===imp.catKey);
+            return `<tr style="border-bottom:1px solid var(--line-soft);">
+              <td style="padding:6px 8px;" class="mono">${escapeHtml(imp.fileName)}</td>
+              <td style="padding:6px 8px;">${cat?escapeHtml(cat.label):escapeHtml(imp.catKey)}</td>
+              <td style="padding:6px 8px;">${escapeHtml(imp.rangeLabel)}</td>
+              <td style="padding:6px 8px; text-align:right;">${imp.items.length}</td>
+              <td style="padding:6px 8px; text-align:right;" class="mono">${money(imp.total)}</td>
+              <td style="padding:6px 8px; text-align:right;"><button type="button" class="danger small" data-action="delete-historical-import" data-id="${imp.id}" title="Delete this import">&times;</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+function renderHistoricalImportCard(){
+  const card = el(`
+    <div class="card" id="section-historical-import">
+      <h3><span class="num">&#128194;</span> Historical Notesheet Import</h3>
+      <p class="subnote">Upload old Withdraw Notesheet .xlsx files (the ones this app itself generates) so their line items show up in Advanced Search and Category Summary. This is lookup-only &mdash; it never feeds the Monthly Ledger, reconciliation, or any accounting total. Exact per-item dates aren't needed; each notesheet's own written date range, category, and every line's own amount are what get read in.</p>
+      <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
+        <div class="field" style="flex:1 1 300px;">
+          <label>Notesheet files (.xlsx) &mdash; choose one or several at once</label>
+          <input type="file" id="hist-file-input" accept=".xlsx" multiple>
+        </div>
+        <button class="secondary" type="button" id="hist-import-btn">&#128229; Import</button>
+      </div>
+      <div id="hist-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
+      <div id="hist-import-results"></div>
+      <div id="hist-import-list">${historicalImportListHtml()}</div>
+    </div>
+  `);
+  const fileInp = card.querySelector('#hist-file-input');
+  const statusEl = card.querySelector('#hist-status');
+  const resultsEl = card.querySelector('#hist-import-results');
+  card.querySelector('#hist-import-btn').onclick = async ()=>{
+    const files = Array.from(fileInp.files||[]);
+    if(!files.length){ showAlert('Choose one or more notesheet .xlsx files first.'); return; }
+    statusEl.textContent = `Reading ${files.length} file${files.length===1?'':'s'}\u2026`;
+    resultsEl.innerHTML = '';
+    const ok = [], failed = [];
+    for(const file of files){
+      try{
+        const rec = await parseHistoricalNotesheetFile(file);
+        state.historicalImports.push(rec);
+        ok.push(rec);
+      }catch(e){
+        failed.push({fileName:file.name, message:e.message});
+      }
+    }
+    statusEl.textContent = `${ok.length} imported, ${failed.length} failed.`;
+    resultsEl.innerHTML =
+      (ok.length ? `<p class="subnote" style="color:#2E7D32;">&#10003; Imported:<br>${ok.map(r=>{
+        const cat = COA.find(c=>c.key===r.catKey);
+        return escapeHtml(r.fileName)+' &mdash; '+(cat?escapeHtml(cat.label):r.catKey)+' &middot; '+escapeHtml(r.rangeLabel)+' ('+r.items.length+' item'+(r.items.length===1?'':'s')+', '+money(r.total)+')';
+      }).join('<br>')}</p>` : '') +
+      (failed.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Could not read:<br>${failed.map(f=>escapeHtml(f.fileName)+' &mdash; '+escapeHtml(f.message)).join('<br>')}</p>` : '');
+    if(ok.length){
+      saveState();
+      fileInp.value = '';
+      card.querySelector('#hist-import-list').innerHTML = historicalImportListHtml();
+    }
+  };
   return card;
 }
 
@@ -9573,7 +9867,14 @@ function wireDelegation(){
 
     if(action==='toggle-sidebar'){ sidebarOpen = !sidebarOpen; render(); return; }
     if(action==='close-sidebar'){ sidebarOpen = false; render(); return; }
-    if(action==='toggle-settings-panel'){ settingsPanelOpen = !settingsPanelOpen; render(); return; }
+    if(action==='open-panel'){ openPanel(t.dataset.panel); render(); return; }
+    if(action==='go-home'){ viewingPanel = null; render(); return; }
+    if(action==='hide-panel-page'){ viewingPanel = null; render(); return; }
+    if(action==='close-panel-page'){
+      const p = viewingPanel ? panelInfo(viewingPanel) : null;
+      if(p) p[2](false);
+      viewingPanel = null; render(); return;
+    }
 
     if(action==='toggle-password-form'){ passwordFormOpen = !passwordFormOpen; render(); return; }
     if(action==='toggle-daylock-password-form'){ dayLockPasswordFormOpen = !dayLockPasswordFormOpen; render(); return; }
@@ -9620,15 +9921,14 @@ function wireDelegation(){
       return;
     }
     if(action==='edit-setup'){ state.setupDone=false; render(); return; }
-    if(action==='toggle-search'){ searchOpen = !searchOpen; render(); return; }
-    if(action==='toggle-summary'){ summaryOpen = !summaryOpen; render(); return; }
-    if(action==='toggle-journal'){ journalOpen = !journalOpen; render(); return; }
-    if(action==='toggle-asset-register'){ assetRegisterOpen = !assetRegisterOpen; render(); return; }
-    if(action==='toggle-ratio-cashflow'){ ratioCashFlowOpen = !ratioCashFlowOpen; render(); return; }
-    if(action==='toggle-audit-log'){ auditLogOpen = !auditLogOpen; render(); return; }
-    if(action==='toggle-ssl-report'){ sslReportOpen = !sslReportOpen; render(); return; }
-    if(action==='toggle-templates'){ templatesOpen = !templatesOpen; render(); return; }
-    if(action==='toggle-dashboard'){ dashboardOpen = !dashboardOpen; render(); return; }
+    if(action==='delete-historical-import'){
+      const id = t.dataset.id;
+      showConfirm('Delete this imported notesheet\u2019s data? It only removes it from Search/Category Summary lookups - nothing in the real accounting changes.', ()=>{
+        state.historicalImports = (state.historicalImports||[]).filter(imp=>imp.id!==id);
+        saveState(); render();
+      });
+      return;
+    }
     if(action==='toggle-monthly-ledger'){
       monthlyLedgerOpen = true;
       if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
