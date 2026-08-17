@@ -11358,6 +11358,14 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firs
   const MIN_PRINT_ROWS = 45; // roughly a full A4 portrait page at these row heights
   const printEndRow = Math.max(gapEnd, MIN_PRINT_ROWS);
   ws.pageSetup.printArea = `A1:F${printEndRow}`;
+
+  // Left border down column F, from the row right after the "Attach"
+  // label (row 3) through the very last printed line, so the Attach
+  // strip reads as a bordered column for its full height.
+  for(let row=4; row<=printEndRow; row++){
+    const c = ws.getCell(`F${row}`);
+    c.border = {...(c.border||{}), left:THIN};
+  }
 }
 
 /* --- Consolidated Withdraw Summary sheet --- */
