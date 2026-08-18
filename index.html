@@ -1172,7 +1172,7 @@ let notesheetSettingsOpen = false;
 let reconDetailOpen = {};
 let voucherCounterSettingsOpen = false;
 let searchOpen = false;
-let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'' };
+let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text:'', minAmt:'', maxAmt:'', groupBy:'' };
 let summaryOpen = false;
 let summaryFilters = { type:'expenditure', catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
 let historicalImportOpen = false;
@@ -1310,6 +1310,8 @@ function defaultState(){
        and everything that feeds real accounting (Monthly Ledger,
        reconciliation, Annual Summary export) - these are lookup-only. */
     historicalImports:[],
+    customHistoricalCategories:[],
+    synonymGroups:[],
     /* User-editable "data link" and "export formatting" knobs, so small
        fixes (a deposit description that should map to a different
        revenue category, or an export border/row-height that looks off)
@@ -1788,10 +1790,23 @@ function allVouchers(){
    historical:true are carried along so the UI can show the written range
    instead of a fake precise date and mark the row as imported. This list
    is intentionally never mixed into allVouchers() itself. */
+/* Categories available when importing/labelling a historical notesheet:
+   the real Daily Ledger CoA (COA) plus any extra categories the person
+   has added just for classifying old/historical notesheets that don't
+   fit the current CoA (state.customHistoricalCategories). Kept separate
+   from COA itself so it never touches live voucher entry, templates, the
+   Withdraw Notesheet generator, or the Journal - purely a lookup/label
+   list for historical import & its Search/Category Summary results. */
+function historyCategories(){
+  return COA.concat((state.customHistoricalCategories||[]).map(c=>(
+    {key:c.key, label:c.label, short:c.label, notesheetLabel:c.label, custom:true}
+  )));
+}
+function findHistoryCategory(key){ return historyCategories().find(c=>c.key===key) || null; }
 function allHistoricalVouchers(){
   const out = [];
   (state.historicalImports||[]).forEach(imp=>{
-    const cat = COA.find(c=>c.key===imp.catKey);
+    const cat = findHistoryCategory(imp.catKey);
     if(!cat) return;
     (imp.items||[]).forEach(it=>{
       const amt = Number(it.amount)||0;
@@ -1810,8 +1825,17 @@ function allHistoricalVouchers(){
    Summary need: category, an approximate from/to date, the written date
    range as text, and each line item's own description+amount (not the
    voucher's summed total). Throws a plain Error with a human message on
-   anything unrecognized, for the import UI to show as-is. */
-async function parseHistoricalNotesheetFile(file){
+   anything unrecognized, for the import UI to show as-is.
+   overrideCatKey: when set (from the import form's category picker),
+   used as-is instead of trying to auto-detect the category from B3 - lets
+   older/oddly-labelled sheets be imported without matching the exact CoA
+   wording, and lets the person point a file at any of their custom
+   historical categories.
+   overrideYear: when set (from the import form's optional year picker),
+   replaces just the YEAR portion of whatever from/to date and range label
+   get read from B5, in case the source sheet's year is missing, wrong, or
+   ambiguous - the month/day/voucher-range text as written are kept as-is. */
+async function parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear){
   await loadExcelJS();
   const buf = await file.arrayBuffer();
   const wb = new ExcelJS.Workbook();
@@ -1827,13 +1851,19 @@ async function parseHistoricalNotesheetFile(file){
     return String(v);
   };
 
-  const b3 = cellText('B3').trim();
-  const parts = b3.split('/');
-  if(parts.length<6) throw new Error(`Unrecognized notesheet header in B3: "${b3}"`);
-  const catLabelRaw = parts[4].trim();
-  const cat = COA.find(c=>normalizeCatLabel(c.notesheetLabel)===normalizeCatLabel(catLabelRaw))
-           || COA.find(c=>normalizeCatLabel(c.label)===normalizeCatLabel(catLabelRaw));
-  if(!cat) throw new Error(`Unrecognized category "${catLabelRaw}" in the notesheet header.`);
+  let cat;
+  if(overrideCatKey){
+    cat = findHistoryCategory(overrideCatKey);
+    if(!cat) throw new Error(`Unrecognized category key "${overrideCatKey}".`);
+  } else {
+    const b3 = cellText('B3').trim();
+    const parts = b3.split('/');
+    if(parts.length<6) throw new Error(`Unrecognized notesheet header in B3: "${b3}"`);
+    const catLabelRaw = parts[4].trim();
+    cat = historyCategories().find(c=>normalizeCatLabel(c.notesheetLabel)===normalizeCatLabel(catLabelRaw))
+       || historyCategories().find(c=>normalizeCatLabel(c.label)===normalizeCatLabel(catLabelRaw));
+    if(!cat) throw new Error(`Unrecognized category "${catLabelRaw}" in the notesheet header - pick a category in the import form instead.`);
+  }
 
   const b5 = cellText('B5').trim();
   const m = b5.match(/from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*-\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*\(voucher no:\s*([^-]+?)\s*-\s*([^)]+?)\)/i);
@@ -1841,9 +1871,11 @@ async function parseHistoricalNotesheetFile(file){
   const monthIdx = name => MONTHS.findIndex(mm=>mm.toLowerCase()===name.toLowerCase());
   const fMonth = monthIdx(m[2]), tMonth = monthIdx(m[5]);
   if(fMonth<0 || tMonth<0) throw new Error(`Unrecognized month name in the date range: "${m[2]}" / "${m[5]}".`);
-  const fromDate = `${m[3]}-${String(fMonth+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`;
-  const toDate = `${m[6]}-${String(tMonth+1).padStart(2,'0')}-${m[4].padStart(2,'0')}`;
-  const rangeLabel = `${m[1]} ${MONTHS[fMonth].slice(0,3)} - ${m[4]} ${MONTHS[tMonth].slice(0,3)} ${m[6]}`;
+  const fYear = overrideYear || m[3];
+  const tYear = overrideYear || m[6];
+  const fromDate = `${fYear}-${String(fMonth+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  const toDate = `${tYear}-${String(tMonth+1).padStart(2,'0')}-${m[4].padStart(2,'0')}`;
+  const rangeLabel = `${m[1]} ${MONTHS[fMonth].slice(0,3)} ${fYear} - ${m[4]} ${MONTHS[tMonth].slice(0,3)} ${tYear}`;
 
   let headerRow = null;
   for(let r=1;r<=15;r++){ if(cellText('C'+r).trim()==='S/no'){ headerRow = r; break; } }
@@ -1868,6 +1900,113 @@ function voucherYearsPresent(list){
   const years = new Set((list || allVouchers()).map(v=>v.date.slice(0,4)));
   return Array.from(years).sort().reverse();
 }
+/* --- Advanced Search text matching --------------------------------------
+   Plain substring-of-the-whole-phrase matching means you have to remember
+   the description almost exactly. This is a lighter, offline stand-in for
+   "search-engine-like" matching: the query is split into words, and a
+   voucher matches if every query word is found somewhere in the
+   description/voucher/note - as a substring OR close enough in spelling
+   (small typo tolerance that scales with word length) - in any order,
+   anywhere among the three fields. It's not real synonym/meaning search
+   (e.g. it won't know "microbus" and "gari" refer to the same thing) -
+   that would need an AI/internet lookup this offline app doesn't have -
+   but it forgives typos, wrong word order, and only remembering part of
+   what was written. */
+function normalizeSearchText(s){
+  return String(s||'').toLowerCase()
+    .replace(/[.,;:()\-_/\\।]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function levenshteinDistance(a,b){
+  if(a===b) return 0;
+  const al=a.length, bl=b.length;
+  if(al===0) return bl;
+  if(bl===0) return al;
+  const dp = new Array(bl+1);
+  for(let j=0;j<=bl;j++) dp[j]=j;
+  for(let i=1;i<=al;i++){
+    let prev = dp[0];
+    dp[0]=i;
+    for(let j=1;j<=bl;j++){
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j]+1, dp[j-1]+1, prev + (a[i-1]===b[j-1]?0:1));
+      prev = tmp;
+    }
+  }
+  return dp[bl];
+}
+function wordsCloseEnough(qWord, textWord){
+  if(!qWord || !textWord) return false;
+  if(textWord.includes(qWord) || qWord.includes(textWord)) return true;
+  const maxDist = qWord.length<=3 ? 0 : (qWord.length<=6 ? 1 : 2);
+  return levenshteinDistance(qWord, textWord) <= maxDist;
+}
+/* Your own synonym groups (state.synonymGroups: array of word-groups, e.g.
+   [["microbus","gari","vehicle"], ["servicing","repair","meramot"]]) let a
+   search word also match anything else in its group - a fixed, offline
+   stand-in for "similar word" search, entirely under your control (see
+   the "Synonym groups" panel in Advanced Search). Only groups containing
+   a word close to qWord (by the same substring/typo rule above) expand
+   the search. */
+function synonymExpand(qWord){
+  const groups = state.synonymGroups || [];
+  const expansions = new Set([qWord]);
+  groups.forEach(group=>{
+    const gWordsNorm = (group||[]).map(w=>normalizeSearchText(w)).filter(Boolean);
+    if(gWordsNorm.some(gw=>wordsCloseEnough(qWord, gw))){
+      gWordsNorm.forEach(gw=>expansions.add(gw));
+    }
+  });
+  return Array.from(expansions);
+}
+function textMatchesQuery(haystack, query){
+  const qWords = normalizeSearchText(query).split(' ').filter(Boolean);
+  if(!qWords.length) return true;
+  const hWords = normalizeSearchText(haystack).split(' ').filter(Boolean);
+  return qWords.every(qw=>{
+    const candidates = synonymExpand(qw);
+    return hWords.some(hw => candidates.some(cw=>wordsCloseEnough(cw, hw)));
+  });
+}
+/* --- AI Search (Advanced Search "meaning" search) ------------------------
+   Calls Claude directly from the browser (see the app's built-in Anthropic
+   API access) to find entries the query is plausibly ABOUT, not just
+   entries that contain matching words - real synonym/meaning matching,
+   unlike textMatchesQuery above which only knows the synonym groups you
+   typed in yourself. This only works while this file is open inside a
+   Claude.ai chat/artifact preview: that's the only place the fetch below
+   is authorized to reach api.anthropic.com without your own API key. Open
+   as a plain file (double-clicked, or hosted on GitHub Pages/anywhere
+   else), the fetch will fail - callers must catch that and say so, never
+   leave the person staring at a stuck spinner. */
+const AI_SEARCH_CANDIDATE_CAP = 300;
+async function aiSearchVouchers(query, candidates){
+  const capped = candidates.length > AI_SEARCH_CANDIDATE_CAP
+    ? candidates.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0, AI_SEARCH_CANDIDATE_CAP)
+    : candidates;
+  const payload = capped.map((v,i)=>({i, date:v.date, cat:v.cat.label, voucher:v.voucher, desc:v.desc, note:v.note||'', amount:v.amount}));
+  const system = "You help search a Bengali madrasa's expense ledger. You are given a search QUERY (may be Bengali, English, or mixed, and may use different words than the ledger text - synonyms, related terms, abbreviations, or a description of what the item/service IS rather than its exact name) and a JSON array of ENTRIES, each with an index \"i\". Return ONLY a JSON array of the \"i\" values of entries that plausibly refer to what the query is about. Consider desc, voucher, note, and cat together. Be reasonably inclusive of true synonyms/related items but exclude entries that are clearly unrelated. Respond with ONLY a JSON array of integers - no words, no markdown fences, no explanation.";
+  const userMsg = `QUERY: ${query}\n\nENTRIES:\n${JSON.stringify(payload)}`;
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      system,
+      messages: [{role:"user", content:userMsg}]
+    })
+  });
+  if(!resp.ok) throw new Error('AI request failed (HTTP '+resp.status+')');
+  const data = await resp.json();
+  const text = (data.content||[]).map(c=>c.text||'').join('');
+  const clean = text.replace(/```json|```/g,'').trim();
+  let idxs;
+  try{ idxs = JSON.parse(clean); }catch(e){ throw new Error('Could not read the AI response'); }
+  if(!Array.isArray(idxs)) throw new Error('Unexpected AI response');
+  return idxs.map(Number).filter(i=>Number.isInteger(i) && i>=0 && i<capped.length).map(i=>capped[i]);
+}
 function filteredVouchers(f, list){
   return (list || allVouchers()).filter(v=>{
     if(f.catKeys && f.catKeys.length && !f.catKeys.includes(v.catKey)) return false;
@@ -1877,8 +2016,8 @@ function filteredVouchers(f, list){
     if(f.fromDate && v.date<f.fromDate) return false;
     if(f.toDate && v.date>f.toDate) return false;
     if(f.text){
-      const q = f.text.toLowerCase();
-      if(!v.desc.toLowerCase().includes(q) && !v.voucher.toLowerCase().includes(q) && !(v.note||'').toLowerCase().includes(q)) return false;
+      const haystack = v.desc + ' ' + v.voucher + ' ' + (v.note||'');
+      if(!textMatchesQuery(haystack, f.text)) return false;
     }
     if(f.minAmt!=='' && f.minAmt!==undefined && v.amount<Number(f.minAmt)) return false;
     if(f.maxAmt!=='' && f.maxAmt!==undefined && v.amount>Number(f.maxAmt)) return false;
@@ -2474,6 +2613,8 @@ function migrateState(){
   if(!state.fixedAssetRegister) state.fixedAssetRegister = { items: [] };
   if(!state.auditLog) state.auditLog = [];
   if(!state.historicalImports) state.historicalImports = [];
+  if(!state.customHistoricalCategories) state.customHistoricalCategories = [];
+  if(!state.synonymGroups) state.synonymGroups = [];
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -2767,17 +2908,35 @@ function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, m=>({'&':'
    is escaped separately, so this never breaks on &, <, > etc. in text). */
 function highlightMatches(text, query){
   const raw = (text||'').toString();
-  if(!query) return escapeHtml(raw);
-  const q = query.toLowerCase();
+  const qWords = normalizeSearchText(query).split(' ').filter(Boolean);
+  if(!qWords.length) return escapeHtml(raw);
+  const expandedWords = new Set();
+  qWords.forEach(w=>synonymExpand(w).forEach(x=>expandedWords.add(x)));
   const lower = raw.toLowerCase();
+  const ranges = [];
+  expandedWords.forEach(w=>{
+    let i = 0;
+    while(true){
+      const idx = lower.indexOf(w, i);
+      if(idx===-1) break;
+      ranges.push([idx, idx+w.length]);
+      i = idx + w.length;
+    }
+  });
+  if(!ranges.length) return escapeHtml(raw);
+  ranges.sort((a,b)=>a[0]-b[0]);
+  const merged = [];
+  ranges.forEach(r=>{
+    if(merged.length && r[0]<=merged[merged.length-1][1]) merged[merged.length-1][1] = Math.max(merged[merged.length-1][1], r[1]);
+    else merged.push(r.slice());
+  });
   let out = '', i = 0;
-  while(i < raw.length){
-    const idx = lower.indexOf(q, i);
-    if(idx===-1){ out += escapeHtml(raw.slice(i)); break; }
-    out += escapeHtml(raw.slice(i, idx));
-    out += '<mark class="search-hit">' + escapeHtml(raw.slice(idx, idx+q.length)) + '</mark>';
-    i = idx + q.length;
-  }
+  merged.forEach(([s,e])=>{
+    out += escapeHtml(raw.slice(i,s));
+    out += '<mark class="search-hit">' + escapeHtml(raw.slice(s,e)) + '</mark>';
+    i = e;
+  });
+  out += escapeHtml(raw.slice(i));
   return out;
 }
 
@@ -6887,6 +7046,7 @@ async function exportMonthlyLedger(key, previewOnly){
 function renderSearchCard(){
   const searchList = allVouchers().concat(allHistoricalVouchers());
   const years = voucherYearsPresent(searchList);
+  const searchCatList = historyCategories();
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128269;</span> Advanced Search</h3>
@@ -6896,7 +7056,12 @@ function renderSearchCard(){
           <label>Category</label>
           <select id="srch-cat">
             <option value="">All categories</option>
-            ${COA.map(c=>`<option value="${c.key}" ${searchFilters.catKey===c.key?'selected':''}>${c.label}</option>`).join('')}
+            <optgroup label="Main expense categories">
+              ${COA.map(c=>`<option value="${c.key}" ${searchFilters.catKey===c.key?'selected':''}>${c.label}</option>`).join('')}
+            </optgroup>
+            ${(state.customHistoricalCategories||[]).length ? `<optgroup label="Custom (historical-only) categories">
+              ${state.customHistoricalCategories.map(c=>`<option value="${c.key}" ${searchFilters.catKey===c.key?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}
+            </optgroup>` : ''}
           </select>
         </div>
         <div class="field" style="min-width:120px;">
@@ -6913,6 +7078,14 @@ function renderSearchCard(){
             ${MONTHS.map((m,i)=>{const v=String(i+1).padStart(2,'0'); return `<option value="${v}" ${searchFilters.month===v?'selected':''}>${m}</option>`;}).join('')}
           </select>
         </div>
+        <div class="field" style="min-width:150px;">
+          <label>Group results by</label>
+          <select id="srch-group">
+            <option value="" ${searchFilters.groupBy===''?'selected':''}>No grouping</option>
+            <option value="month" ${searchFilters.groupBy==='month'?'selected':''}>By month</option>
+            <option value="year" ${searchFilters.groupBy==='year'?'selected':''}>By year</option>
+          </select>
+        </div>
       </div>
       <div class="row" style="flex-wrap:wrap;">
         <div class="field"><label>From date <span class="tag">optional</span></label><input type="date" id="srch-from" value="${searchFilters.fromDate}"></div>
@@ -6923,7 +7096,32 @@ function renderSearchCard(){
       <div class="field">
         <label>Description or voucher text</label>
         <input type="text" id="srch-text" placeholder="e.g. warranty, pure it kit, misc18/6/26" value="${escapeHtml(searchFilters.text)}">
+        <span class="tag" style="margin-top:4px; display:inline-block;">Doesn't need to be exact - order and small typos/spelling are forgiven; each word just needs to appear somewhere in the description, voucher no. or note</span>
       </div>
+      <div class="settings-panel-group" style="margin-top:12px;">
+        <div class="settings-panel-label">Synonym groups <span class="tag">optional</span></div>
+        <p class="subnote" style="margin-top:0;">Words you group together here are treated as the same word when searching - e.g. group "microbus, gari, vehicle" so any of those three finds the same entries. Type words separated by commas, one group at a time.</p>
+        <div class="row" style="align-items:flex-end; gap:10px; flex-wrap:wrap;">
+          <div class="field" style="flex:1 1 260px;">
+            <label>New group (comma-separated words)</label>
+            <input type="text" id="syn-new-group" placeholder="e.g. microbus, gari, vehicle">
+          </div>
+          <button class="secondary" type="button" id="syn-add-group-btn">&#10133; Add group</button>
+        </div>
+        <div id="syn-group-list" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+          ${(state.synonymGroups||[]).map((g,gi)=>`
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span class="tag" style="padding:4px 10px;">${g.map(w=>escapeHtml(w)).join(' = ')}</span>
+              <button type="button" class="danger small" data-action="delete-synonym-group" data-idx="${gi}" title="Delete this group" style="padding:1px 8px;">&times;</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end; gap:8px;">
+        <button type="button" class="secondary" id="srch-ai-btn">&#10024; AI Search <span class="tag">works inside Claude.ai only</span></button>
+        <button type="button" class="secondary" id="srch-export-btn">&#128190; Export this search to Excel</button>
+      </div>
+      <div id="srch-ai-results"></div>
       <div id="srch-results"></div>
     </div>
   `);
@@ -6936,6 +7134,55 @@ function renderSearchCard(){
     if(results.length===0){
       box.appendChild(el(`<p class="empty">No matching vouchers.</p>`));
       return;
+    }
+    // Quick per-year totals strip - shows automatically whenever the
+    // results span more than one year, regardless of the Group-by
+    // dropdown, so a multi-year search always gives an at-a-glance
+    // breakdown next to the grand total without needing to set anything.
+    const yearTotals = groupSum(results, v=>v.date.slice(0,4), key=>key);
+    if(yearTotals.length>1){
+      box.appendChild(el(`
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 4px;">
+          ${yearTotals.map(y=>`
+            <div style="display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid var(--line-soft); border-radius:8px; background:#fff; font-size:12.5px;">
+              <span style="font-weight:600;">${escapeHtml(y.label)}</span>
+              <span class="mono">${money(y.total)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `));
+    }
+    if(searchFilters.groupBy==='month' || searchFilters.groupBy==='year'){
+      const groupBy = searchFilters.groupBy;
+      const keyFn = groupBy==='year' ? (v=>v.date.slice(0,4)) : (v=>v.date.slice(0,7));
+      const labelFn = key => {
+        if(groupBy==='year') return key;
+        const [y,m] = key.split('-');
+        return `${MONTHS[Number(m)-1]} ${y}`;
+      };
+      const groups = groupSum(results, keyFn, labelFn).slice().reverse();
+      const groupTable = el(`
+        <div style="overflow-x:auto; margin-top:10px;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+              <th style="padding:6px 8px;">${groupBy==='year'?'Year':'Month'}</th>
+              <th style="padding:6px 8px; text-align:right;">Vouchers</th>
+              <th style="padding:6px 8px; text-align:right;">Total</th>
+            </tr></thead>
+            <tbody>
+              ${groups.map(g=>{
+                const count = results.filter(v=>keyFn(v)===g.key).length;
+                return `<tr style="border-bottom:1px solid var(--line-soft);">
+                  <td style="padding:6px 8px;">${escapeHtml(g.label)}</td>
+                  <td style="padding:6px 8px; text-align:right;">${count}</td>
+                  <td style="padding:6px 8px; text-align:right;" class="mono">${money(g.total)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `);
+      box.appendChild(groupTable);
     }
     const table = el(`
       <div style="overflow-x:auto; margin-top:10px;">
@@ -6968,9 +7215,84 @@ function renderSearchCard(){
     box.appendChild(table);
   }
   drawResults();
+  card.querySelector('#srch-export-btn').onclick = ()=>{
+    const results = filteredVouchers(searchFilters, searchList);
+    exportSearchResults(searchFilters, results, searchCatList);
+  };
+  card.querySelector('#syn-add-group-btn').onclick = ()=>{
+    const inp = card.querySelector('#syn-new-group');
+    const words = inp.value.split(',').map(w=>w.trim()).filter(Boolean);
+    if(words.length<2){ showAlert('Type at least two words separated by commas (e.g. microbus, gari, vehicle).'); return; }
+    state.synonymGroups = state.synonymGroups || [];
+    state.synonymGroups.push(words);
+    saveState();
+    inp.value = '';
+    render();
+  };
+  const aiBtn = card.querySelector('#srch-ai-btn');
+  const aiResultsBox = card.querySelector('#srch-ai-results');
+  aiBtn.onclick = async ()=>{
+    const q = (card.querySelector('#srch-text').value||'').trim();
+    if(!q){ showAlert('Type what you\u2019re looking for in the Description/voucher text box first.'); return; }
+    const nonTextFilters = Object.assign({}, searchFilters, {text:''});
+    const candidates = filteredVouchers(nonTextFilters, searchList);
+    if(!candidates.length){ showAlert('No entries match the other filters (category/date/amount) to search within.'); return; }
+    aiBtn.disabled = true;
+    const originalLabel = aiBtn.innerHTML;
+    aiBtn.innerHTML = '&#8987; Asking AI\u2026';
+    aiResultsBox.innerHTML = '';
+    try{
+      const matches = await aiSearchVouchers(q, candidates);
+      const total = matches.reduce((s,v)=>s+v.amount,0);
+      const cappedNote = candidates.length>AI_SEARCH_CANDIDATE_CAP
+        ? `<p class="subnote">Only the ${AI_SEARCH_CANDIDATE_CAP} most recent matching entries were considered - narrow with Category/Year/Month above for a more precise AI search.</p>` : '';
+      if(!matches.length){
+        aiResultsBox.innerHTML = `<div class="card" style="background:#F6F3EA;"><h4 style="margin-top:0;">&#10024; AI Search</h4><p class="empty">AI didn't find anything it's confident is related to "${escapeHtml(q)}".</p>${cappedNote}</div>`;
+      } else {
+        const box2 = el(`
+          <div class="card" style="background:#F6F3EA;">
+            <h4 style="margin-top:0;">&#10024; AI Search &mdash; ${matches.length} possible match${matches.length===1?'':'es'}</h4>
+            <p class="subnote">These may use different wording than "${escapeHtml(q)}" but are what AI judged as related - double-check before relying on them.</p>
+            ${cappedNote}
+            <div class="computed total"><span class="lbl">Total</span><span>${money(total)}</span></div>
+            <div style="overflow-x:auto; margin-top:8px;">
+              <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
+                  <th style="padding:6px 8px;">Date</th>
+                  <th style="padding:6px 8px;">Category</th>
+                  <th style="padding:6px 8px;">Voucher</th>
+                  <th style="padding:6px 8px;">Description</th>
+                  <th style="padding:6px 8px; text-align:right;">Amount</th>
+                </tr></thead>
+                <tbody>
+                  ${matches.slice().reverse().map(v=>`
+                    <tr style="border-bottom:1px solid var(--line-soft);">
+                      <td style="padding:6px 8px; white-space:nowrap;" class="mono">${voucherDateLabel(v)}</td>
+                      <td style="padding:6px 8px;">${escapeHtml(v.cat.label)}</td>
+                      <td style="padding:6px 8px;" class="mono">${escapeHtml(v.voucher)}</td>
+                      <td style="padding:6px 8px;">${escapeHtml(v.desc)}</td>
+                      <td style="padding:6px 8px; text-align:right;" class="mono">${money(v.amount)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `);
+        aiResultsBox.innerHTML = '';
+        aiResultsBox.appendChild(box2);
+      }
+    }catch(e){
+      aiResultsBox.innerHTML = `<div class="card" style="background:#FBEAEA;"><h4 style="margin-top:0;">&#10024; AI Search unavailable</h4><p class="subnote">AI Search only works while this file is open inside a Claude.ai chat - it couldn't be reached just now, which usually means this copy is running outside Claude.ai (e.g. from GitHub Pages or a downloaded file). Try again from within Claude.ai, or use the keyword search above (with Synonym groups) instead.</p></div>`;
+    }finally{
+      aiBtn.disabled = false;
+      aiBtn.innerHTML = originalLabel;
+    }
+  };
   card.querySelector('#srch-cat').onchange = (e)=>{ searchFilters.catKey = e.target.value; drawResults(); };
   card.querySelector('#srch-year').onchange = (e)=>{ searchFilters.year = e.target.value; drawResults(); };
   card.querySelector('#srch-month').onchange = (e)=>{ searchFilters.month = e.target.value; drawResults(); };
+  card.querySelector('#srch-group').onchange = (e)=>{ searchFilters.groupBy = e.target.value; drawResults(); };
   card.querySelector('#srch-from').onchange = (e)=>{ searchFilters.fromDate = e.target.value; drawResults(); };
   card.querySelector('#srch-to').onchange = (e)=>{ searchFilters.toDate = e.target.value; drawResults(); };
   card.querySelector('#srch-text').oninput = (e)=>{ searchFilters.text = e.target.value; drawResults(); };
@@ -6982,7 +7304,7 @@ function renderSearchCard(){
 /* --- Category-wise Summary: pick a category and see totals by month,
    by year, or for a custom date range (e.g. 1st-15th). --- */
 function renderCategorySummaryCard(){
-  const catList = summaryFilters.type==='income' ? REVENUE_CATS : COA;
+  const catList = summaryFilters.type==='income' ? REVENUE_CATS : historyCategories();
   if(!summaryFilters.catKeys || summaryFilters.catKeys.length===0 || !summaryFilters.catKeys.every(k=>catList.some(c=>c.key===k))){
     summaryFilters.catKeys = [catList[0].key];
   }
@@ -7156,7 +7478,7 @@ function historicalImportListHtml(){
         </tr></thead>
         <tbody>
           ${imports.map(imp=>{
-            const cat = COA.find(c=>c.key===imp.catKey);
+            const cat = findHistoryCategory(imp.catKey);
             return `<tr style="border-bottom:1px solid var(--line-soft);">
               <td style="padding:6px 8px;" class="mono">${escapeHtml(imp.fileName)}</td>
               <td style="padding:6px 8px;">${cat?escapeHtml(cat.label):escapeHtml(imp.catKey)}</td>
@@ -7171,6 +7493,33 @@ function historicalImportListHtml(){
     </div>`;
 }
 function renderHistoricalImportCard(){
+  const HIST_YEARS = ['2024','2025','2026'];
+  const catOptionsHtml = ()=>{
+    const customCats = state.customHistoricalCategories||[];
+    return `
+      <option value="">Auto-detect from file</option>
+      <optgroup label="Main expense categories">
+        ${COA.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}
+      </optgroup>
+      ${customCats.length ? `<optgroup label="Custom (historical-only) categories">
+        ${customCats.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}
+      </optgroup>` : ''}
+    `;
+  };
+  const customCatListHtml = ()=>{
+    const customCats = state.customHistoricalCategories||[];
+    if(!customCats.length) return '';
+    return `
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+        ${customCats.map(c=>`
+          <span class="tag" style="display:inline-flex; align-items:center; gap:6px; padding:4px 6px 4px 10px;">
+            ${escapeHtml(c.label)}
+            <button type="button" class="danger small" data-action="delete-hist-category" data-key="${c.key}" title="Delete this custom category" style="padding:1px 6px;">&times;</button>
+          </span>
+        `).join('')}
+      </div>
+    `;
+  };
   const card = el(`
     <div class="card" id="section-historical-import">
       <h3><span class="num">&#128194;</span> Historical Notesheet Import</h3>
@@ -7180,7 +7529,30 @@ function renderHistoricalImportCard(){
           <label>Notesheet files (.xlsx) &mdash; choose one or several at once</label>
           <input type="file" id="hist-file-input" accept=".xlsx" multiple>
         </div>
+        <div class="field" style="min-width:220px;">
+          <label>Category <span class="tag">applies to all files chosen above</span></label>
+          <select id="hist-cat">${catOptionsHtml()}</select>
+        </div>
+        <div class="field" style="min-width:120px;">
+          <label>Year <span class="tag">optional</span></label>
+          <select id="hist-year">
+            <option value="">As written in file</option>
+            ${HIST_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('')}
+          </select>
+        </div>
         <button class="secondary" type="button" id="hist-import-btn">&#128229; Import</button>
+      </div>
+      <div class="settings-panel-group" style="margin-top:14px;">
+        <div class="settings-panel-label">Add a custom historical category</div>
+        <p class="subnote" style="margin-top:0;">The categories above (Transport, Tailor, Utility, ...) are the institute's main expense categories. If an old notesheet used a category that isn't one of these, add it here first, then pick it from the Category list above before importing.</p>
+        <div class="row" style="align-items:flex-end; gap:10px; flex-wrap:wrap;">
+          <div class="field" style="flex:1 1 240px;">
+            <label>New category name</label>
+            <input type="text" id="hist-new-cat-name" placeholder="e.g. Old Building Rent">
+          </div>
+          <button class="secondary" type="button" id="hist-add-cat-btn">&#10133; Add category</button>
+        </div>
+        <div id="hist-cat-list">${customCatListHtml()}</div>
       </div>
       <div id="hist-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
       <div id="hist-import-results"></div>
@@ -7188,17 +7560,36 @@ function renderHistoricalImportCard(){
     </div>
   `);
   const fileInp = card.querySelector('#hist-file-input');
+  const catSel = card.querySelector('#hist-cat');
+  const yearSel = card.querySelector('#hist-year');
   const statusEl = card.querySelector('#hist-status');
   const resultsEl = card.querySelector('#hist-import-results');
+  card.querySelector('#hist-add-cat-btn').onclick = ()=>{
+    const nameInp = card.querySelector('#hist-new-cat-name');
+    const label = nameInp.value.trim();
+    if(!label){ showAlert('Type a name for the new category first.'); return; }
+    if(historyCategories().some(c=>normalizeCatLabel(c.label)===normalizeCatLabel(label))){
+      showAlert('A category with that name already exists.'); return;
+    }
+    const key = 'hist_'+uid();
+    state.customHistoricalCategories.push({key, label});
+    saveState();
+    nameInp.value = '';
+    catSel.innerHTML = catOptionsHtml();
+    catSel.value = key;
+    card.querySelector('#hist-cat-list').innerHTML = customCatListHtml();
+  };
   card.querySelector('#hist-import-btn').onclick = async ()=>{
     const files = Array.from(fileInp.files||[]);
     if(!files.length){ showAlert('Choose one or more notesheet .xlsx files first.'); return; }
+    const overrideCatKey = catSel.value || null;
+    const overrideYear = yearSel.value || null;
     statusEl.textContent = `Reading ${files.length} file${files.length===1?'':'s'}\u2026`;
     resultsEl.innerHTML = '';
     const ok = [], failed = [];
     for(const file of files){
       try{
-        const rec = await parseHistoricalNotesheetFile(file);
+        const rec = await parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear);
         state.historicalImports.push(rec);
         ok.push(rec);
       }catch(e){
@@ -7208,7 +7599,7 @@ function renderHistoricalImportCard(){
     statusEl.textContent = `${ok.length} imported, ${failed.length} failed.`;
     resultsEl.innerHTML =
       (ok.length ? `<p class="subnote" style="color:#2E7D32;">&#10003; Imported:<br>${ok.map(r=>{
-        const cat = COA.find(c=>c.key===r.catKey);
+        const cat = findHistoryCategory(r.catKey);
         return escapeHtml(r.fileName)+' &mdash; '+(cat?escapeHtml(cat.label):r.catKey)+' &middot; '+escapeHtml(r.rangeLabel)+' ('+r.items.length+' item'+(r.items.length===1?'':'s')+', '+money(r.total)+')';
       }).join('<br>')}</p>` : '') +
       (failed.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Could not read:<br>${failed.map(f=>escapeHtml(f.fileName)+' &mdash; '+escapeHtml(f.message)).join('<br>')}</p>` : '');
@@ -9929,6 +10320,25 @@ function wireDelegation(){
       });
       return;
     }
+    if(action==='delete-hist-category'){
+      const key = t.dataset.key;
+      const inUse = (state.historicalImports||[]).some(imp=>imp.catKey===key);
+      showConfirm(inUse
+        ? 'Delete this custom category? It is used by one or more imported notesheets - those entries will show a plain key instead of a label until re-imported under a different category.'
+        : 'Delete this custom historical category?', ()=>{
+        state.customHistoricalCategories = (state.customHistoricalCategories||[]).filter(c=>c.key!==key);
+        saveState(); render();
+      });
+      return;
+    }
+    if(action==='delete-synonym-group'){
+      const idx = Number(t.dataset.idx);
+      showConfirm('Delete this synonym group?', ()=>{
+        state.synonymGroups = (state.synonymGroups||[]).filter((g,i)=>i!==idx);
+        saveState(); render();
+      });
+      return;
+    }
     if(action==='toggle-monthly-ledger'){
       monthlyLedgerOpen = true;
       if(!monthlyLedgerViewKey) monthlyLedgerViewKey = monthKeyFor(state.month, state.year);
@@ -11512,6 +11922,111 @@ async function exportAnnualSummary(year){
   writeGrid(wsInc, `Annual Income Summary - ${year}`, incVouchers, REVENUE_CATS.map(c=>c.key), key=>REVENUE_CATS.find(c=>c.key===key));
 
   await downloadWorkbook(wb, `Annual_Summary_${year}.xlsx`);
+}
+
+/* --- Advanced Search export: an .xlsx of exactly what's on screen for the
+   current filters (category, year/month, date range, text, amounts,
+   grouping) - a criteria summary, an optional month/year subtotal block
+   matching the on-screen grouping, then the same detail rows in the same
+   order. Recomputes from the live filters/results at click time so it's
+   never stale relative to what's showing. */
+async function exportSearchResults(filters, results, catList){
+  try{ await loadExcelJS(); }catch(e){ showAlert('Could not reach the Excel export library. Check your internet connection and try again.'); return; }
+  if(!results.length){ showAlert('No results to export - adjust the search first.'); return; }
+
+  const wb = new ExcelJS.Workbook();
+  wb.calcProperties = {fullCalcOnLoad:true};
+  const ws = wb.addWorksheet('Search Results');
+  ws.getColumn(1).width = 13; ws.getColumn(2).width = 22; ws.getColumn(3).width = 16;
+  ws.getColumn(4).width = 44; ws.getColumn(5).width = 26; ws.getColumn(6).width = 16;
+
+  function put(addr, value, {size=11, bold=false, italic=false, numFmt, wrap=false}={}){
+    const c = ws.getCell(addr);
+    c.value = (value===''||value===undefined) ? '' : value;
+    c.font = {name:FONT, size, bold, italic};
+    if(numFmt) c.numFmt = numFmt;
+    if(wrap) c.alignment = {wrapText:true, vertical:'center'};
+    return c;
+  }
+
+  let r = 1;
+  ws.mergeCells(`A${r}:F${r}`);
+  put(`A${r}`, 'Advanced Search - Export', {size:16, bold:true});
+  ws.getRow(r).height = 22;
+  r += 2;
+
+  // --- Criteria actually used, skipping anything left blank ---
+  const cat = filters.catKey ? catList.find(c=>c.key===filters.catKey) : null;
+  const criteria = [
+    ['Category', cat ? cat.label : 'All categories'],
+    ['Year', filters.year || 'All years'],
+    ['Month', filters.month ? MONTHS[Number(filters.month)-1] : 'All months'],
+    ['From date', filters.fromDate || '\u2014'],
+    ['To date', filters.toDate || '\u2014'],
+    ['Description/voucher text', filters.text || '\u2014'],
+    ['Min amount', filters.minAmt!=='' && filters.minAmt!==undefined ? formatAsianAmount(filters.minAmt) : '\u2014'],
+    ['Max amount', filters.maxAmt!=='' && filters.maxAmt!==undefined ? formatAsianAmount(filters.maxAmt) : '\u2014'],
+    ['Grouped by', filters.groupBy ? (filters.groupBy==='year'?'Year':'Month') : 'Not grouped'],
+  ];
+  put(`A${r}`, 'Search criteria', {bold:true}); r++;
+  criteria.forEach(([label,val])=>{
+    put(`A${r}`, label, {italic:true});
+    ws.mergeCells(`B${r}:D${r}`);
+    put(`B${r}`, val);
+    r++;
+  });
+  r++;
+
+  const total = results.reduce((s,v)=>s+v.amount,0);
+  put(`A${r}`, `${results.length} voucher${results.length===1?'':'s'} found`, {bold:true});
+  put(`F${r}`, total, {bold:true, numFmt:ASIAN_NUMFMT});
+  r += 2;
+
+  // --- Optional month/year subtotal block, matching the on-screen grouping ---
+  if(filters.groupBy==='month' || filters.groupBy==='year'){
+    const groupBy = filters.groupBy;
+    const keyFn = groupBy==='year' ? (v=>v.date.slice(0,4)) : (v=>v.date.slice(0,7));
+    const labelFn = key => {
+      if(groupBy==='year') return key;
+      const [y,m] = key.split('-');
+      return `${MONTHS[Number(m)-1]} ${y}`;
+    };
+    const groups = groupSum(results, keyFn, labelFn).slice().reverse();
+    put(`A${r}`, groupBy==='year' ? 'Subtotal by year' : 'Subtotal by month', {bold:true}); r++;
+    put(`A${r}`, groupBy==='year'?'Year':'Month', {bold:true});
+    put(`B${r}`, 'Vouchers', {bold:true});
+    put(`C${r}`, 'Total', {bold:true});
+    r++;
+    groups.forEach(g=>{
+      const count = results.filter(v=>keyFn(v)===g.key).length;
+      put(`A${r}`, g.label);
+      put(`B${r}`, count);
+      put(`C${r}`, g.total, {numFmt:ASIAN_NUMFMT});
+      r++;
+    });
+    r++;
+  }
+
+  // --- Detail rows, same order as on screen (most recent first) ---
+  put(`A${r}`, 'Date', {bold:true});
+  put(`B${r}`, 'Category', {bold:true});
+  put(`C${r}`, 'Voucher', {bold:true});
+  put(`D${r}`, 'Description', {bold:true});
+  put(`E${r}`, 'Internal note', {bold:true});
+  put(`F${r}`, 'Amount', {bold:true});
+  r++;
+  results.slice().reverse().forEach(v=>{
+    put(`A${r}`, voucherDateLabel(v));
+    put(`B${r}`, v.cat.label);
+    put(`C${r}`, v.voucher);
+    put(`D${r}`, v.desc, {wrap:true});
+    put(`E${r}`, v.note||'');
+    put(`F${r}`, v.amount, {numFmt:ASIAN_NUMFMT});
+    r++;
+  });
+
+  const stamp = todayDateStr();
+  await downloadWorkbook(wb, `Advanced_Search_Export_${stamp}.xlsx`);
 }
 
 function uniqueSheetName(base, used){
