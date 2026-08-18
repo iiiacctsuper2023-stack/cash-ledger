@@ -1865,9 +1865,22 @@ async function parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear){
     if(!cat) throw new Error(`Unrecognized category "${catLabelRaw}" in the notesheet header - pick a category in the import form instead.`);
   }
 
-  const b5 = cellText('B5').trim();
-  const m = b5.match(/from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*-\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*\(voucher no:\s*([^-]+?)\s*-\s*([^)]+?)\)/i);
-  if(!m) throw new Error('Could not read the date-range sentence (row 5) in this notesheet.');
+  // The date-range sentence is normally at B5, but some older/exported
+  // notesheets shift it down or across a column or two (extra title rows,
+  // merged cells, etc.) - scan a small neighborhood of rows/columns for the
+  // matching sentence instead of assuming it's exactly at B5.
+  const DATE_RANGE_RE = /from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*-\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*\(voucher no:\s*([^-]+?)\s*-\s*([^)]+?)\)/i;
+  let m = null;
+  outerScan:
+  for(let r=1;r<=12;r++){
+    for(const col of ['A','B','C','D','E','F']){
+      const text = cellText(col+r).trim();
+      if(!text) continue;
+      const found = text.match(DATE_RANGE_RE);
+      if(found){ m = found; break outerScan; }
+    }
+  }
+  if(!m) throw new Error('Could not read the date-range sentence in this notesheet.');
   const monthIdx = name => MONTHS.findIndex(mm=>mm.toLowerCase()===name.toLowerCase());
   const fMonth = monthIdx(m[2]), tMonth = monthIdx(m[5]);
   if(fMonth<0 || tMonth<0) throw new Error(`Unrecognized month name in the date range: "${m[2]}" / "${m[5]}".`);
