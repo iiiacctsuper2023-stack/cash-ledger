@@ -1932,7 +1932,24 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
     }
   }
   if(!m) throw new Error('Could not read the date-range sentence in this notesheet.');
-  const monthIdx = name => MONTHS.findIndex(mm=>mm.toLowerCase()===name.toLowerCase());
+  // Source sheets aren't consistent about writing the full month name -
+  // some use abbreviations ("Feb"), and at least one had a plain typo
+  // ("Octoberber"). Accept an exact match first, then fall back to
+  // whichever direction of prefix-match makes sense: the written text is
+  // a prefix of the real month name (abbreviations), or the real month
+  // name is a prefix of the written text (typo'd extra letters tacked on
+  // the end). Require at least 3 letters so short/ambiguous fragments
+  // don't silently match the wrong month.
+  const monthIdx = name => {
+    const n = name.toLowerCase();
+    let idx = MONTHS.findIndex(mm=>mm.toLowerCase()===n);
+    if(idx>=0) return idx;
+    if(n.length>=3) idx = MONTHS.findIndex(mm=>{
+      const ml = mm.toLowerCase();
+      return ml.startsWith(n) || n.startsWith(ml);
+    });
+    return idx;
+  };
   const fMonth = monthIdx(m[2]), tMonth = monthIdx(m[5]);
   if(fMonth<0 || tMonth<0) throw new Error(`Unrecognized month name in the date range: "${m[2]}" / "${m[5]}".`);
   const fYear = overrideYear || m[3];
