@@ -1817,6 +1817,17 @@ function allHistoricalVouchers(){
   out.sort((a,b)=>a.date.localeCompare(b.date));
   return out;
 }
+/* allVouchers() and allHistoricalVouchers() are each sorted internally,
+   but simply concatenating them (real vouchers, then historical ones)
+   does NOT produce one date-sorted list - it produces two separately-
+   sorted blocks stuck together, so anything that reverses the result to
+   show "newest first" ends up showing the whole historical block before
+   the whole real-voucher block regardless of actual dates. Always use
+   this instead of `allVouchers().concat(allHistoricalVouchers())` when
+   the combined list needs to be in true date order. */
+function allVouchersAndHistorical(){
+  return allVouchers().concat(allHistoricalVouchers()).sort((a,b)=>a.date.localeCompare(b.date));
+}
 /* Reads one previously-generated Withdraw Notesheet .xlsx (the exact
    layout writeNotesheet() produces: B3 = "III/Acct/Madrasa/Withdraw/
    <Category>/<Number>", B5 = the "Following amount... disbursed from
@@ -7153,7 +7164,7 @@ async function exportMonthlyLedger(key, previewOnly){
 }
 
 function renderSearchCard(){
-  const searchList = allVouchers().concat(allHistoricalVouchers());
+  const searchList = allVouchersAndHistorical();
   const years = voucherYearsPresent(searchList);
   const searchCatList = historyCategories();
   const card = el(`
@@ -7417,7 +7428,7 @@ function renderCategorySummaryCard(){
   if(!summaryFilters.catKeys || summaryFilters.catKeys.length===0 || !summaryFilters.catKeys.every(k=>catList.some(c=>c.key===k))){
     summaryFilters.catKeys = [catList[0].key];
   }
-  const voucherList = summaryFilters.type==='income' ? allRevenueVouchers() : allVouchers().concat(allHistoricalVouchers());
+  const voucherList = summaryFilters.type==='income' ? allRevenueVouchers() : allVouchersAndHistorical();
   const years = voucherYearsPresent(voucherList);
   const selectedLabel = ()=> summaryFilters.catKeys.map(k=>catList.find(c=>c.key===k).label).join(' + ');
   const card = el(`
@@ -7572,7 +7583,11 @@ function renderCategorySummaryCard(){
    Advanced Search / Category Summary - see allHistoricalVouchers() and
    parseHistoricalNotesheetFile() above. Never touches real accounting. --- */
 function historicalImportListHtml(){
-  const imports = (state.historicalImports||[]).slice().sort((a,b)=>(b.importedAt||'').localeCompare(a.importedAt||''));
+  // Sort by the notesheet's own date range (oldest first), not by when it
+  // happened to be uploaded - a person importing files out of order
+  // shouldn't see the list jump around by upload time instead of reading
+  // top-to-bottom like a real chronological record.
+  const imports = (state.historicalImports||[]).slice().sort((a,b)=>(a.fromDate||'').localeCompare(b.fromDate||''));
   if(!imports.length) return `<p class="empty" style="margin-top:10px;">No historical notesheets imported yet.</p>`;
   return `
     <div style="overflow-x:auto; margin-top:14px;">
