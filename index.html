@@ -7280,7 +7280,7 @@ function renderSearchCard(){
         const [y,m] = key.split('-');
         return `${MONTHS[Number(m)-1]} ${y}`;
       };
-      const groups = groupSum(results, keyFn, labelFn).slice().reverse();
+      const groups = groupSum(results, keyFn, labelFn);
       const groupTable = el(`
         <div style="overflow-x:auto; margin-top:10px;">
           <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -7320,7 +7320,7 @@ function renderSearchCard(){
       </div>
     `);
     const tbody = table.querySelector('tbody');
-    results.slice().reverse().forEach(v=>{
+    results.slice().forEach(v=>{
       tbody.appendChild(el(`
         <tr style="border-bottom:1px solid var(--line-soft);">
           <td style="padding:6px 8px; white-space:nowrap;" class="mono">${voucherDateLabel(v)}</td>
@@ -12114,7 +12114,7 @@ async function exportSearchResults(filters, results, catList){
       const [y,m] = key.split('-');
       return `${MONTHS[Number(m)-1]} ${y}`;
     };
-    const groups = groupSum(results, keyFn, labelFn).slice().reverse();
+    const groups = groupSum(results, keyFn, labelFn);
     put(`A${r}`, groupBy==='year' ? 'Subtotal by year' : 'Subtotal by month', {bold:true}); r++;
     put(`A${r}`, groupBy==='year'?'Year':'Month', {bold:true});
     put(`B${r}`, 'Vouchers', {bold:true});
@@ -12130,7 +12130,7 @@ async function exportSearchResults(filters, results, catList){
     r++;
   }
 
-  // --- Detail rows, same order as on screen (most recent first) ---
+  // --- Detail rows, same order as on screen (oldest first) ---
   put(`A${r}`, 'Date', {bold:true});
   put(`B${r}`, 'Category', {bold:true});
   put(`C${r}`, 'Voucher', {bold:true});
@@ -12138,7 +12138,7 @@ async function exportSearchResults(filters, results, catList){
   put(`E${r}`, 'Internal note', {bold:true});
   put(`F${r}`, 'Amount', {bold:true});
   r++;
-  results.slice().reverse().forEach(v=>{
+  results.slice().forEach(v=>{
     put(`A${r}`, voucherDateLabel(v));
     put(`B${r}`, v.cat.label);
     put(`C${r}`, v.voucher);
