@@ -1840,40 +1840,91 @@ async function parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear){
   const buf = await file.arrayBuffer();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
-  const ws = wb.worksheets[0];
-  if(!ws) throw new Error('Could not read this workbook - no sheet found.');
+  if(!wb.worksheets.length) throw new Error('Could not read this workbook - no sheet found.');
 
+  // One .xlsx can contain several notesheets, one per tab (e.g. a combined
+  // "transport 01-10.xlsx" with tabs "transport 08", "transport 09",
+  // "transport 10" ...). Parse every sheet and return one record per sheet
+  // that successfully parses; sheets that don't look like a notesheet at
+  // all (no recognizable header) are skipped rather than failing the whole
+  // file, but a sheet that looks like a notesheet yet has a real problem
+  // still throws so the person sees it.
+  const records = [];
+  const sheetErrors = [];
+  for(const ws of wb.worksheets){
+    try{
+      const rec = parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear);
+      if(rec) records.push(rec);
+    }catch(e){
+      sheetErrors.push(`${ws.name}: ${e.message}`);
+    }
+  }
+  if(records.length===0){
+    throw new Error(sheetErrors.length ? sheetErrors.join(' | ') : 'No recognizable notesheet found in this workbook.');
+  }
+  return records;
+}
+function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
   const cellText = addr => {
     const v = ws.getCell(addr).value;
     if(v==null) return '';
     if(typeof v==='object' && 'richText' in v) return v.richText.map(rt=>rt.text).join('');
     if(typeof v==='object' && 'result' in v) return String(v.result||'');
+    if(v instanceof Date) return v.toISOString();
     return String(v);
   };
+  const COLS = ['A','B','C','D','E','F','G','H','I','J','K'];
+
+  // Locate the "III/.../Withdraw/<Category>/<Number>" header line - it can
+  // sit at B3 or C3 depending on the sheet's layout, so scan a small
+  // neighborhood rather than assuming one fixed cell.
+  let b3 = '', b3Found = false;
+  outerB3:
+  for(let r=1;r<=6;r++){
+    for(const col of COLS){
+      const text = cellText(col+r).trim();
+      if(text.includes('/Withdraw/')){ b3 = text; b3Found = true; break outerB3; }
+    }
+  }
+  if(!b3Found) return null; // doesn't look like a notesheet at all - skip silently
 
   let cat;
   if(overrideCatKey){
     cat = findHistoryCategory(overrideCatKey);
     if(!cat) throw new Error(`Unrecognized category key "${overrideCatKey}".`);
   } else {
-    const b3 = cellText('B3').trim();
-    const parts = b3.split('/');
-    if(parts.length<6) throw new Error(`Unrecognized notesheet header in B3: "${b3}"`);
-    const catLabelRaw = parts[4].trim();
-    cat = historyCategories().find(c=>normalizeCatLabel(c.notesheetLabel)===normalizeCatLabel(catLabelRaw))
-       || historyCategories().find(c=>normalizeCatLabel(c.label)===normalizeCatLabel(catLabelRaw));
-    if(!cat) throw new Error(`Unrecognized category "${catLabelRaw}" in the notesheet header - pick a category in the import form instead.`);
+    // Real notesheet headers don't always follow the exact slash layout
+    // this app currently writes, and the category word inside them isn't
+    // always an exact match either (e.g. "Transport expense" vs the
+    // category's own label "Transport") - so instead of picking one fixed
+    // slash-separated part and requiring an exact match, check the whole
+    // header line for any known category name appearing in it, preferring
+    // the longest/most specific name so e.g. "Books & Stationery" wins
+    // over a shorter unrelated partial match.
+    const b3Norm = normalizeCatLabel(b3);
+    const candidates = historyCategories().slice().sort((a,b)=>
+      normalizeCatLabel(b.notesheetLabel||b.label).length - normalizeCatLabel(a.notesheetLabel||a.label).length);
+    cat = candidates.find(c=> b3Norm.includes(normalizeCatLabel(c.notesheetLabel)) || b3Norm.includes(normalizeCatLabel(c.label)));
+    if(!cat) throw new Error(`Unrecognized category in the notesheet header: "${b3}" - pick a category in the import form instead.`);
   }
 
   // The date-range sentence is normally at B5, but some older/exported
   // notesheets shift it down or across a column or two (extra title rows,
   // merged cells, etc.) - scan a small neighborhood of rows/columns for the
   // matching sentence instead of assuming it's exactly at B5.
-  const DATE_RANGE_RE = /from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*-\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*\(voucher no:\s*([^-]+?)\s*-\s*([^)]+?)\)/i;
+  // Two known phrasings show up in the wild:
+  //   "...from 1st July 2024 - 15th July 2024 (voucher no: X - Y)"
+  //   "...from 1st July 2024 to 15th July 2024" (voucher info in a
+  //    separate following sentence, e.g. "Voucher no( ... )")
+  // The voucher numbers themselves aren't used anywhere below (only the
+  // dates are), so the regex only needs to capture the date range and can
+  // accept either "-" or "to" as the separator, with or without a trailing
+  // voucher clause.
+  const DATE_RANGE_RE = /from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*(?:-|to)\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})/i;
   let m = null;
   outerScan:
-  for(let r=1;r<=12;r++){
-    for(const col of ['A','B','C','D','E','F']){
+  for(let r=1;r<=15;r++){
+    for(const col of COLS){
       const text = cellText(col+r).trim();
       if(!text) continue;
       const found = text.match(DATE_RANGE_RE);
@@ -1890,24 +1941,52 @@ async function parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear){
   const toDate = `${tYear}-${String(tMonth+1).padStart(2,'0')}-${m[4].padStart(2,'0')}`;
   const rangeLabel = `${m[1]} ${MONTHS[fMonth].slice(0,3)} ${fYear} - ${m[4]} ${MONTHS[tMonth].slice(0,3)} ${tYear}`;
 
-  let headerRow = null;
-  for(let r=1;r<=15;r++){ if(cellText('C'+r).trim()==='S/no'){ headerRow = r; break; } }
+  // The item table's header row has "S/no" (or a close variant),
+  // "Description", and "Amount" as separate cells - but NOT necessarily in
+  // adjacent columns (e.g. S/no in D, Description in E, Amount all the way
+  // over in I, with blank columns in between for print spacing). So each
+  // column is found independently by matching its own header text on
+  // whichever row the "S/no" cell turns up in, rather than assuming
+  // Description/Amount sit right next to S/no.
+  const normHeader = s => s.toLowerCase().replace(/[.\s]/g,'');
+  const SNO_VARIANTS = new Set(['s/no','sno','sl','slno','serialno','s/n']);
+  let headerRow = null, voucherCol = null;
+  outerHeaderScan:
+  for(let r=1;r<=25;r++){
+    for(const col of COLS){
+      const text = normHeader(cellText(col+r).trim());
+      if(text && SNO_VARIANTS.has(text)){ headerRow = r; voucherCol = col; break outerHeaderScan; }
+    }
+  }
   if(!headerRow) throw new Error('Could not find the item table (S/no header) in this notesheet.');
+
+  let descCol = null, amountCol = null;
+  for(const col of COLS){
+    const text = normHeader(cellText(col+headerRow).trim());
+    if(!descCol && text==='description') descCol = col;
+    if(!amountCol && text==='amount') amountCol = col;
+  }
+  // Fall back to the two columns right after S/no if a label wasn't found
+  // (e.g. a blank/merged header cell) - matches the layout this app itself
+  // writes when generating notesheets.
+  const voucherColIdx = COLS.indexOf(voucherCol);
+  if(!descCol) descCol = COLS[voucherColIdx+1];
+  if(!amountCol) amountCol = COLS[voucherColIdx+2];
 
   const items = [];
   for(let r=headerRow+1; r<headerRow+500; r++){
-    const cVal = cellText('C'+r).trim();
-    const dVal = cellText('D'+r).trim();
-    const eVal = cellText('E'+r).trim();
-    if(cVal==='Total Amount') break;
-    if(cVal==='' && dVal==='' && eVal==='') break;
+    const cVal = cellText(voucherCol+r).trim();
+    const dVal = cellText(descCol+r).trim();
+    const eVal = cellText(amountCol+r).trim();
+    if(/^total\s*amount/i.test(cVal)) break;
+    if(cVal==='' && dVal==='' && eVal==='') continue; // skip blank spacer rows rather than stopping
     const amt = Number(eVal.replace(/,/g,''))||0;
     if(amt>0) items.push({voucher:cVal, desc:dVal, amount:amt});
   }
   if(items.length===0) throw new Error('No line items found in this notesheet.');
   const total = items.reduce((s,it)=>s+it.amount,0);
 
-  return {id:uid(), fileName:file.name, catKey:cat.key, fromDate, toDate, rangeLabel, items, total, importedAt:new Date().toISOString()};
+  return {id:uid(), fileName:file.name+' ('+ws.name+')', catKey:cat.key, fromDate, toDate, rangeLabel, items, total, importedAt:new Date().toISOString()};
 }
 function voucherYearsPresent(list){
   const years = new Set((list || allVouchers()).map(v=>v.date.slice(0,4)));
@@ -7602,9 +7681,8 @@ function renderHistoricalImportCard(){
     const ok = [], failed = [];
     for(const file of files){
       try{
-        const rec = await parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear);
-        state.historicalImports.push(rec);
-        ok.push(rec);
+        const recs = await parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear);
+        recs.forEach(rec=>{ state.historicalImports.push(rec); ok.push(rec); });
       }catch(e){
         failed.push({fileName:file.name, message:e.message});
       }
