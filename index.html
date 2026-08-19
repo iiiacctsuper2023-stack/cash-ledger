@@ -3113,6 +3113,18 @@ function showMoveVoucherModal(day, fromCatKey, item){
     newVoucher.desc = item.desc;
     newVoucher.amount = item.amount;
     newVoucher.status = item.status;
+    newVoucher.note = item.note;
+    // The description/amount fields shown in the list are actually read
+    // from item.sections[0] (drawCoaList), not from item.desc/item.amount
+    // directly - those two are just kept in sync FROM sections. Carrying
+    // over only desc/amount left the new voucher's sections at their
+    // freshly-created blank default, so the move looked like it silently
+    // discarded the amount and description. Carry the real sections
+    // across (deep-copied so editing one voucher doesn't mutate the
+    // other) so syncCoaItemFromSections/rendering see the moved data.
+    newVoucher.sections = (item.sections && item.sections.length)
+      ? item.sections.map(s=>({id:uid(), desc:s.desc||'', amount:Number(s.amount)||0}))
+      : [{id:uid(), desc:item.desc||'', amount:Number(item.amount)||0}];
     pushUndo(`Voucher moved to ${COA.find(c=>c.key===toCatKey).label} - undone.`, ()=>{
       day.coa[toCatKey] = day.coa[toCatKey].filter(x=>x.id!==newVoucher.id);
       day.coa[fromCatKey].push(item);
