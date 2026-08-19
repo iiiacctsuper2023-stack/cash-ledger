@@ -1237,12 +1237,18 @@ function panelRegistry(){
 }
 function panelInfo(key){ return panelRegistry().find(p=>p[0]===key) || null; }
 /* Open (or re-focus) a sidebar section as a full page. Clicking the same
-   section that's already on screen closes it instead (old toggle habit). */
+   section that's already on screen closes it instead (old toggle habit).
+   Switching to a different section always closes every other section
+   first, so only one nav item is ever highlighted at a time - like a
+   normal single-active-panel sidebar - instead of every section you've
+   visited staying lit up in the background. */
 function openPanel(key){
   const p = panelInfo(key);
   if(!p) return;
-  if(viewingPanel===key){ p[2](false); viewingPanel=null; }
-  else { p[2](true); viewingPanel=key; }
+  if(viewingPanel===key){ p[2](false); viewingPanel=null; return; }
+  panelRegistry().forEach(([k,,setter])=>{ if(k!==key) setter(false); });
+  p[2](true);
+  viewingPanel = key;
 }
 /* Renders the sticky title bar + Hide/Close controls that wrap every
    sidebar section when it's shown as its own page. */
@@ -3125,9 +3131,15 @@ function showMoveVoucherModal(day, fromCatKey, item){
     newVoucher.sections = (item.sections && item.sections.length)
       ? item.sections.map(s=>({id:uid(), desc:s.desc||'', amount:Number(s.amount)||0}))
       : [{id:uid(), desc:item.desc||'', amount:Number(item.amount)||0}];
-    pushUndo(`Voucher moved to ${COA.find(c=>c.key===toCatKey).label} - undone.`, ()=>{
+    const toLabel = COA.find(c=>c.key===toCatKey).label;
+    // entity is HTML-escaped by the Audit Trail renderer itself (see
+    // renderAuditLogCard) - don't escape it again here, or "&" etc in a
+    // description would show up double-encoded.
+    pushAuditEntry({kind:'edit', entity:`Voucher ${item.voucher} \u2192 ${newVoucher.voucher} (${item.desc||'no description'}, ${money(item.amount)})`, field:'Category', oldVal:fromLabel, newVal:toLabel});
+    pushUndo(`Voucher moved to ${toLabel} - undone.`, ()=>{
       day.coa[toCatKey] = day.coa[toCatKey].filter(x=>x.id!==newVoucher.id);
       day.coa[fromCatKey].push(item);
+      pushAuditEntry({kind:'edit', entity:`Voucher ${newVoucher.voucher} \u2192 ${item.voucher} (${item.desc||'no description'}, ${money(item.amount)})`, field:'Category (move undone)', oldVal:toLabel, newVal:fromLabel});
     });
     saveState();
     overlay.remove();
@@ -3137,6 +3149,55 @@ function showMoveVoucherModal(day, fromCatKey, item){
   cancelBtn.onclick = ()=> overlay.remove();
   wireBackdropClose(overlay);
   setTimeout(()=>catSelect.focus(), 30);
+}
+
+/* Deleting an already-added CoA voucher or voucher section (Cash
+   Disbursed) needs a short reason first - unlike most quick-deletes in
+   this tool, these remove real accounting data, so the "why" is
+   required and gets stored in the Audit Trail snapshot alongside the
+   voucher/section itself. onConfirmed(note) only fires once a
+   non-empty reason is given; Cancel/backdrop-click leaves it untouched.
+   `title` is the modal heading ("Delete voucher" / "Delete section"),
+   `summaryHtml` is pre-built (already-escaped) HTML describing what's
+   about to be deleted. */
+function showDeleteReasonModal(title, summaryHtml, onConfirmed){
+  const overlay = el(`
+    <div class="modal-overlay">
+      <div class="modal-box">
+        <p><strong>${escapeHtml(title)}</strong><br>
+        <span style="color:var(--ink-soft);font-size:12.5px;">${summaryHtml}</span></p>
+        <label style="font-size:12.5px;color:var(--ink-soft);">Reason for deleting <span style="color:var(--danger);">*</span></label>
+        <textarea id="del-reason-note" rows="2" style="width:100%;margin:2px 0 10px;font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;resize:vertical;" placeholder="Why is this being deleted? (required, shown in Audit Trail)"></textarea>
+        <div id="del-reason-error" style="color:var(--danger); font-size:12.5px; margin:-6px 0 8px; min-height:1em;"></div>
+        <div class="modal-actions">
+          <button class="secondary" type="button">Cancel</button>
+          <button class="danger" type="button">Delete</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.body.appendChild(overlay);
+  const noteInp = overlay.querySelector('#del-reason-note');
+  const errBox = overlay.querySelector('#del-reason-error');
+  const buttons = overlay.querySelectorAll('.modal-actions button');
+  const cancelBtn = buttons[0], confirmBtn = buttons[1];
+  confirmBtn.onclick = ()=>{
+    const note = noteInp.value.trim();
+    if(!note){ errBox.textContent = 'A short reason is required before deleting.'; noteInp.focus(); return; }
+    overlay.remove();
+    onConfirmed(note);
+  };
+  cancelBtn.onclick = ()=> overlay.remove();
+  wireBackdropClose(overlay);
+  setTimeout(()=>noteInp.focus(), 30);
+}
+/* Thin wrapper over showDeleteReasonModal for the common "delete a
+   whole CoA voucher" case, so call sites don't have to build the
+   summary HTML themselves. */
+function showDeleteCoaVoucherModal(catKey, item, onConfirmed){
+  const cat = COA.find(c=>c.key===catKey);
+  const summary = `${escapeHtml(item.voucher)} &mdash; ${escapeHtml(item.desc||'(no description)')} &mdash; ${money(item.amount)}<br>${escapeHtml(cat?cat.label:catKey)}`;
+  showDeleteReasonModal('Delete voucher', summary, onConfirmed);
 }
 
 /* Native confirm()/alert() are often blocked inside a sandboxed artifact
@@ -8284,9 +8345,6 @@ function renderAuditLogCard(){
           <label>Search</label>
           <input type="text" id="al-search" placeholder="Filter by entity, field, or value&hellip;"/>
         </div>
-        <div class="field" style="flex:none;">
-          <button type="button" class="danger small" id="al-clear">Clear entire log</button>
-        </div>
       </div>
       <div id="al-body"></div>
     </div>
@@ -8338,11 +8396,6 @@ function renderAuditLogCard(){
   draw();
   card.querySelector('#al-kind').onchange = draw;
   card.querySelector('#al-search').oninput = draw;
-  card.querySelector('#al-clear').onclick = ()=>{
-    if(!confirm('Clear the entire audit log? This cannot be undone.')) return;
-    state.auditLog = [];
-    saveState(); draw();
-  };
   return card;
 }
 
@@ -10881,7 +10934,9 @@ function wireDelegation(){
       if(item){
         if(item.fromDate===day.date){
           const idx = state.iouRegistry.findIndex(x=>x.id===item.id);
-          logAuditDelete('IOU', item);
+          // IOU removal isn't logged to the Audit Trail (by request) -
+          // it's routine bookkeeping (an IOU line added and then fixed
+          // the same day), not a deletion worth surfacing there.
           state.iouRegistry = state.iouRegistry.filter(x=>x.id!==item.id);
           pushUndo('IOU removed.', ()=>{ state.iouRegistry.splice(idx,0,item); });
         } else {
@@ -11007,10 +11062,15 @@ function wireDelegation(){
       const item = (day.coa[catKey]||[]).find(x=>x.id===t.dataset.item);
       if(item && item.sections && item.sections.length>1){
         const removedSec = item.sections.find(s=>s.id===t.dataset.section);
-        if(removedSec) logAuditDelete(`${catKey} voucher section`, removedSec);
-        item.sections = item.sections.filter(s=>s.id!==t.dataset.section);
-        syncCoaItemFromSections(item);
-        saveState(); render();
+        if(!removedSec) return;
+        const secIdx = item.sections.indexOf(removedSec);
+        const summary = `${escapeHtml(item.voucher)} &mdash; section ${secIdx+1}: ${escapeHtml(removedSec.desc||'(no description)')} &mdash; ${money(removedSec.amount)}`;
+        showDeleteReasonModal('Delete section', summary, (note)=>{
+          logAuditDelete(`${catKey} voucher section`, {desc:removedSec.desc, amount:removedSec.amount, reason:note});
+          item.sections = item.sections.filter(s=>s.id!==t.dataset.section);
+          syncCoaItemFromSections(item);
+          saveState(); render();
+        });
       }
       return;
     }
@@ -11019,34 +11079,39 @@ function wireDelegation(){
       const catKey = t.dataset.cat;
       const idx = day.coa[catKey].findIndex(x=>x.id===t.dataset.item);
       const removed = day.coa[catKey][idx];
-      logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount});
-      let removedAssetEntry = null, removedAssetItemId = null;
-      if(removed.assetLink){
-        const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removed.assetLink.assetItemId);
-        const entry = assetItem && assetItem.entries.find(e=>e.id===removed.assetLink.entryId);
-        if(assetItem && entry){
-          logAuditDelete(`Asset entry (${assetItem.name})`, entry);
-          removedAssetEntry = entry; removedAssetItemId = assetItem.id;
-          assetItem.entries = assetItem.entries.filter(e=>e.id!==entry.id);
+      // Deleting a real voucher requires a short reason first (see
+      // showDeleteCoaVoucherModal) - the actual removal only happens
+      // once that's confirmed, in the callback below.
+      showDeleteCoaVoucherModal(catKey, removed, (note)=>{
+        logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount, reason:note});
+        let removedAssetEntry = null, removedAssetItemId = null;
+        if(removed.assetLink){
+          const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removed.assetLink.assetItemId);
+          const entry = assetItem && assetItem.entries.find(e=>e.id===removed.assetLink.entryId);
+          if(assetItem && entry){
+            logAuditDelete(`Asset entry (${assetItem.name})`, entry);
+            removedAssetEntry = entry; removedAssetItemId = assetItem.id;
+            assetItem.entries = assetItem.entries.filter(e=>e.id!==entry.id);
+          }
         }
-      }
-      day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==t.dataset.item);
-      const reclaimedSeq = (removed.voucherSeq!=null && state.voucherCounters[catKey]===removed.voucherSeq) ? removed.voucherSeq : null;
-      reclaimVoucherNumberIfLast(catKey, removed);
-      pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{
-        day.coa[catKey].splice(idx,0,removed);
-        // If the delete had freed up this number and nothing new has
-        // claimed it since, put the counter back too - otherwise the
-        // restored voucher and the next new one would collide.
-        if(reclaimedSeq!=null && state.voucherCounters[catKey]===reclaimedSeq-1){
-          state.voucherCounters[catKey] = reclaimedSeq;
-        }
-        if(removedAssetEntry && removedAssetItemId){
-          const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removedAssetItemId);
-          if(assetItem) assetItem.entries.push(removedAssetEntry);
-        }
+        day.coa[catKey] = day.coa[catKey].filter(x=>x.id!==removed.id);
+        const reclaimedSeq = (removed.voucherSeq!=null && state.voucherCounters[catKey]===removed.voucherSeq) ? removed.voucherSeq : null;
+        reclaimVoucherNumberIfLast(catKey, removed);
+        pushUndo((removed.desc||catKey+' voucher')+' removed.', ()=>{
+          day.coa[catKey].splice(idx,0,removed);
+          // If the delete had freed up this number and nothing new has
+          // claimed it since, put the counter back too - otherwise the
+          // restored voucher and the next new one would collide.
+          if(reclaimedSeq!=null && state.voucherCounters[catKey]===reclaimedSeq-1){
+            state.voucherCounters[catKey] = reclaimedSeq;
+          }
+          if(removedAssetEntry && removedAssetItemId){
+            const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removedAssetItemId);
+            if(assetItem) assetItem.entries.push(removedAssetEntry);
+          }
+        });
+        saveState(); render();
       });
-      saveState(); render();
       return;
     }
     if(action==='open-move-coa'){
