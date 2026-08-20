@@ -1180,6 +1180,9 @@ let historicalImportOpen = false;
 // currently sorted - persists only for this session, not saved to state,
 // same as other in-memory UI filters in this file (searchFilters etc.).
 let histImportSort = 'date';
+// Which single category to narrow the list to when histImportSort is
+// 'category' - '' means show every category (still grouped by category).
+let histImportCategoryFilter = '';
 let journalOpen = false;
 let journalFilters = { mode:'month', year:'', month:'', view:'journal' }; // view: journal | ledger | trial
 let journalLedgerAccount = null;
@@ -7702,10 +7705,17 @@ function historicalImportListHtml(){
   // Sort order is user-selectable (category / year / month / upload date
   // range) via the dropdown rendered alongside this list - see
   // histImportSort and the #hist-sort control in renderHistoricalImportCard.
-  const imports = (state.historicalImports||[]).slice();
+  // When sorting by Category, a second dropdown (histImportCategoryFilter)
+  // lists every category (khat) - picking one narrows the table to just
+  // that category's notesheets, shown ordered by year.
+  let imports = (state.historicalImports||[]).slice();
   const catLabelOf = imp => { const c = findHistoryCategory(imp.catKey); return c ? c.label : imp.catKey; };
   if(histImportSort==='category'){
-    imports.sort((a,b)=> catLabelOf(a).localeCompare(catLabelOf(b)) || (a.fromDate||'').localeCompare(b.fromDate||''));
+    if(histImportCategoryFilter) imports = imports.filter(imp=>imp.catKey===histImportCategoryFilter);
+    imports.sort((a,b)=>
+      (histImportCategoryFilter ? 0 : catLabelOf(a).localeCompare(catLabelOf(b))) ||
+      (a.fromDate||'').slice(0,4).localeCompare((b.fromDate||'').slice(0,4)) ||
+      (a.fromDate||'').localeCompare(b.fromDate||''));
   } else if(histImportSort==='year'){
     imports.sort((a,b)=> (b.fromDate||'').slice(0,4).localeCompare((a.fromDate||'').slice(0,4)) || (a.fromDate||'').localeCompare(b.fromDate||''));
   } else if(histImportSort==='month'){
@@ -7720,7 +7730,8 @@ function historicalImportListHtml(){
     // reading top-to-bottom like a real chronological record.
     imports.sort((a,b)=>(a.fromDate||'').localeCompare(b.fromDate||''));
   }
-  if(!imports.length) return `<p class="empty" style="margin-top:10px;">No historical notesheets imported yet.</p>`;
+  const totalCount = (state.historicalImports||[]).length;
+  if(!totalCount) return `<p class="empty" style="margin-top:10px;">No historical notesheets imported yet.</p>`;
   return `
     <div class="row" style="align-items:flex-end; gap:10px; margin-top:14px; flex-wrap:wrap;">
       <div class="field" style="min-width:180px;">
@@ -7732,7 +7743,16 @@ function historicalImportListHtml(){
           <option value="month" ${histImportSort==='month'?'selected':''}>Month (মাস)</option>
         </select>
       </div>
+      ${histImportSort==='category' ? `
+      <div class="field" style="min-width:220px;">
+        <label>Category</label>
+        <select id="hist-cat-filter">
+          <option value="">All categories</option>
+          ${historyCategories().map(c=>`<option value="${c.key}" ${histImportCategoryFilter===c.key?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}
+        </select>
+      </div>` : ''}
     </div>
+    ${imports.length ? `
     <div style="overflow-x:auto; margin-top:8px;">
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
@@ -7757,7 +7777,7 @@ function historicalImportListHtml(){
           }).join('')}
         </tbody>
       </table>
-    </div>`;
+    </div>` : `<p class="empty" style="margin-top:10px;">No historical notesheets imported in this category yet.</p>`}`;
 }
 function renderHistoricalImportCard(){
   const HIST_YEARS = ['2024','2025','2026'];
@@ -7832,12 +7852,15 @@ function renderHistoricalImportCard(){
   const statusEl = card.querySelector('#hist-status');
   const resultsEl = card.querySelector('#hist-import-results');
   const listEl = card.querySelector('#hist-import-list');
-  // The sort dropdown lives inside the list's own HTML (rebuilt on every
-  // refresh), so its change handler has to be re-wired each time the list
-  // is redrawn rather than bound once at card creation.
+  // The sort dropdown (and, when sorting by category, the category-filter
+  // dropdown) live inside the list's own HTML (rebuilt on every refresh),
+  // so their change handlers have to be re-wired each time the list is
+  // redrawn rather than bound once at card creation.
   function wireHistSortSelect(){
     const sortSel = listEl.querySelector('#hist-sort');
     if(sortSel) sortSel.onchange = ()=>{ histImportSort = sortSel.value; listEl.innerHTML = historicalImportListHtml(); wireHistSortSelect(); };
+    const catFilterSel = listEl.querySelector('#hist-cat-filter');
+    if(catFilterSel) catFilterSel.onchange = ()=>{ histImportCategoryFilter = catFilterSel.value; listEl.innerHTML = historicalImportListHtml(); wireHistSortSelect(); };
   }
   wireHistSortSelect();
   card.querySelector('#hist-add-cat-btn').onclick = ()=>{
