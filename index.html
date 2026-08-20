@@ -1176,6 +1176,10 @@ let searchFilters = { catKey:'', year:'', month:'', fromDate:'', toDate:'', text
 let summaryOpen = false;
 let summaryFilters = { type:'expenditure', catKeys:[], mode:'month', year:'', fromDate:'', toDate:'' };
 let historicalImportOpen = false;
+// How the Historical Notesheet Import list (below the upload form) is
+// currently sorted - persists only for this session, not saved to state,
+// same as other in-memory UI filters in this file (searchFilters etc.).
+let histImportSort = 'date';
 let journalOpen = false;
 let journalFilters = { mode:'month', year:'', month:'', view:'journal' }; // view: journal | ledger | trial
 let journalLedgerAccount = null;
@@ -2059,7 +2063,7 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
   if(items.length===0) throw new Error('No line items found in this notesheet.');
   const total = items.reduce((s,it)=>s+it.amount,0);
 
-  return {id:uid(), fileName:file.name+' ('+ws.name+')', catKey:cat.key, fromDate, toDate, rangeLabel, items, total, importedAt:new Date().toISOString()};
+  return {id:uid(), fileName:file.name+' ('+ws.name+')', sourceFileName:file.name, catKey:cat.key, fromDate, toDate, rangeLabel, items, total, importedAt:new Date().toISOString()};
 }
 function voucherYearsPresent(list){
   const years = new Set((list || allVouchers()).map(v=>v.date.slice(0,4)));
@@ -7695,14 +7699,41 @@ function renderCategorySummaryCard(){
    Advanced Search / Category Summary - see allHistoricalVouchers() and
    parseHistoricalNotesheetFile() above. Never touches real accounting. --- */
 function historicalImportListHtml(){
-  // Sort by the notesheet's own date range (oldest first), not by when it
-  // happened to be uploaded - a person importing files out of order
-  // shouldn't see the list jump around by upload time instead of reading
-  // top-to-bottom like a real chronological record.
-  const imports = (state.historicalImports||[]).slice().sort((a,b)=>(a.fromDate||'').localeCompare(b.fromDate||''));
+  // Sort order is user-selectable (category / year / month / upload date
+  // range) via the dropdown rendered alongside this list - see
+  // histImportSort and the #hist-sort control in renderHistoricalImportCard.
+  const imports = (state.historicalImports||[]).slice();
+  const catLabelOf = imp => { const c = findHistoryCategory(imp.catKey); return c ? c.label : imp.catKey; };
+  if(histImportSort==='category'){
+    imports.sort((a,b)=> catLabelOf(a).localeCompare(catLabelOf(b)) || (a.fromDate||'').localeCompare(b.fromDate||''));
+  } else if(histImportSort==='year'){
+    imports.sort((a,b)=> (b.fromDate||'').slice(0,4).localeCompare((a.fromDate||'').slice(0,4)) || (a.fromDate||'').localeCompare(b.fromDate||''));
+  } else if(histImportSort==='month'){
+    // Groups by calendar month across years (all Januaries together, etc.)
+    // rather than chronologically, since that's what "sort by month" means
+    // as distinct from "sort by year" or the default date-range sort.
+    imports.sort((a,b)=> (a.fromDate||'').slice(5,7).localeCompare((b.fromDate||'').slice(5,7)) || (a.fromDate||'').localeCompare(b.fromDate||''));
+  } else {
+    // Default: by the notesheet's own date range (oldest first), not by
+    // when it happened to be uploaded - a person importing files out of
+    // order shouldn't see the list jump around by upload time instead of
+    // reading top-to-bottom like a real chronological record.
+    imports.sort((a,b)=>(a.fromDate||'').localeCompare(b.fromDate||''));
+  }
   if(!imports.length) return `<p class="empty" style="margin-top:10px;">No historical notesheets imported yet.</p>`;
   return `
-    <div style="overflow-x:auto; margin-top:14px;">
+    <div class="row" style="align-items:flex-end; gap:10px; margin-top:14px; flex-wrap:wrap;">
+      <div class="field" style="min-width:180px;">
+        <label>Sort list by</label>
+        <select id="hist-sort">
+          <option value="date" ${histImportSort==='date'?'selected':''}>Date range (default)</option>
+          <option value="category" ${histImportSort==='category'?'selected':''}>Category (খাত)</option>
+          <option value="year" ${histImportSort==='year'?'selected':''}>Year (সাল)</option>
+          <option value="month" ${histImportSort==='month'?'selected':''}>Month (মাস)</option>
+        </select>
+      </div>
+    </div>
+    <div style="overflow-x:auto; margin-top:8px;">
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
           <th style="padding:6px 8px;">File</th>
@@ -7800,6 +7831,15 @@ function renderHistoricalImportCard(){
   const yearSel = card.querySelector('#hist-year');
   const statusEl = card.querySelector('#hist-status');
   const resultsEl = card.querySelector('#hist-import-results');
+  const listEl = card.querySelector('#hist-import-list');
+  // The sort dropdown lives inside the list's own HTML (rebuilt on every
+  // refresh), so its change handler has to be re-wired each time the list
+  // is redrawn rather than bound once at card creation.
+  function wireHistSortSelect(){
+    const sortSel = listEl.querySelector('#hist-sort');
+    if(sortSel) sortSel.onchange = ()=>{ histImportSort = sortSel.value; listEl.innerHTML = historicalImportListHtml(); wireHistSortSelect(); };
+  }
+  wireHistSortSelect();
   card.querySelector('#hist-add-cat-btn').onclick = ()=>{
     const nameInp = card.querySelector('#hist-new-cat-name');
     const label = nameInp.value.trim();
@@ -7822,26 +7862,36 @@ function renderHistoricalImportCard(){
     const overrideYear = yearSel.value || null;
     statusEl.textContent = `Reading ${files.length} file${files.length===1?'':'s'}\u2026`;
     resultsEl.innerHTML = '';
-    const ok = [], failed = [];
+    // A file already imported (same original filename, case-insensitive)
+    // is skipped rather than parsed again - re-uploading the same
+    // notesheet would otherwise double its line items in Search/Category
+    // Summary. Matches on the raw filename picked in the file dialog, not
+    // the "File (sheet)" label shown in the list below.
+    const alreadyImported = new Set((state.historicalImports||[]).map(imp=>(imp.sourceFileName||imp.fileName||'').toLowerCase()));
+    const ok = [], failed = [], skipped = [];
     for(const file of files){
+      if(alreadyImported.has(file.name.toLowerCase())){ skipped.push(file.name); continue; }
       try{
         const recs = await parseHistoricalNotesheetFile(file, overrideCatKey, overrideYear);
         recs.forEach(rec=>{ state.historicalImports.push(rec); ok.push(rec); });
+        alreadyImported.add(file.name.toLowerCase());
       }catch(e){
         failed.push({fileName:file.name, message:e.message});
       }
     }
-    statusEl.textContent = `${ok.length} imported, ${failed.length} failed.`;
+    statusEl.textContent = `${ok.length} imported, ${failed.length} failed${skipped.length ? ', '+skipped.length+' skipped (already imported)' : ''}.`;
     resultsEl.innerHTML =
       (ok.length ? `<p class="subnote" style="color:#2E7D32;">&#10003; Imported:<br>${ok.map(r=>{
         const cat = findHistoryCategory(r.catKey);
         return escapeHtml(r.fileName)+' &mdash; '+(cat?escapeHtml(cat.label):r.catKey)+' &middot; '+escapeHtml(r.rangeLabel)+' ('+r.items.length+' item'+(r.items.length===1?'':'s')+', '+money(r.total)+')';
       }).join('<br>')}</p>` : '') +
+      (skipped.length ? `<p class="subnote" style="color:var(--ink-soft);">&#8635; Skipped (already imported earlier):<br>${skipped.map(f=>escapeHtml(f)).join('<br>')}</p>` : '') +
       (failed.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Could not read:<br>${failed.map(f=>escapeHtml(f.fileName)+' &mdash; '+escapeHtml(f.message)).join('<br>')}</p>` : '');
     if(ok.length){
       saveState();
       fileInp.value = '';
-      card.querySelector('#hist-import-list').innerHTML = historicalImportListHtml();
+      listEl.innerHTML = historicalImportListHtml();
+      wireHistSortSelect();
     }
   };
   return card;
