@@ -1887,10 +1887,20 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
     if(v==null) return '';
     if(typeof v==='object' && 'richText' in v) return v.richText.map(rt=>rt.text).join('');
     if(typeof v==='object' && 'result' in v) return String(v.result||'');
-    if(v instanceof Date) return v.toISOString();
+    // A stray date value can end up in a text-ish field (e.g. a S/no
+    // cell where "utility 1/12/24" got auto-converted to an actual
+    // date by Excel) - show it as a plain "1-Jan-2024" instead of a
+    // raw ISO timestamp with a spurious time-of-day component, so it
+    // at least reads sensibly if it surfaces as an imported label.
+    if(v instanceof Date) return `${v.getDate()}-${MONTHS[v.getMonth()].slice(0,3)}-${v.getFullYear()}`;
     return String(v);
   };
-  const COLS = ['A','B','C','D','E','F','G','H','I','J','K'];
+  // Widened from A-K to A-Z: some real notesheets space the "Amount"
+  // header several columns further right than S/no and Description
+  // (e.g. Amount at L while S/no sits at E) for print-layout reasons,
+  // and stopping the scan at K silently missed that header, which then
+  // made the whole item table look empty even though the data was there.
+  const COLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
   // Locate the "III/.../Withdraw/<Category>/<Number>" header line - it can
   // sit at B3 or C3 depending on the sheet's layout, so scan a small
@@ -1933,11 +1943,17 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
   //   "...from 1st July 2024 - 15th July 2024 (voucher no: X - Y)"
   //   "...from 1st July 2024 to 15th July 2024" (voucher info in a
   //    separate following sentence, e.g. "Voucher no( ... )")
+  // Some source sheets also have a stray typo'd word wedged between
+  // "from" and the day number, e.g. "disbursed from th 29th December
+  // 2025 - ..." (the ordinal suffix got typed as its own word). Allow up
+  // to two extra words there - tried lazily (0 first) so the normal case
+  // still matches the very next token, and a real typo only costs one
+  // extra attempt rather than ever grabbing the wrong number.
   // The voucher numbers themselves aren't used anywhere below (only the
   // dates are), so the regex only needs to capture the date range and can
   // accept either "-" or "to" as the separator, with or without a trailing
   // voucher clause.
-  const DATE_RANGE_RE = /from\s+(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*(?:-|to)\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})/i;
+  const DATE_RANGE_RE = /from\s+(?:\S+\s+){0,2}?(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*(?:-|to)\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})/i;
   let m = null;
   outerScan:
   for(let r=1;r<=15;r++){
@@ -2012,7 +2028,13 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
     const cVal = cellText(voucherCol+r).trim();
     const dVal = cellText(descCol+r).trim();
     const eVal = cellText(amountCol+r).trim();
-    if(/^total\s*amount/i.test(cVal)) break;
+    // Real sheets phrase the total row differently - "Total amount",
+    // "Total disbursed amount", "Total Disbursement", etc. - so stop at
+    // any voucher-column cell starting with "Total" rather than
+    // requiring the word "amount" to immediately follow it; otherwise a
+    // wording like "Total disbursed amount" slips past this check and
+    // gets read in as a bogus extra line item, doubling the sum.
+    if(/^total\b/i.test(cVal)) break;
     if(cVal==='' && dVal==='' && eVal==='') continue; // skip blank spacer rows rather than stopping
     const amt = Number(eVal.replace(/,/g,''))||0;
     if(amt>0) items.push({voucher:cVal, desc:dVal, amount:amt});
