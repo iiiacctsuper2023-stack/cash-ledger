@@ -1954,6 +1954,12 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
   // accept either "-" or "to" as the separator, with or without a trailing
   // voucher clause.
   const DATE_RANGE_RE = /from\s+(?:\S+\s+){0,2}?(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})\s*(?:-|to)\s*(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})/i;
+  // Some notesheets cover a single day rather than a range, e.g.
+  // "...disbursed from 8th June 2026 (voucher no: X)..." with no second
+  // date at all. Falls back to this single-date form (from-date and
+  // to-date both set to that one day) only when the two-date pattern
+  // above doesn't match anywhere.
+  const SINGLE_DATE_RE = /from\s+(?:\S+\s+){0,2}?(\d+)\w*\s+([A-Za-z]+)\s+(\d{4})/i;
   let m = null;
   outerScan:
   for(let r=1;r<=15;r++){
@@ -1962,6 +1968,17 @@ function parseHistoricalNotesheetSheet(ws, file, overrideCatKey, overrideYear){
       if(!text) continue;
       const found = text.match(DATE_RANGE_RE);
       if(found){ m = found; break outerScan; }
+    }
+  }
+  if(!m){
+    outerScanSingle:
+    for(let r=1;r<=15;r++){
+      for(const col of COLS){
+        const text = cellText(col+r).trim();
+        if(!text) continue;
+        const found = text.match(SINGLE_DATE_RE);
+        if(found){ m = [found[0], found[1], found[2], found[3], found[1], found[2], found[3]]; break outerScanSingle; }
+      }
     }
   }
   if(!m) throw new Error('Could not read the date-range sentence in this notesheet.');
