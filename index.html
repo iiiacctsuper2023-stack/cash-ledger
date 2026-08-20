@@ -10447,7 +10447,7 @@ function wireDelegation(){
     if(action==='toggle-sidebar'){ sidebarOpen = !sidebarOpen; render(); return; }
     if(action==='close-sidebar'){ sidebarOpen = false; render(); return; }
     if(action==='open-panel'){ openPanel(t.dataset.panel); render(); return; }
-    if(action==='go-home'){ viewingPanel = null; render(); return; }
+    if(action==='go-home'){ panelRegistry().forEach(([,,setter])=>setter(false)); viewingPanel = null; render(); return; }
     if(action==='hide-panel-page'){ viewingPanel = null; render(); return; }
     if(action==='close-panel-page'){
       const p = viewingPanel ? panelInfo(viewingPanel) : null;
