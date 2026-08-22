@@ -1417,9 +1417,21 @@ function todayDateStr(){
    used to say" and "what got deleted and when". Capped at the most
    recent 3000 entries (oldest trimmed silently) so it can't grow
    unbounded. Entirely separate from every other report/export. */
+/* Every audit-log timestamp is fixed to Bangladesh time (Asia/Dhaka,
+   UTC+6, no DST) via the Intl API, regardless of the device/browser's
+   own timezone setting - the institution is in Bangladesh, so "when"
+   in the log should always mean Dhaka time, not wherever the person
+   happens to be viewing the app from. */
 function auditTimestamp(){
   const d = new Date();
-  return toLocalDateStr(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Dhaka',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(d);
+  const get = type => (parts.find(p=>p.type===type)||{}).value || '00';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 function pushAuditEntry(entry){
   state.auditLog.push(Object.assign({id:'al'+Date.now()+Math.random().toString(36).slice(2,7), at:auditTimestamp()}, entry));
@@ -8487,7 +8499,7 @@ function renderAuditLogCard(){
       <div style="overflow-x:auto; margin-top:10px;">
         <table style="width:100%; border-collapse:collapse; font-size:12px;">
           <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
-            <th style="padding:5px 6px;">When</th>
+            <th style="padding:5px 6px;">When (BD time)</th>
             <th style="padding:5px 6px;">Entity</th>
             <th style="padding:5px 6px;">What changed</th>
           </tr></thead>
