@@ -11196,13 +11196,19 @@ function wireDelegation(){
         const removedSec = item.sections.find(s=>s.id===t.dataset.section);
         if(!removedSec) return;
         const secIdx = item.sections.indexOf(removedSec);
-        const summary = `${escapeHtml(item.voucher)} &mdash; section ${secIdx+1}: ${escapeHtml(removedSec.desc||'(no description)')} &mdash; ${money(removedSec.amount)}`;
-        showDeleteReasonModal('Delete section', summary, (note)=>{
-          logAuditDelete(`${catKey} voucher section`, {desc:removedSec.desc, amount:removedSec.amount, reason:note});
+        const doSectionRemoval = (note)=>{
+          if(note) logAuditDelete(`${catKey} voucher section`, {desc:removedSec.desc, amount:removedSec.amount, reason:note});
           item.sections = item.sections.filter(s=>s.id!==t.dataset.section);
           syncCoaItemFromSections(item);
           saveState(); render();
-        });
+        };
+        // A section that was added but never filled in (no description,
+        // no amount) isn't real accounting data yet - remove it silently,
+        // same as an untouched blank voucher above.
+        const isBlankSection = !((removedSec.desc||'').trim()) && !(Number(removedSec.amount)>0);
+        if(isBlankSection){ doSectionRemoval(null); return; }
+        const summary = `${escapeHtml(item.voucher)} &mdash; section ${secIdx+1}: ${escapeHtml(removedSec.desc||'(no description)')} &mdash; ${money(removedSec.amount)}`;
+        showDeleteReasonModal('Delete section', summary, doSectionRemoval);
       }
       return;
     }
@@ -11211,17 +11217,21 @@ function wireDelegation(){
       const catKey = t.dataset.cat;
       const idx = day.coa[catKey].findIndex(x=>x.id===t.dataset.item);
       const removed = day.coa[catKey][idx];
-      // Deleting a real voucher requires a short reason first (see
-      // showDeleteCoaVoucherModal) - the actual removal only happens
-      // once that's confirmed, in the callback below.
-      showDeleteCoaVoucherModal(catKey, removed, (note)=>{
-        logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount, reason:note});
+      // A blank voucher - added via "+ Add voucher" but nothing was ever
+      // typed into it (no description, no amount, in any section) - isn't
+      // real accounting data yet, so removing it needs no reason and
+      // doesn't belong in the Audit Trail. Only a voucher that actually
+      // holds entered data goes through the mandatory-reason modal below.
+      const isBlankVoucher = !((removed.desc||'').trim()) && !(Number(removed.amount)>0) &&
+        (!removed.sections || removed.sections.every(s=>!((s.desc||'').trim()) && !(Number(s.amount)>0)));
+      const doRemoval = (note)=>{
+        if(note) logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount, reason:note});
         let removedAssetEntry = null, removedAssetItemId = null;
         if(removed.assetLink){
           const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removed.assetLink.assetItemId);
           const entry = assetItem && assetItem.entries.find(e=>e.id===removed.assetLink.entryId);
           if(assetItem && entry){
-            logAuditDelete(`Asset entry (${assetItem.name})`, entry);
+            if(note) logAuditDelete(`Asset entry (${assetItem.name})`, entry);
             removedAssetEntry = entry; removedAssetItemId = assetItem.id;
             assetItem.entries = assetItem.entries.filter(e=>e.id!==entry.id);
           }
@@ -11243,7 +11253,12 @@ function wireDelegation(){
           }
         });
         saveState(); render();
-      });
+      };
+      if(isBlankVoucher){ doRemoval(null); return; }
+      // Deleting a real voucher requires a short reason first (see
+      // showDeleteCoaVoucherModal) - the actual removal only happens
+      // once that's confirmed, in the callback below.
+      showDeleteCoaVoucherModal(catKey, removed, (note)=> doRemoval(note));
       return;
     }
     if(action==='open-move-coa'){
