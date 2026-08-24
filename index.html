@@ -11006,13 +11006,14 @@ function wireDelegation(){
       selectedDayId = d.id;
       dayTabsViewMonth = next.slice(0,7); // show the month the new day landed in
       saveState(); render();
-      // Scroll straight to the new day and highlight it, so it's obvious
-      // a fresh day with the next date was created - not just the same
-      // last day being shown again.
+      // Only flash-highlight the Cash Received section so the new day is
+      // obviously a fresh one, without any smooth-scroll - the view used
+      // to jump/scroll down every time "Add day" was clicked, which felt
+      // like the page was shifting under the person's hands. No more
+      // auto-scrolling; the page stays exactly where it was.
       requestAnimationFrame(()=>requestAnimationFrame(()=>{
         const target = document.getElementById('section-cash-received');
         if(target){
-          target.scrollIntoView({behavior:'smooth', block:'start'});
           target.classList.add('section-nav-target');
           clearTimeout(target._navHighlightTimer);
           target._navHighlightTimer = setTimeout(()=>target.classList.remove('section-nav-target'), 4500);
