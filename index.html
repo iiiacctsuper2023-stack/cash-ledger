@@ -2443,10 +2443,18 @@ function monthYearAbbr(){
    hidden reference cell on each notesheet, so the "month" line under
    every signatory can be a formula that reads this cell (TEXT(...,
    "mmm-yy")) instead of a typed-in string with no traceable source. The
-   date itself is never displayed - only its formatted month/year. */
+   date itself is never displayed - only its formatted month/year.
+   Built with Date.UTC(), NOT the local Date(year,month,day) constructor -
+   ExcelJS computes the Excel serial date it writes into the file from a
+   JS Date's UTC fields. A local-time "1st of the month at midnight" is,
+   for any timezone ahead of UTC (e.g. Bangladesh/UTC+6), still the LAST
+   DAY of the PREVIOUS month in UTC - so the file ended up storing (and
+   every notesheet's signature block kept printing) the previous month
+   no matter how many times the month was "fixed" by hand, since the
+   real cause was this date being built in local time at all. */
 function monthRefDate(){
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), 1));
 }
 /* Third signature line under Name/Designation on notesheets: a bare
    "Jul 26" with no label reads like a stray date, so it's always prefixed
@@ -2476,17 +2484,12 @@ function collectNotesheetRange(startDate, endDate){
       });
     });
     if(rawItems.length===0) return;
-    // If the same description (e.g. the same person's name, for a salary
-    // or honorarium category) appears more than once in this category,
-    // combine them into one line with the summed amount - instead of
-    // repeating that name/description on separate lines.
-    const byDesc = new Map();
-    const items = [];
-    rawItems.forEach(it=>{
-      const existing = byDesc.get(it.desc);
-      if(existing){ existing.amount += it.amount; existing.voucher += `, ${it.voucher}`; }
-      else{ const merged = {voucher:it.voucher, desc:it.desc, amount:it.amount, date:it.date}; byDesc.set(it.desc, merged); items.push(merged); }
-    });
+    // Every voucher gets its own line in the exported notesheet, even when
+    // two vouchers share the exact same description (e.g. the same
+    // person's name for a salary/honorarium category) - each is a
+    // separate withdrawal with its own voucher number and needs to be
+    // auditable as its own line, not silently summed into one row.
+    const items = rawItems;
     const total = items.reduce((s,it)=>s+it.amount,0);
     cats.push({key, cat, items, total, firstDate:rawItems[0].date, lastDate:rawItems[rawItems.length-1].date,
                firstVoucher:rawItems[0].voucher, lastVoucher:rawItems[rawItems.length-1].voucher});
@@ -8703,8 +8706,15 @@ function renderNotesheetCard(){
   const curMonthKey = currentSelectedMonthKey();
   if(!notesheetRange || notesheetRangeMonthKey !== curMonthKey){
     const monthDates = state.days.map(d=>d.date).filter(d=>d.slice(0,7)===curMonthKey).sort();
+    // Default "From date" to the day right after the previous saved
+    // Withdraw Notesheet's end date, not the current month's first entry -
+    // notesheets should read as an unbroken chain (no gaps, no overlaps)
+    // the way the person actually withdraws money over time. Still fully
+    // editable below; this is only the starting suggestion.
+    const lastLog = (state.withdrawNotesheetLog||[]).slice().sort((a,b)=>(a.endDate||'').localeCompare(b.endDate||'')).pop();
+    const chainedStart = lastLog && lastLog.endDate ? addDaysStr(lastLog.endDate, 1) : null;
     notesheetRange = {
-      start: monthDates[0] || minDate,
+      start: (chainedStart && chainedStart>=minDate && chainedStart<=maxDate) ? chainedStart : (monthDates[0] || minDate),
       end: monthDates[monthDates.length-1] || maxDate,
     };
     notesheetRangeMonthKey = curMonthKey;
@@ -8938,6 +8948,15 @@ function renderDepositNotesheetCard(){
   });
   const dnsRec = state.monthlyLedger.months[dnsMonthKey];
   const dnsFilesHidden = dnsRec && dnsRec.notesheetFilesHidden;
+  // Default "Collection start date" to the day right after the previous
+  // saved Deposit Notesheet's end date - deposits should read as an
+  // unbroken chain the way collections actually happen over time. Still
+  // fully editable, and the uploaded file's own header date (if present)
+  // still takes over once a file is chosen - see the "touched" tracking
+  // below, which stops that override only after the person edits the
+  // field by hand.
+  const lastDepositLog = (state.depositNotesheetLog||[]).slice().sort((a,b)=>(a.endDate||'').localeCompare(b.endDate||'')).pop();
+  const depositDefaultStart = lastDepositLog && lastDepositLog.endDate ? addDaysStr(lastDepositLog.endDate, 1) : '';
   const card = el(`
     <div class="card" id="section-deposit-notesheet">
       <h3><span class="num">&#128190;</span> Deposit Notesheet</h3>
@@ -8949,7 +8968,7 @@ function renderDepositNotesheetCard(){
         </div>
         <div class="field" style="max-width:170px;">
           <label>Collection start date</label>
-          <input type="date" id="dns-start-date">
+          <input type="date" id="dns-start-date" value="${depositDefaultStart}">
         </div>
         <div class="field" style="max-width:170px;">
           <label>Collection end date</label>
@@ -9010,6 +9029,11 @@ function renderDepositNotesheetCard(){
   const endInp = card.querySelector('#dns-end-date');
   const attribInp = card.querySelector('#dns-attrib-date');
   const statusEl = card.querySelector('#dns-status');
+  // Tracks whether the person has hand-edited the start date since the
+  // card was drawn - once they have, an uploaded file's own header date
+  // should no longer silently overwrite what they typed.
+  let startTouchedByUser = false;
+  startInp.addEventListener('input', ()=>{ startTouchedByUser = true; });
   fileInp.onchange = async ()=>{
     const file = fileInp.files && fileInp.files[0];
     if(!file) return;
@@ -9022,7 +9046,11 @@ function renderDepositNotesheetCard(){
       const rawText = wb.worksheets[0].getCell('B3').value;
       const iso = depositParseRawRangeToISO(rawText);
       if(iso){
-        if(!startInp.value) startInp.value = iso.start;
+        // The file's own header date range is the ground truth once a
+        // file is actually uploaded - it overrides the chained "day
+        // after last deposit" default, but never overwrites a date the
+        // person has already typed in by hand.
+        if(!startTouchedByUser) startInp.value = iso.start;
         if(!endInp.value) endInp.value = iso.end;
         // attrib deliberately NOT set from the file here - it defaults to
         // today's date (the generation date) instead, set once above when
@@ -12522,9 +12550,12 @@ function writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firs
   ws.pageSetup.printArea = `A1:F${printEndRow}`;
 
   // Left border down column F, from the row right after the "Attach"
-  // label (row 3) through the very last printed line, so the Attach
-  // strip reads as a bordered column for its full height.
-  for(let row=4; row<=printEndRow; row++){
+  // label (row 3) through the last bordered content line (gapEnd, where
+  // the bottom border sits) - stopping there, not at printEndRow's blank
+  // padding rows, so nothing draws below the notesheet's actual bottom
+  // border. It used to run all the way to printEndRow, leaving a stray
+  // vertical line hanging past the bottom edge with no border to meet it.
+  for(let row=4; row<=gapEnd; row++){
     const c = ws.getCell(`F${row}`);
     c.border = {...(c.border||{}), left:THIN};
   }
@@ -12597,10 +12628,15 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   const used = new Set();
   const summaryRows = [];
 
-  cats.forEach(({key, cat, items, total, firstDate, lastDate, firstVoucher, lastVoucher})=>{
+  cats.forEach(({key, cat, items, total, firstVoucher, lastVoucher})=>{
     const number = (state.notesheetCounters[key]||0) + 1;
     const ws = wb.addWorksheet(uniqueSheetName(`${coaText(cat,'notesheetLabel')} ${number}`.replace(/[\\\/\?\*\[\]:]/g,''), used));
-    writeNotesheet(ws, cat, number, items, total, firstDate, lastDate, firstVoucher, lastVoucher);
+    // The printed date-range sentence always uses the "From date"/"To
+    // date" actually chosen in the app for this whole batch (startDate,
+    // endDate) - not each category's own first/last voucher date, which
+    // could fall short of the full range if that category happened to
+    // have no expenses on the range's very first or last day.
+    writeNotesheet(ws, cat, number, items, total, startDate, endDate, firstVoucher, lastVoucher);
     if(incrementNumbering) state.notesheetCounters[key] = number;
     summaryRows.push({label:coaText(cat,'summaryLabel'), total});
   });
@@ -12610,9 +12646,14 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   writeWithdrawSummary(wsSummary, summaryRows, grandTotal, state.summaryCounterYear, summaryNum);
   if(incrementNumbering) state.summaryCounterNum = summaryNum;
 
+  // Named after the consolidated Withdraw Summary's own number (e.g.
+  // "Notesheets-26-19.xlsx"), not the raw date range - that summary
+  // number is the reference people actually use for this batch, the
+  // same way the sheet itself is titled "26-19" inside the workbook.
+  const fileName = `Notesheets-${state.summaryCounterYear}-${summaryNum}.xlsx`;
+
   if(shouldSave && incrementNumbering){
     if(!Array.isArray(state.withdrawNotesheetLog)) state.withdrawNotesheetLog = [];
-    const fileName = `Notesheets_${startDate}_to_${endDate}.xlsx`;
     const finalAttribDate = attribDate || endDate;
     state.withdrawNotesheetLog.push({
       id:uid(), generatedAt:new Date().toISOString(), generatedDate: finalAttribDate, startDate, endDate,
@@ -12647,10 +12688,10 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
   if(previewOnly){
     showWorkbookPreview(wb, {
       title: `Notesheets & Summary (${startDate} to ${endDate})`,
-      onDownload: ()=> downloadWorkbook(wb, `Notesheets_${startDate}_to_${endDate}.xlsx`)
+      onDownload: ()=> downloadWorkbook(wb, fileName)
     });
   } else {
-    await downloadWorkbook(wb, `Notesheets_${startDate}_to_${endDate}.xlsx`);
+    await downloadWorkbook(wb, fileName);
   }
   render();
 }
