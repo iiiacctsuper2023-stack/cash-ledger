@@ -1392,6 +1392,16 @@ function newDay(dateStr){
     locked:false
   };
 }
+/* Default bank for a freshly-added Cash Deposit / Cash Withdraw line -
+   Trust Bank (TBL) when one exists (matching the same /tbl/i pattern
+   used everywhere else in this file to identify it), since day-to-day
+   deposits/withdrawals normally go through TBL, not whichever bank
+   happens to be listed first. Falls back to the first configured bank
+   if no TBL-named account is set up. */
+function defaultTransferBankId(){
+  const tbl = state.banks.find(b=>/tbl/i.test(b.name));
+  return (tbl || state.banks[0]).id;
+}
 function ensureBankDaily(day, bankId){
   if(!day.banksDaily[bankId]) day.banksDaily[bankId] = {sslDeposit:0, houseRentDeposit:0, fees:0, salaryAccount:0, salaryCash:0, reconciledBalance:null, reconcileNote:''};
   const bd = day.banksDaily[bankId];
@@ -11072,7 +11082,7 @@ function wireDelegation(){
 
     if(!day && action!=='dl-day' && action!=='dl-month'){ return; }
 
-    if(action==='add-withdraw'){ if(day.locked) return; day.withdrawals.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
+    if(action==='add-withdraw'){ if(day.locked) return; day.withdrawals.push({id:uid(), amount:0, bankId:defaultTransferBankId(), note:''}); render(); return; }
     if(action==='remove-withdraw'){
       if(day.locked) return;
       const idx = day.withdrawals.findIndex(x=>x.id===t.dataset.item);
@@ -11081,7 +11091,7 @@ function wireDelegation(){
       pushUndo('Withdrawal removed.', ()=>{ day.withdrawals.splice(idx,0,removed); });
       saveState(); render(); return;
     }
-    if(action==='add-deposit'){ if(day.locked) return; day.deposits.push({id:uid(), amount:0, bankId:state.banks[0].id, note:''}); render(); return; }
+    if(action==='add-deposit'){ if(day.locked) return; day.deposits.push({id:uid(), amount:0, bankId:defaultTransferBankId(), note:''}); render(); return; }
     if(action==='remove-deposit'){
       if(day.locked) return;
       const idx = day.deposits.findIndex(x=>x.id===t.dataset.item);
