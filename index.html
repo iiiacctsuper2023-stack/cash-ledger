@@ -1448,21 +1448,26 @@ function pushAuditEntry(entry){
   if(state.auditLog.length>3000) state.auditLog.splice(0, state.auditLog.length-3000);
 }
 /* Logs a field edit - skipped automatically if the value didn't actually
-   change (e.g. clicking into a field and out again without typing). */
-function logAuditChange(entity, field, oldVal, newVal){
+   change (e.g. clicking into a field and out again without typing).
+   `category` is the Chart-of-Accounts khat this edit belongs to (e.g.
+   "Utility", "Transport"), if any - separate from `entity`, which stays
+   the existing section/voucher label. Optional: most edits (Cash
+   Received, IOU, Misc Collection, etc.) simply aren't tied to a khat, and
+   show blank in that column. */
+function logAuditChange(entity, field, oldVal, newVal, category){
   const a = (oldVal==null?'':String(oldVal).trim());
   const b = (newVal==null?'':String(newVal).trim());
   if(a===b) return;
-  pushAuditEntry({kind:'edit', entity, field, oldVal:a, newVal:b});
+  pushAuditEntry({kind:'edit', entity, field, oldVal:a, newVal:b, category:category||''});
 }
 /* Logs a whole record's removal, with a readable snapshot of every field
    it had (so "what got deleted" can actually be read back later, not
-   just "something was deleted"). */
-function logAuditDelete(entity, snapshotObj){
+   just "something was deleted"). `category` - see logAuditChange above. */
+function logAuditDelete(entity, snapshotObj, category){
   const lines = Object.entries(snapshotObj||{})
     .filter(([k,v])=> v!==undefined && v!==null && v!=='' && typeof v!=='object')
     .map(([k,v])=>`${k}: ${v}`);
-  pushAuditEntry({kind:'delete', entity, snapshot:lines.join(' \u00b7 ')});
+  pushAuditEntry({kind:'delete', entity, snapshot:lines.join(' \u00b7 '), category:category||''});
 }
 /* Best-effort human label for a field, from its own <label> sibling in
    the same .field wrapper (used by wireLockableTextInput/wireAmountInput
@@ -1585,6 +1590,22 @@ function nearestEntityLabel(inputEl){
   if(h3) return h3.textContent.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,'').trim() || 'entry';
   return 'entry';
 }
+/* The Chart-of-Accounts khat a given field belongs to, for the Audit
+   Trail's separate Category column/filter - distinct from
+   nearestEntityLabel above, which stays section/voucher-based. Any
+   sibling element inside the same .line-item that carries a data-cat
+   attribute (the Move/Print/Remove buttons on a CoA voucher row all do)
+   gives the category key away, even though the description/amount
+   inputs themselves don't carry it directly. Returns '' (no category)
+   for fields that simply aren't tied to a khat - Cash Received, IOU,
+   Misc Collection, bank fields, etc. */
+function nearestCategoryLabel(inputEl){
+  const li = inputEl.closest('.line-item');
+  const catKey = li && li.querySelector('[data-cat]') && li.querySelector('[data-cat]').getAttribute('data-cat');
+  if(!catKey) return '';
+  const cat = findHistoryCategory(catKey);
+  return cat ? cat.label : '';
+}
 function wireAmountInput(inputEl, onChange, onPlainEnter){
   const fallbackValue = parseAmountInput(inputEl.value);
   let auditFocusVal = null;
@@ -1631,7 +1652,7 @@ function wireAmountInput(inputEl, onChange, onPlainEnter){
   });
   inputEl.addEventListener('blur', ()=>{ resolveAmountField(inputEl, onChange, fallbackValue); });
   inputEl.addEventListener('blur', ()=>{
-    if(auditFocusVal!==null) logAuditChange(nearestEntityLabel(inputEl), nearestFieldLabel(inputEl), auditFocusVal, inputEl.value);
+    if(auditFocusVal!==null) logAuditChange(nearestEntityLabel(inputEl), nearestFieldLabel(inputEl), auditFocusVal, inputEl.value, nearestCategoryLabel(inputEl));
     auditFocusVal = null;
   });
   inputEl.addEventListener('keydown', (e)=>{
@@ -3074,7 +3095,7 @@ function wireLockableTextInput(inputEl){
   });
   inputEl.addEventListener('blur', syncLock);
   inputEl.addEventListener('blur', ()=>{
-    logAuditChange(nearestEntityLabel(inputEl), nearestFieldLabel(inputEl), auditFocusVal, inputEl.value);
+    logAuditChange(nearestEntityLabel(inputEl), nearestFieldLabel(inputEl), auditFocusVal, inputEl.value, nearestCategoryLabel(inputEl));
     auditFocusVal = inputEl.value;
   });
   // Spell-check suggestion strip - on blur (once the person has finished
@@ -3213,12 +3234,14 @@ function showMoveVoucherModal(day, fromCatKey, item){
     const toLabel = COA.find(c=>c.key===toCatKey).label;
     // entity is HTML-escaped by the Audit Trail renderer itself (see
     // renderAuditLogCard) - don't escape it again here, or "&" etc in a
-    // description would show up double-encoded.
-    pushAuditEntry({kind:'edit', entity:`Voucher ${item.voucher} \u2192 ${newVoucher.voucher} (${item.desc||'no description'}, ${money(item.amount)})`, field:'Category', oldVal:fromLabel, newVal:toLabel});
+    // description would show up double-encoded. category is set to
+    // wherever the voucher ends up after this event, for the Audit
+    // Trail's Category filter/column.
+    pushAuditEntry({kind:'edit', entity:`Voucher ${item.voucher} \u2192 ${newVoucher.voucher} (${item.desc||'no description'}, ${money(item.amount)})`, field:'Category', oldVal:fromLabel, newVal:toLabel, category:toLabel});
     pushUndo(`Voucher moved to ${toLabel} - undone.`, ()=>{
       day.coa[toCatKey] = day.coa[toCatKey].filter(x=>x.id!==newVoucher.id);
       day.coa[fromCatKey].push(item);
-      pushAuditEntry({kind:'edit', entity:`Voucher ${newVoucher.voucher} \u2192 ${item.voucher} (${item.desc||'no description'}, ${money(item.amount)})`, field:'Category (move undone)', oldVal:toLabel, newVal:fromLabel});
+      pushAuditEntry({kind:'edit', entity:`Voucher ${newVoucher.voucher} \u2192 ${item.voucher} (${item.desc||'no description'}, ${money(item.amount)})`, field:'Category (move undone)', oldVal:toLabel, newVal:fromLabel, category:fromLabel});
     });
     saveState();
     overlay.remove();
@@ -8486,6 +8509,12 @@ function renderAuditLogCard(){
             <option value="delete">Deletions only</option>
           </select>
         </div>
+        <div class="field" style="min-width:180px;">
+          <label>Category (খাত)</label>
+          <select id="al-category">
+            <option value="">All categories</option>
+          </select>
+        </div>
         <div class="field" style="flex:1 1 200px; min-width:160px;">
           <label>Search</label>
           <input type="text" id="al-search" placeholder="Filter by entity, field, or value&hellip;"/>
@@ -8498,22 +8527,34 @@ function renderAuditLogCard(){
     const box = card.querySelector('#al-body');
     box.innerHTML = '';
     const kind = card.querySelector('#al-kind').value;
+    const category = card.querySelector('#al-category').value;
     const q = card.querySelector('#al-search').value.trim().toLowerCase();
+    // The Category dropdown's own option list is rebuilt from whatever
+    // categories actually appear in the log so far - a plain alphabetical
+    // list of every entry that ever showed up, not a fixed enum like Kind
+    // above (khats vary, and an entry from a since-removed custom
+    // category should still be filterable).
+    const catSel = card.querySelector('#al-category');
+    const seenCats = [...new Set(state.auditLog.map(e=>e.category).filter(Boolean))].sort();
+    const catOptionsHtml = `<option value="">All categories</option>` + seenCats.map(c=>`<option value="${escapeHtml(c)}" ${category===c?'selected':''}>${escapeHtml(c)}</option>`).join('');
+    if(catSel.innerHTML !== catOptionsHtml) catSel.innerHTML = catOptionsHtml;
     const rows = state.auditLog.filter(e=>{
       if(kind && e.kind!==kind) return false;
+      if(category && e.category!==category) return false;
       if(q){
         const hay = [e.entity, e.field, e.oldVal, e.newVal, e.snapshot].filter(Boolean).join(' ').toLowerCase();
         if(!hay.includes(q)) return false;
       }
       return true;
     }).slice().reverse().slice(0,500); // newest first, cap what's rendered at once
-    if(!rows.length){ box.appendChild(el(`<p class="empty" style="margin-top:10px;">No log entries yet${kind||q?' matching this filter':''}.</p>`)); return; }
+    if(!rows.length){ box.appendChild(el(`<p class="empty" style="margin-top:10px;">No log entries yet${kind||category||q?' matching this filter':''}.</p>`)); return; }
     const table = el(`
       <div style="overflow-x:auto; margin-top:10px;">
         <table style="width:100%; border-collapse:collapse; font-size:12px;">
           <thead><tr style="text-align:left; border-bottom:2px solid var(--line);">
             <th style="padding:5px 6px;">When (BD time)</th>
             <th style="padding:5px 6px;">Entity</th>
+            <th style="padding:5px 6px;">Category (খাত)</th>
             <th style="padding:5px 6px;">What changed</th>
           </tr></thead>
           <tbody></tbody>
@@ -8526,6 +8567,7 @@ function renderAuditLogCard(){
         <tr style="border-bottom:1px solid var(--line-soft); vertical-align:top;">
           <td class="mono" style="padding:5px 6px; white-space:nowrap; opacity:.75;">${escapeHtml(e.at)}</td>
           <td style="padding:5px 6px;">${escapeHtml(e.entity)}</td>
+          <td style="padding:5px 6px; opacity:${e.category?1:.4};">${e.category?escapeHtml(e.category):'&mdash;'}</td>
           <td style="padding:5px 6px;">
             ${e.kind==='delete'
               ? `<span style="color:var(--danger,#B3261E);font-weight:600;">Deleted</span> &mdash; <span style="opacity:.8;">${escapeHtml(e.snapshot||'(no details)')}</span>`
@@ -8540,6 +8582,7 @@ function renderAuditLogCard(){
   }
   draw();
   card.querySelector('#al-kind').onchange = draw;
+  card.querySelector('#al-category').onchange = draw;
   card.querySelector('#al-search').oninput = draw;
   return card;
 }
@@ -11244,7 +11287,7 @@ function wireDelegation(){
         if(!removedSec) return;
         const secIdx = item.sections.indexOf(removedSec);
         const doSectionRemoval = (note)=>{
-          if(note) logAuditDelete(`${catKey} voucher section`, {desc:removedSec.desc, amount:removedSec.amount, reason:note});
+          if(note) logAuditDelete(`${catKey} voucher section`, {desc:removedSec.desc, amount:removedSec.amount, reason:note}, (findHistoryCategory(catKey)||{}).label || '');
           item.sections = item.sections.filter(s=>s.id!==t.dataset.section);
           syncCoaItemFromSections(item);
           saveState(); render();
@@ -11272,7 +11315,7 @@ function wireDelegation(){
       const isBlankVoucher = !((removed.desc||'').trim()) && !(Number(removed.amount)>0) &&
         (!removed.sections || removed.sections.every(s=>!((s.desc||'').trim()) && !(Number(s.amount)>0)));
       const doRemoval = (note)=>{
-        if(note) logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount, reason:note});
+        if(note) logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount, reason:note}, (findHistoryCategory(catKey)||{}).label || '');
         let removedAssetEntry = null, removedAssetItemId = null;
         if(removed.assetLink){
           const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removed.assetLink.assetItemId);
