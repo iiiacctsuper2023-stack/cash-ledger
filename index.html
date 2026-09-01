@@ -7010,7 +7010,7 @@ async function exportMonthlyLedger(key, previewOnly){
   const totalAmountSumRow = r;
   revSummaryLabel(r, `Total Amount (Sum of ${banksForCols.map(b=>b.name||'Total').join(' & ')})`);
   rev.getCell(r,1).font = BOLD;
-  rev.mergeCells(r, BANK_COL_START, r, REV_LAST_COL);
+  rev.mergeCells(r, BANK_COL_START, r, BANK_COL_START+numBankCols-1);
   rev.getCell(r, BANK_COL_START).value = {formula:`SUM(${rev.getColumn(BANK_COL_START).letter}${totalAmountRow}:${rev.getColumn(BANK_COL_START+numBankCols-1).letter}${totalAmountRow})`};
   rev.getCell(r, BANK_COL_START).font = BOLD;
   rev.getCell(r, BANK_COL_START).alignment = {horizontal:'right'};
