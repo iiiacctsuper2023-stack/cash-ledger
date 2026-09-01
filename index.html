@@ -1000,7 +1000,14 @@ function monthAdmissionFeeOnlyTotal(monthRec){
    Running Total via effectiveRevenueTransfer below. */
 function autoGratuityEduAssist(monthRec){
   const feeOnly = monthAdmissionFeeOnlyTotal(monthRec);
-  return {gratuity: feeOnly/6, eduAssist: feeOnly/30};
+  // Gratuity/Education Assistance Fund are shown as whole taka only:
+  // .50 or above rounds up to the next taka, below .50 rounds down to the
+  // previous one, exact .50 rounds up - i.e. standard "round half up",
+  // applied here (the single source both funds derive from) so every
+  // screen and export that reads these two figures already gets a
+  // decimal-free number without needing its own rounding.
+  const roundHalfUp = n => Math.floor(n) + (n - Math.floor(n) >= 0.5 ? 1 : 0);
+  return {gratuity: roundHalfUp(feeOnly/6), eduAssist: roundHalfUp(feeOnly/30)};
 }
 /* "Yearly Running Total from Previous Month": the seed (if any, for
    whatever predates this tool) plus every tracked month of the same
@@ -1501,6 +1508,18 @@ function money(n){
   const neg = n<0;
   const abs = Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
   return (neg?'(':'')+abs+(neg?')':'');
+}
+/* Gratuity Payable / Education Assistance Payable are shown as whole
+   taka only, never with paisa - same "round half up" rule as
+   autoGratuityEduAssist (.50+ rounds up, below .50 rounds down), applied
+   again here as a display-time safety net in case a running total ever
+   carries in a fractional legacy value from before that rounding existed. */
+function moneyWhole(n){
+  n = Number(n)||0;
+  const neg = n<0;
+  const abs = Math.abs(n);
+  const rounded = Math.floor(abs) + (abs - Math.floor(abs) >= 0.5 ? 1 : 0);
+  return (neg&&rounded!==0?'(':'')+rounded.toLocaleString('en-IN')+(neg&&rounded!==0?')':'');
 }
 
 /* --- Asian/Indian comma grouping (12,34,567 instead of 1,234,567) for the
@@ -5662,10 +5681,10 @@ function refreshMonthlyLedgerComputedOnly(){
   setText('ml-total-balance', money(f.totalBalance));
   setText('ml-bs-balance-bank', money(f.bankBalanceShown||0));
   setText('ml-bs-due-payment', money(f.totalDueSum));
-  setText('ml-bs-gratuity', money(f.gratuityPayable));
-  setText('ml-bs-eduassist', money(f.eduAssistPayable));
-  setText('ml-note-gratuity', money(f.gratuityPayable));
-  setText('ml-note-eduassist', money(f.eduAssistPayable));
+  setText('ml-bs-gratuity', moneyWhole(f.gratuityPayable));
+  setText('ml-bs-eduassist', moneyWhole(f.eduAssistPayable));
+  setText('ml-note-gratuity', moneyWhole(f.gratuityPayable));
+  setText('ml-note-eduassist', moneyWhole(f.eduAssistPayable));
   setText('ml-total-assets', money(f.totalAssets));
   setText('ml-equity', money(f.equity));
   setText('ml-bank-breakdown-sum', money(f.bankBreakdownSum));
@@ -5899,8 +5918,8 @@ function renderMonthlyLedgerCard(){
       </div>
 
       <div class="computed"><span class="lbl">Due Payment</span><span id="ml-bs-due-payment">${money(totalDueSum)}</span></div>
-      <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${money(gratuityPayable)}</span></div>
-      <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${money(eduAssistPayable)}</span></div>
+      <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${moneyWhole(gratuityPayable)}</span></div>
+      <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${moneyWhole(eduAssistPayable)}</span></div>
       <div class="computed"><span class="lbl">Advance Payment</span><span></span></div>
       <div class="row">
         <div class="field">
@@ -5964,8 +5983,8 @@ function renderMonthlyLedgerCard(){
       <div class="divider"></div>
       <div class="ml-zone ml-zone-a">
       <label id="ml-section-headwise">Note: Head wise distribution of Balance in Account</label>
-      <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span id="ml-note-gratuity">${money(gratuityPayable)}</span></div>
-      <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span id="ml-note-eduassist">${money(eduAssistPayable)}</span></div>
+      <div class="computed"><span class="lbl">Account Balance for Gratuity</span><span id="ml-note-gratuity">${moneyWhole(gratuityPayable)}</span></div>
+      <div class="computed"><span class="lbl">Account Balance for Education Assistant Fund</span><span id="ml-note-eduassist">${moneyWhole(eduAssistPayable)}</span></div>
       <div class="computed"><span class="lbl">Remaining Balance</span><span id="ml-note-remaining">${money(remainingBalance)}</span></div>
       <div class="computed total"><span class="lbl">Total</span><span id="ml-note-total">${money(noteTotal)}</span></div>
       <p id="ml-warn-note-total" class="subnote" style="color:#B3261E;${noteTotalMismatch?'':'display:none;'}">&#9888; This total doesn't match Balance in Bank Account above.</p>
@@ -9325,7 +9344,15 @@ function crossCheckTBLStatement(stmtRows){
       // matched it, and shows up as a phantom "missing" duplicate.
       if(/^Online Payment \(SSL Commerz\)/.test(entry.desc||'')) return;
       const amt = REVENUE_CATS.reduce((s,c)=>s+(Number(entry[c.key])||0),0);
-      if(amt && entry.date) expectedManualRevenue.push({side:'deposit', checkDate:entry.date, amount:amt, label: entry.desc || 'Monthly Ledger revenue entry', tolDays:0});
+      // A manual entry can still describe an SSL Commerz collection (e.g.
+      // typed in directly as "Deposit through SSL Commerz" rather than via
+      // the official Online Payment import flow above). It's the same kind
+      // of gateway settlement, which can clear the bank a day or two after
+      // the app's own entry date - so it needs the same forgiving window as
+      // expectedSsl below, not an exact-date-only match, or a same-amount
+      // deposit that settles late gets wrongly flagged as missing.
+      const looksLikeSsl = /ssl\s*commerz/i.test(entry.desc||'');
+      if(amt && entry.date) expectedManualRevenue.push({side:'deposit', checkDate:entry.date, amount:amt, label: entry.desc || 'Monthly Ledger revenue entry', tolDays: looksLikeSsl?2:0});
     });
   });
 
@@ -9371,7 +9398,7 @@ function crossCheckTBLStatement(stmtRows){
   const beftnDates = beftnStmtRows.map(r=>r.date).filter(Boolean).sort();
   tryMatch(expectedSsl, beftnStmtRows, beftnDates[0], beftnDates[beftnDates.length-1], Math.max(0, ...expectedSsl.map(e=>e.tolDays||0)));
   const allDates = stmtRows.map(r=>r.date).filter(Boolean).sort();
-  tryMatch(expectedManualRevenue, stmtRows, allDates[0], allDates[allDates.length-1], 0);
+  tryMatch(expectedManualRevenue, stmtRows, allDates[0], allDates[allDates.length-1], Math.max(0, ...expectedManualRevenue.map(e=>e.tolDays||0)));
 
   const unmatchedStmtRows = stmtRows.filter((r,i)=>!usedStmtIdx.has(i) && (r.deposit>0 || r.withdrawal>0));
   return {matched, missingFromStatement, unmatchedStmtRows};
