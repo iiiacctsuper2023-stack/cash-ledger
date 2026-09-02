@@ -1201,6 +1201,8 @@ let ratioCashFlowFilters = { view:'ratio', year:'', month:'' };
 let auditLogOpen = false;
 let sslReportOpen = false;
 let sslReportFilters = { year:'', month:'' };
+let meterLoadOpen = false;
+let meterLoadFilters = { year:'', month:'' };
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false; // also doubles as "which top-level tab is active" (Daily Ledger vs Monthly Ledger)
@@ -1246,6 +1248,7 @@ function panelRegistry(){
     ['ratio-cashflow',     ()=>ratioCashFlowOpen,      v=>{ratioCashFlowOpen=v;},      'Ratio &amp; Cash Flow',        renderRatioCashFlowCard],
     ['audit-log',          ()=>auditLogOpen,           v=>{auditLogOpen=v;},           'Audit Trail',                  renderAuditLogCard],
     ['ssl-report',         ()=>sslReportOpen,          v=>{sslReportOpen=v;},          'SSL Commerz Entries',          renderSslReportCard],
+    ['meter-load',         ()=>meterLoadOpen,          v=>{meterLoadOpen=v;},          'Electricity Meter Load',       renderMeterLoadCard],
     ['templates',          ()=>templatesOpen,          v=>{templatesOpen=v;},          'Templates',                    renderTemplatesCard],
   ];
 }
@@ -2860,6 +2863,7 @@ function migrateState(){
   if(!state.historicalImports) state.historicalImports = [];
   if(!state.customHistoricalCategories) state.customHistoricalCategories = [];
   if(!state.synonymGroups) state.synonymGroups = [];
+  if(!Array.isArray(state.meterLoadLog)) state.meterLoadLog = [];
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -3941,6 +3945,7 @@ function navIcon(name){
     audit:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.2" cy="10.2" r="6.7"/><path d="M20.2 20.2l-5.1-5.1"/><path d="M7.3 10.2h5.8"/></svg>',
     ssl:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="5" width="19.6" height="14" rx="2.2"/><path d="M2.2 9.8h19.6"/><path d="M6 15h4"/></svg>',
     templates: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2"/><path d="M9.5 3.2v17.6"/><path d="M3.2 9h6.3"/></svg>',
+    meter:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8.3"/><path d="M12 13 15.2 8.5"/><path d="M8.7 6.2 7.6 4.3M15.3 6.2l1.1-1.9M4.7 13H2.7M21.3 13h-2"/></svg>',
     setup:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.1a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.1a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.1a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.1a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     backup:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16"/><path d="M6 5.5V19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5.5"/><path d="M9.5 5.5V4a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 15.5 4v1.5"/><path d="M12 9.5v6M9.3 12.2 12 9.5l2.7 2.7"/></svg>',
     download:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 18.5h16"/></svg>',
@@ -3989,6 +3994,7 @@ function renderSidebar(){
     ['ratio',       'ratio-cashflow',      'Ratio &amp; Cash Flow',    ratioCashFlowOpen],
     ['audit',       'audit-log',           'Audit Trail',              auditLogOpen],
     ['ssl',         'ssl-report',          'SSL Commerz Entries',      sslReportOpen],
+    ['meter',       'meter-load',          'Electricity Meter Load',   meterLoadOpen],
     ['templates',   'templates',           'Templates',                templatesOpen],
   ];
   const navList = el(`<div class="sidebar-nav">
@@ -7723,7 +7729,7 @@ function renderCategorySummaryCard(){
       renderSummaryTable(box, rows, 'Year', filtered, v=>v.date.slice(0,4));
     } else {
       const f = Object.assign({}, catFilter, {fromDate:summaryFilters.fromDate, toDate:summaryFilters.toDate});
-      const results = filteredVouchers(f, voucherList);
+      const results = filteredVouchers(f, voucherList).sort((a,b)=>a.date.localeCompare(b.date));
       const total = results.reduce((s,v)=>s+v.amount,0);
       box.appendChild(el(`<div class="computed total"><span class="lbl">${escapeHtml(selectedLabel())} total for this range</span><span>${money(total)}</span></div>`));
       if(results.length===0){
@@ -7759,7 +7765,7 @@ function renderCategorySummaryCard(){
         const existing = tr.nextElementSibling;
         if(existing && existing.dataset.expansionFor===r.key){ existing.remove(); return; }
         tbody.querySelectorAll('tr[data-expansion-for]').forEach(x=>x.remove());
-        const vouchers = (sourceVouchers||[]).filter(v=>rowKeyFn(v)===r.key).sort((a,b)=>b.amount-a.amount);
+        const vouchers = (sourceVouchers||[]).filter(v=>rowKeyFn(v)===r.key).sort((a,b)=>a.date.localeCompare(b.date));
         const detailTr = el(`<tr data-expansion-for="${escapeHtml(r.key)}"><td colspan="2" style="padding:0;background:var(--paper-soft, #f7f6f2);"></td></tr>`);
         const cell = detailTr.querySelector('td');
         vouchers.forEach(v=>{
@@ -8709,6 +8715,93 @@ function renderSslReportCard(){
   draw();
   card.querySelector('#ssl-year').onchange = (e)=>{ sslReportFilters.year = e.target.value; sslReportFilters.month = ''; render(); };
   card.querySelector('#ssl-month').onchange = (e)=>{ sslReportFilters.month = e.target.value; draw(); };
+  return card;
+}
+
+/* --- Electricity Meter Load: a simple reference log of the exact date
+   each electricity meter recharge actually went in. Separate need from
+   the Utility voucher/bill (which is entered on the bill's sign date,
+   e.g. 30th, days after the meter itself was loaded, e.g. 27th) - this
+   card exists purely so that earlier load date is easy to find again
+   without re-opening old vouchers. Deliberately NOT wired into
+   allVouchers()/COA/Monthly Ledger/any export - on-screen only, exactly
+   like SSL Commerz Entries above. --- */
+function renderMeterLoadCard(){
+  const entries = (state.meterLoadLog||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const years = [...new Set(entries.map(e=>e.date.slice(0,4)))].sort().reverse();
+  if(meterLoadFilters.year && !years.includes(meterLoadFilters.year)) meterLoadFilters.year = '';
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#9889;</span> Electricity Meter Load</h3>
+      <p class="subnote">A simple reference log for the exact date each electricity meter recharge/load actually went in &mdash; separate from the Utility voucher/bill entry, so the real load date is easy to find later without re-checking old vouchers. On screen only, not linked to accounting or any export.</p>
+      <div class="row" style="align-items:flex-end; gap:14px; flex-wrap:wrap;">
+        <div class="field" style="flex:0 0 160px;">
+          <label>Date loaded</label>
+          <input type="date" id="ml-date-input">
+        </div>
+        <div class="field" style="flex:1 1 220px;">
+          <label>Note <span class="tag">optional</span></label>
+          <input type="text" id="ml-note-input" placeholder="e.g. Main meter / Submersible pump meter">
+        </div>
+        <button class="secondary" type="button" id="ml-add-btn">+ Add</button>
+      </div>
+      <div class="row" style="flex-wrap:wrap; margin-top:10px;">
+        <div class="field" style="min-width:140px;">
+          <label>Year <span class="tag">optional</span></label>
+          <select id="ml-year">
+            <option value="">All years</option>
+            ${years.map(y=>`<option value="${y}" ${meterLoadFilters.year===y?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="ml-body"></div>
+    </div>
+  `);
+  function draw(){
+    const box = card.querySelector('#ml-body');
+    box.innerHTML = '';
+    const filtered = meterLoadFilters.year ? entries.filter(e=>e.date.slice(0,4)===meterLoadFilters.year) : entries;
+    if(!filtered.length){ box.appendChild(el(`<p class="empty" style="margin-top:10px;">No meter load dates recorded yet.</p>`)); return; }
+    const byMonth = new Map();
+    filtered.forEach(e=>{
+      const k = e.date.slice(0,7);
+      if(!byMonth.has(k)) byMonth.set(k, []);
+      byMonth.get(k).push(e);
+    });
+    Array.from(byMonth.keys()).sort().reverse().forEach(k=>{
+      const [y,m] = k.split('-');
+      const rows = byMonth.get(k).slice().sort((a,b)=>a.date.localeCompare(b.date));
+      const monthBlock = el(`<div style="margin-top:12px;"><div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">${MONTHS[parseInt(m,10)-1]} ${y} &mdash; ${rows.length} ${rows.length===1?'entry':'entries'}</div></div>`);
+      rows.forEach(r=>{
+        monthBlock.appendChild(el(`
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid var(--line-soft); font-size:12.5px;">
+            <span class="mono">${dayLabel(r.date)} ${r.date.slice(0,4)}</span>
+            <span style="flex:1; padding-left:10px;">${escapeHtml(r.note||'')}</span>
+            <button type="button" class="danger small" data-id="${r.id}" title="Delete">&times;</button>
+          </div>
+        `));
+      });
+      box.appendChild(monthBlock);
+    });
+    box.querySelectorAll('button[data-id]').forEach(btn=>{
+      btn.onclick = ()=>{
+        state.meterLoadLog = (state.meterLoadLog||[]).filter(e=>e.id!==btn.dataset.id);
+        saveState(); render();
+      };
+    });
+  }
+  draw();
+  card.querySelector('#ml-add-btn').onclick = ()=>{
+    const dateInp = card.querySelector('#ml-date-input');
+    const noteInp = card.querySelector('#ml-note-input');
+    const date = dateInp.value;
+    if(!date){ showAlert('Pick a date first.'); return; }
+    if(!Array.isArray(state.meterLoadLog)) state.meterLoadLog = [];
+    state.meterLoadLog.push({id: uid(), date, note: noteInp.value.trim()});
+    dateInp.value = ''; noteInp.value = '';
+    saveState(); render();
+  };
+  card.querySelector('#ml-year').onchange = (e)=>{ meterLoadFilters.year = e.target.value; draw(); };
   return card;
 }
 
@@ -10451,6 +10544,33 @@ function drawMiscCollectionList(container, day){
   }
 }
 
+/* Electricity Meter Load auto-fill: when a Utility voucher's description
+   reads like "Electricity meter load" (English or Bangla "মিটার লোড"),
+   drawCoaList below reveals an extra "Original load date" field right on
+   that voucher. Filling it does double duty - it stays with the voucher
+   as item.meterLoadDate/meterLoadLogId, AND is mirrored into
+   state.meterLoadLog (the same log the sidebar card reads), so one entry
+   covers both the expense and the meter-load date lookup. */
+function isMeterLoadDescription(text){
+  if(!text) return false;
+  return /meter\s*load/i.test(text) || text.includes('মিটার লোড');
+}
+function upsertMeterLoadLogEntry(item, date, day){
+  if(!Array.isArray(state.meterLoadLog)) state.meterLoadLog = [];
+  const note = 'Utility voucher ' + (item.voucher||'') + (day && day.date ? ' (bill entry ' + dayLabel(day.date) + ')' : '');
+  let entry = item.meterLoadLogId ? state.meterLoadLog.find(e=>e.id===item.meterLoadLogId) : null;
+  if(entry){ entry.date = date; entry.note = note; }
+  else {
+    entry = {id: uid(), date, note, voucherLink: item.id};
+    state.meterLoadLog.push(entry);
+    item.meterLoadLogId = entry.id;
+  }
+}
+function removeMeterLoadLogEntryForItem(item){
+  if(!item || !item.meterLoadLogId) return;
+  state.meterLoadLog = (state.meterLoadLog||[]).filter(e=>e.id!==item.meterLoadLogId);
+}
+
 function drawCoaList(container, day, catKey, arr){
   container.innerHTML = '';
   if(arr.length===0){ container.appendChild(el(`<p class="empty">No vouchers yet.</p>`)); return; }
@@ -10532,10 +10652,30 @@ function drawCoaList(container, day, catKey, arr){
     syncDescRequired();
     descInp.addEventListener('blur', syncDescRequired);
     descInp.addEventListener('input', syncDescRequired);
+    let meterRow = null;
+    if(catKey==='Utility'){
+      meterRow = el(`
+        <div class="coa-meter-load-row" style="margin:-4px 0 8px 0; ${isMeterLoadDescription(sec0.desc)?'':'display:none;'}">
+          <div class="field" style="max-width:220px; margin-bottom:0;">
+            <label>Original load date <span class="tag">saves to Meter Load log</span></label>
+            <input type="date" class="meter-load-date-input" value="${item.meterLoadDate||''}">
+          </div>
+        </div>
+      `);
+      const meterDateInp = meterRow.querySelector('.meter-load-date-input');
+      descInp.addEventListener('input', ()=>{ meterRow.style.display = isMeterLoadDescription(sec0.desc) ? '' : 'none'; });
+      meterDateInp.onchange = ()=>{
+        item.meterLoadDate = meterDateInp.value;
+        if(meterDateInp.value) upsertMeterLoadLogEntry(item, meterDateInp.value, day);
+        else removeMeterLoadLogEntryForItem(item);
+        saveState();
+      };
+    }
     container.appendChild(row);
     container.appendChild(extraWrap);
     container.appendChild(addSecBtn);
     container.appendChild(sectionsTotal);
+    if(meterRow) container.appendChild(meterRow);
     const noteInp = noteRow.querySelector('.note-input');
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
     wireLockableTextInput(noteInp);
@@ -11382,6 +11522,11 @@ function wireDelegation(){
       const doRemoval = (note)=>{
         if(note) logAuditDelete(`${catKey} voucher`, {voucher:removed.voucher, desc:removed.desc, amount:removed.amount, reason:note}, (findHistoryCategory(catKey)||{}).label || '');
         let removedAssetEntry = null, removedAssetItemId = null;
+        let removedMeterLoadEntry = null;
+        if(removed.meterLoadLogId){
+          removedMeterLoadEntry = (state.meterLoadLog||[]).find(e=>e.id===removed.meterLoadLogId) || null;
+          if(removedMeterLoadEntry) state.meterLoadLog = state.meterLoadLog.filter(e=>e.id!==removed.meterLoadLogId);
+        }
         if(removed.assetLink){
           const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removed.assetLink.assetItemId);
           const entry = assetItem && assetItem.entries.find(e=>e.id===removed.assetLink.entryId);
@@ -11405,6 +11550,10 @@ function wireDelegation(){
           if(removedAssetEntry && removedAssetItemId){
             const assetItem = state.fixedAssetRegister.items.find(a=>a.id===removedAssetItemId);
             if(assetItem) assetItem.entries.push(removedAssetEntry);
+          }
+          if(removedMeterLoadEntry){
+            if(!Array.isArray(state.meterLoadLog)) state.meterLoadLog = [];
+            state.meterLoadLog.push(removedMeterLoadEntry);
           }
         });
         saveState(); render();
