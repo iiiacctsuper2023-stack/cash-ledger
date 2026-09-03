@@ -1498,6 +1498,16 @@ function dayLabelFull(dateStr){
   const d = new Date(dateStr+'T00:00:00');
   return ordinal(d.getDate())+' '+MONTHS[d.getMonth()];
 }
+/* "01 Sep 26" style - zero-padded day, 3-letter month, 2-digit year.
+   Used for the Excel Debit Voucher date box, which has a tight fixed
+   print area. */
+function dayLabelDDMonYY(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mon = MONTHS[d.getMonth()].slice(0,3);
+  const yy = String(state.year).slice(-2);
+  return `${dd} ${mon} ${yy}`;
+}
 /* Date label for a voucher row in Search/Category Summary results - a
    real voucher shows its exact day; an imported historical voucher (see
    allHistoricalVouchers()) has no real day, so it shows the notesheet's
@@ -12296,7 +12306,7 @@ async function appendDebitVoucherSheets(wb, day, used){
     const sheetName = uniqueSheetName(label.replace(/[\\/\?\*\[\]:']/g,''), used);
     const ws = cloneTemplateSheet(wb, srcWs, sheetName);
     ws.getCell('C9').value = item.voucher;
-    ws.getCell('H9').value = `${dayLabel(day.date)} ${state.year}`;
+    ws.getCell('H9').value = dayLabelDDMonYY(day.date);
     ws.getCell('B14').value = formatMultiItemDescription(label);
     ws.getCell('G14').value = formatMultiItemAmounts(item);
     ws.getCell('B28').value = `In Words: ${takaInWords(amt)}`;
