@@ -3458,7 +3458,7 @@ function debitVoucherHtml(day, cat, item){
     <div class="voucher-title-box">Debit Voucher</div>
     <table class="no-outer"><tr>
       <td class="no-border" style="width:50%;">No: <span class="boxed">${escapeHtml(item.voucher||'')}</span></td>
-      <td class="no-border" style="width:50%;">Date: <span class="boxed">${dayLabelFull(day.date)} ${state.year}</span></td>
+      <td class="no-border" style="width:50%;">Date: <span class="boxed">${dayLabel(day.date)} ${state.year}</span></td>
     </tr><tr>
       <td class="no-border">Paid To <span class="boxed">&nbsp;</span></td>
       <td class="no-border">Through: <span class="boxed">&nbsp;</span></td>
@@ -12296,7 +12296,7 @@ async function appendDebitVoucherSheets(wb, day, used){
     const sheetName = uniqueSheetName(label.replace(/[\\/\?\*\[\]:']/g,''), used);
     const ws = cloneTemplateSheet(wb, srcWs, sheetName);
     ws.getCell('C9').value = item.voucher;
-    ws.getCell('H9').value = `${dayLabelFull(day.date)} ${state.year}`;
+    ws.getCell('H9').value = `${dayLabel(day.date)} ${state.year}`;
     ws.getCell('B14').value = formatMultiItemDescription(label);
     ws.getCell('G14').value = formatMultiItemAmounts(item);
     ws.getCell('B28').value = `In Words: ${takaInWords(amt)}`;
