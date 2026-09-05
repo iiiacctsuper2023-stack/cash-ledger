@@ -6907,17 +6907,21 @@ async function exportMonthlyLedger(key, previewOnly){
   });
 
   let r = headerRowNum+1;
-  // One row per bank ("IBBPLC Total", "TBL Total", ...), each bank's own
-  // beginning balance sitting only in that bank's own column (0 in every
-  // other bank's column on that row) - so summing a bank's column later
-  // picks up exactly that bank's figures, nothing else's.
+  // Single "Beginning Bank Balance" row (bold label) with each bank's own
+  // opening balance sitting in that bank's own column, all on one line -
+  // rather than a separate "<Bank> Total" row per bank as before. Summing
+  // a bank's column later still picks up exactly that bank's figures,
+  // since bankBeginRows[b.id] now all point at this same row but each
+  // bank still only reads its own column off it.
   const bankBeginRows = {};
-  banksForCols.forEach((b,i)=>{
-    bankBeginRows[b.id] = r;
-    rev.getCell(r,3).value = `${b.name||'Total'} Total`;
-    banksForCols.forEach((b2,j)=>{ rev.getCell(r, BANK_COL_START+j).value = (j===i) ? effectiveBeginningBankBalanceFor(key, b.id) : 0; });
-    r++;
+  const beginBalRow = r;
+  rev.getCell(r,3).value = 'Beginning Bank Balance';
+  rev.getCell(r,3).font = BOLD;
+  banksForCols.forEach((b,j)=>{
+    bankBeginRows[b.id] = beginBalRow;
+    rev.getCell(beginBalRow, BANK_COL_START+j).value = effectiveBeginningBankBalanceFor(key, b.id);
   });
+  r++;
   // House Rent Deposit only gets its own separate (non-dated) row in the
   // rare legacy case where it's a flat manually-typed monthly total with
   // no day-by-day source to date it by; the normal, dated, per-day case is
@@ -7033,25 +7037,32 @@ async function exportMonthlyLedger(key, previewOnly){
   r++;
   const totalDueRow = r;
   revSummaryLabel(r, 'Total Due'); rev.getCell(r,1).font = FONT;
-  rev.getCell(r, targetBankCol).value = {formula:`SUM(${rev.getColumn(CAT_COL_START).letter}${r}:${rev.getColumn(REV_LAST_COL).letter}${r})`};
-  banksForCols.forEach((b,j)=>{ if(BANK_COL_START+j!==targetBankCol) rev.getCell(r,BANK_COL_START+j).value = 0; });
+  rev.mergeCells(r, BANK_COL_START, r, BANK_COL_START+numBankCols-1);
+  rev.getCell(r, BANK_COL_START).value = {formula:`SUM(${rev.getColumn(CAT_COL_START).letter}${r}:${rev.getColumn(REV_LAST_COL).letter}${r})`};
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,CAT_COL_START+i).value = Number(rec.revenueTotalDue[c.key])||0; });
   r++;
   const transferRow = r;
   revSummaryLabel(r, 'Transfer from Admission Fee to Gratuity & Education Assistant Fund'); rev.getCell(r,1).font = FONT;
-  rev.getCell(r, targetBankCol).value = {formula:`SUM(${rev.getColumn(CAT_COL_START).letter}${r}:${rev.getColumn(REV_LAST_COL).letter}${r})`};
-  banksForCols.forEach((b,j)=>{ if(BANK_COL_START+j!==targetBankCol) rev.getCell(r,BANK_COL_START+j).value = 0; });
+  rev.mergeCells(r, BANK_COL_START, r, BANK_COL_START+numBankCols-1);
+  rev.getCell(r, BANK_COL_START).value = {formula:`SUM(${rev.getColumn(CAT_COL_START).letter}${r}:${rev.getColumn(REV_LAST_COL).letter}${r})`};
   REVENUE_CATS.forEach((c,i)=>{ rev.getCell(r,CAT_COL_START+i).value = effectiveRevenueTransfer(rec, c.key); });
   r++;
   const yrtNewRow = r;
   revSummaryLabel(r, 'Yearly Running Total'); rev.getCell(r,1).font = BOLD;
+  rev.mergeCells(r, BANK_COL_START, r, BANK_COL_START+numBankCols-1);
+  const expAssistColIdx = mlFig.rec.expenditureColumns.findIndex(c=>resolveColCoaKey(c)==='EduAssist');
+  const expAssistAmt = expAssistColIdx>=0 ? (mlFig.expColAmounts[expAssistColIdx]||0) : 0;
   REVENUE_CATS.forEach((c,i)=>{
     const colLetter = rev.getColumn(CAT_COL_START+i).letter;
     if(c.key==='eduAssist'){
-      // Net of this month's own EduAssist expenditure - can't be a live
-      // formula here since the Expenditure sheet (built later) is where
-      // that expenditure column lives; embed the already-computed net value.
-      rev.getCell(r,CAT_COL_START+i).value = mlFig.yrtNew.eduAssist;
+      // Net of this month's own EduAssist expenditure - that expenditure
+      // total isn't a cell on this sheet (it lives on the Monthly
+      // Expenditure sheet, built after this one, at a row that isn't known
+      // yet), so it's embedded as a plain number inside the formula rather
+      // than a live cross-sheet reference - but the three running-total
+      // components (Total Income + Transfer + Yearly Running Total Before)
+      // are still a real SUM formula, same as every other category here.
+      rev.getCell(r,CAT_COL_START+i).value = {formula:`${colLetter}${totalIncomeRow}+${colLetter}${transferRow}+${colLetter}${yrtBeforeRow}-${expAssistAmt}`};
     } else {
       rev.getCell(r,CAT_COL_START+i).value = {formula:`${colLetter}${totalIncomeRow}+${colLetter}${transferRow}+${colLetter}${yrtBeforeRow}`};
     }
@@ -7308,7 +7319,7 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(assetStartRow+1,10).value = 2; exp.getCell(assetStartRow+1,11).value = 'Advance Payment'; exp.getCell(assetStartRow+1,14).value = Number(rec.balanceSheet.advancePayment)||0;
   const gratuityColLetter = rev.getColumn(CAT_COL_START + REVENUE_CATS.findIndex(c=>c.key==='gratuity')).letter;
   const eduAssistColLetter = rev.getColumn(CAT_COL_START + REVENUE_CATS.findIndex(c=>c.key==='eduAssist')).letter;
-  exp.getCell(assetStartRow+2,5).value = 3; exp.getCell(assetStartRow+2,6).value = 'Due Payment'; exp.getCell(assetStartRow+2,9).value = {formula:`'Monthly Revenue'!${targetBankColLetter()}${totalDueRow}`};
+  exp.getCell(assetStartRow+2,5).value = 3; exp.getCell(assetStartRow+2,6).value = 'Due Payment'; exp.getCell(assetStartRow+2,9).value = {formula:`'Monthly Revenue'!${rev.getColumn(BANK_COL_START).letter}${totalDueRow}`};
   exp.getCell(assetStartRow+2,10).value = 3; exp.getCell(assetStartRow+2,11).value = 'Gratuity Payable'; exp.getCell(assetStartRow+2,14).value = {formula:`'Monthly Revenue'!${gratuityColLetter}${yrtNewRow}`};
   exp.getCell(assetStartRow+3,5).value = 4; exp.getCell(assetStartRow+3,6).value = otherAsset.label||'Debt to III Assets Ltd'; exp.getCell(assetStartRow+3,9).value = Number(otherAsset.amount)||0;
 
@@ -7329,6 +7340,16 @@ async function exportMonthlyLedger(key, previewOnly){
       exp.getCell(rr,cc).border = thin;
       if(!exp.getCell(rr,cc).font || !exp.getCell(rr,cc).font.name) exp.getCell(rr,cc).font = FONT;
     }
+  }
+  // H, M and N are cut border-free from directly below the "Balance Sheet"
+  // title down through the block's own Total row - H and M are blank
+  // spacer columns right before each side's amount column (I/N), so a grid
+  // line there was cutting into the overflowing Asset/Liability label text
+  // in F/K; N (the Liability amount column) is cut the same way.
+  for(let rr=balanceSheetHeaderRow; rr<=totalRow; rr++){
+    exp.getCell(rr,8).border = {};
+    exp.getCell(rr,13).border = {};
+    exp.getCell(rr,14).border = {};
   }
   // Only columns 9 (asset amount) and 14 (liability amount) hold money here -
   // column 5/10 are the plain 1/2/3/4 item numbers, which should stay as-is.
