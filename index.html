@@ -211,6 +211,7 @@
     transition:border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
   }
   input[type=number]{font-family:'IBM Plex Mono',monospace;}
+  input[readonly]{background:#f1efe6;color:var(--ink-soft);cursor:not-allowed;}
   input:hover, select:hover{border-color:#c3bda6;}
   input:focus, select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-tint);background:#fff;}
   .row{display:flex;gap:10px;flex-wrap:wrap;}
@@ -4856,7 +4857,7 @@ function renderDayPanel(dayId, computed){
       <div class="divider"></div>
 
       <label>IOU / not-yet-cleared cash (subtracted from today's closing cash)</label>
-      <p class="subnote" style="margin-top:-4px;">An IOU line keeps carrying forward to every following day automatically, until you remove it &mdash; removing it here only stops it going forward, it stays on the earlier days it already appeared on.</p>
+      <p class="subnote" style="margin-top:-4px;">An IOU line keeps carrying forward to every following day automatically, until you remove it &mdash; removing it here only stops it going forward, it stays on the earlier days it already appeared on. Its amount can only be edited on the day it started; if the same person takes more later, add a separate IOU line for that day instead of changing the earlier amount.</p>
       <div id="iou-list"></div>
       <button class="secondary small" data-action="add-iou" data-day="${day.id}">+ Add IOU line</button>
 
@@ -10790,7 +10791,10 @@ function drawIouList(container, day){
           <label>Description <span style="color:var(--danger);">*</span> ${carried?`<span class="tag">carried from ${dayLabel(item.fromDate)}</span>`:''}</label>
           <input type="text" class="desc-input" list="iou-desc-suggest" autocomplete="off" value="${escapeHtml(item.desc)}" placeholder="e.g. Electricity meter load" required>
         </div>
-        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}"></div>
+        <div class="field amt" style="margin-bottom:0;">
+          <label>Amount ${carried?`<span class="tag" title="This IOU started on ${dayLabel(item.fromDate)} - edit the amount there so earlier days keep their own correct totals. Taking more on this day? Use + Add IOU line below for a separate entry instead.">locked here</span>`:''}</label>
+          <input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(item.amount)}" ${carried?'readonly title="This IOU started on an earlier day - edit the amount there, or add a new IOU line for money taken on this day."':''}>
+        </div>
         <button class="secondary small" type="button" data-action="open-settle-iou" data-day="${day.id}" data-item="${item.id}" title="Record a receipt/repayment against this IOU">Settle</button>
         <button class="danger small" type="button" data-action="remove-iou" data-day="${day.id}" data-item="${item.id}" title="Remove (stops it carrying forward)">&times;</button>
       </div>
@@ -10803,7 +10807,7 @@ function drawIouList(container, day){
     syncDescRequired();
     descInp.addEventListener('blur', syncDescRequired);
     descInp.addEventListener('input', syncDescRequired);
-    wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
+    if(!carried) wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
 }
@@ -12127,6 +12131,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   const ws = cloneTemplateSheet(wb, srcWs, String(noteNum - 1), 11);
 
   ws.getCell('B3').value = `III/Acct/Madrasa/revenue/${noteNum}`;
+  ws.getCell('F5').value = 1; // sheet number - the main sheet is always sheet 1; becomes "1 of 2" alongside the Miscellaneous breakdown sheet below when one exists
   ws.getCell('B7').value = dateText
     ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
     : `Following amount of cash collected may be deposited to madrasa account`;
@@ -12153,6 +12158,7 @@ async function generateDepositNotesheet(file, startISO, endISO, shouldSave, prev
   if(miscLines.length){
     const miscWs = cloneTemplateSheet(wb, srcWs, 'Miscellaneous', 11);
     miscWs.getCell('B3').value = `III/Acct/Madrasa/revenue/${noteNum}`;
+    miscWs.getCell('F5').value = 2; // second sheet of this notesheet package
     miscWs.getCell('B7').value = dateText
       ? `Following amount of cash collected at ${dateText} may be deposited to madrasa account`
       : `Following amount of cash collected may be deposited to madrasa account`;
