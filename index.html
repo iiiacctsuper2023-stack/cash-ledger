@@ -11895,17 +11895,39 @@ async function parseDepositRawFile(arrayBuffer){
   await wb.xlsx.load(arrayBuffer);
   const ws = wb.worksheets[0];
   const dateRangeRaw = ws.getCell('B3').value;
-  const headerRow = ws.getRow(5);
-  const headers = {};
-  headerRow.eachCell({includeEmpty:false}, (cell, colNum)=>{ headers[String(cell.value||'').trim()] = colNum; });
-  const tranIdCol = headers['TranID'];
-  const totalAmtCol = headers['TotalAmount'];
+  // The header row used to always be row 5 with an exact "TranID" spelling,
+  // but the bank's own export has since moved it (seen at row 1) and
+  // re-spelled the column "Tran ID" (with a space) - so scan the first few
+  // rows for whichever one actually has a TranID-like header, and match
+  // column names loosely (case/space-insensitive) instead of assuming a
+  // fixed row and exact spelling.
+  const norm = s => String(s||'').replace(/[\s\u00A0]+/g,'').toLowerCase();
+  let headerRowNum = null, headers = {};
+  for(let rn=1; rn<=15 && rn<=ws.rowCount; rn++){
+    const row = ws.getRow(rn);
+    const rowHeaders = {};
+    let hasTranId = false;
+    row.eachCell({includeEmpty:false}, (cell, colNum)=>{
+      const text = String(cell.value||'').trim();
+      if(text) rowHeaders[text] = colNum;
+      if(norm(text)==='tranid') hasTranId = true;
+    });
+    if(hasTranId){ headerRowNum = rn; headers = rowHeaders; break; }
+  }
+  const findCol = (name)=>{
+    if(headers[name]) return headers[name];
+    const target = norm(name);
+    for(const key in headers){ if(norm(key)===target) return headers[key]; }
+    return null;
+  };
+  const tranIdCol = headerRowNum ? findCol('TranID') : null;
+  const totalAmtCol = headerRowNum ? findCol('TotalAmount') : null;
   if(!tranIdCol || !totalAmtCol) throw new Error('Could not find TranID/TotalAmount columns - is this the right raw file?');
   const catCols = {};
-  DEPOSIT_CAT_COLS.forEach(name=>{ catCols[name] = headers[name] || null; });
+  DEPOSIT_CAT_COLS.forEach(name=>{ catCols[name] = findCol(name); });
   let grand = 0;
   const totals = {}; DEPOSIT_CAT_COLS.forEach(c=>totals[c]=0);
-  for(let r=6; r<=ws.rowCount; r++){
+  for(let r=headerRowNum+1; r<=ws.rowCount; r++){
     const row = ws.getRow(r);
     const tranId = row.getCell(tranIdCol).value;
     if(tranId===null || tranId===undefined || tranId==='') continue;
