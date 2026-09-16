@@ -1204,6 +1204,7 @@ let sslReportOpen = false;
 let sslReportFilters = { year:'', month:'' };
 let meterLoadOpen = false;
 let meterLoadFilters = { year:'', month:'' };
+let suggestManagerOpen = false;
 let templatesOpen = false;
 let dashboardOpen = false;
 let monthlyLedgerOpen = false; // also doubles as "which top-level tab is active" (Daily Ledger vs Monthly Ledger)
@@ -1250,6 +1251,7 @@ function panelRegistry(){
     ['audit-log',          ()=>auditLogOpen,           v=>{auditLogOpen=v;},           'Audit Trail',                  renderAuditLogCard],
     ['ssl-report',         ()=>sslReportOpen,          v=>{sslReportOpen=v;},          'SSL Commerz Entries',          renderSslReportCard],
     ['meter-load',         ()=>meterLoadOpen,          v=>{meterLoadOpen=v;},          'Electricity Meter Load',       renderMeterLoadCard],
+    ['suggest-manager',    ()=>suggestManagerOpen,     v=>{suggestManagerOpen=v;},     'Manage Suggestions',           renderSuggestManagerCard],
     ['templates',          ()=>templatesOpen,          v=>{templatesOpen=v;},          'Templates',                    renderTemplatesCard],
   ];
 }
@@ -2875,6 +2877,7 @@ function migrateState(){
   if(!state.customHistoricalCategories) state.customHistoricalCategories = [];
   if(!state.synonymGroups) state.synonymGroups = [];
   if(!Array.isArray(state.meterLoadLog)) state.meterLoadLog = [];
+  if(!Array.isArray(state.suppressedDescSuggestions)) state.suppressedDescSuggestions = [];
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -3957,6 +3960,7 @@ function navIcon(name){
     ssl:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="5" width="19.6" height="14" rx="2.2"/><path d="M2.2 9.8h19.6"/><path d="M6 15h4"/></svg>',
     templates: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2"/><path d="M9.5 3.2v17.6"/><path d="M3.2 9h6.3"/></svg>',
     meter:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8.3"/><path d="M12 13 15.2 8.5"/><path d="M8.7 6.2 7.6 4.3M15.3 6.2l1.1-1.9M4.7 13H2.7M21.3 13h-2"/></svg>',
+    suggest:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"/><path d="M4 10h10"/><path d="M4 15h13"/><path d="M18.5 13.5 21 16l-5.5 5.5L13 21l.5-2.5z"/></svg>',
     setup:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.1a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.1a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.1a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.1a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     backup:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16"/><path d="M6 5.5V19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5.5"/><path d="M9.5 5.5V4a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 15.5 4v1.5"/><path d="M12 9.5v6M9.3 12.2 12 9.5l2.7 2.7"/></svg>',
     download:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 18.5h16"/></svg>',
@@ -4006,6 +4010,7 @@ function renderSidebar(){
     ['audit',       'audit-log',           'Audit Trail',              auditLogOpen],
     ['ssl',         'ssl-report',          'SSL Commerz Entries',      sslReportOpen],
     ['meter',       'meter-load',          'Electricity Meter Load',   meterLoadOpen],
+    ['suggest',     'suggest-manager',     'Manage Suggestions',      suggestManagerOpen],
     ['templates',   'templates',           'Templates',                templatesOpen],
   ];
   const navList = el(`<div class="sidebar-nav">
@@ -8837,6 +8842,89 @@ function renderMeterLoadCard(){
   return card;
 }
 
+/* --- Manage Suggestions: every description/note dropdown in this app
+   (Cash Disbursed category descriptions, Misc Collection "Collected from",
+   IOU description, Bank Transfer notes) is built live from real past
+   entries - there's no separately-stored list. So this card can't delete
+   a suggestion by deleting data; it keeps a small blocklist
+   (state.suppressedDescSuggestions) of exact terms to hide from those
+   dropdowns going forward, which every *Suggestions() function above
+   filters through via filterSuppressedSuggestions(). Hiding a term here
+   never touches the actual vouchers/entries that produced it. --- */
+function renderSuggestManagerCard(){
+  const card = el(`
+    <div class="card">
+      <h3><span class="num">&#128269;</span> Manage Suggestions</h3>
+      <p class="subnote">The suggestions that pop up while typing a description or note are built automatically from real past entries. Removing one here only hides that exact word/phrase from future suggestions - it does not delete or change any voucher or entry that used it.</p>
+      <div class="field" style="max-width:280px;">
+        <label>Filter</label>
+        <input type="text" id="sm-filter" placeholder="Type to filter the list below">
+      </div>
+      <div id="sm-body"></div>
+      <div style="margin-top:18px; border-top:1px solid var(--line-soft); padding-top:12px;">
+        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:6px;">Hidden suggestions <span class="tag">click to restore</span></div>
+        <div id="sm-suppressed-body"></div>
+      </div>
+    </div>
+  `);
+  function suggestionGroups(){
+    const groups = [];
+    COA.forEach(c=>{
+      const list = descriptionSuggestions(c.key);
+      if(list.length) groups.push({label: c.label, list});
+    });
+    const misc = miscCollectionDescSuggestions(); if(misc.length) groups.push({label:'Misc Collection (Collected from)', list:misc});
+    const iou = iouDescSuggestions(); if(iou.length) groups.push({label:'IOU description', list:iou});
+    const wd = transferNoteSuggestions('withdrawals'); if(wd.length) groups.push({label:'Bank Transfer note - Cash Withdrawn from Bank', list:wd});
+    const dp = transferNoteSuggestions('deposits'); if(dp.length) groups.push({label:'Bank Transfer note - Cash Deposited to Bank', list:dp});
+    return groups;
+  }
+  function chipHtml(term){
+    return `<span class="sm-chip" style="display:inline-flex; align-items:center; gap:6px; background:#f1efe6; border:1px solid var(--line); border-radius:20px; padding:4px 6px 4px 12px; font-size:12.5px;">${escapeHtml(term)} <button type="button" class="sm-hide-btn" data-term="${escapeHtml(term)}" title="Hide this suggestion going forward" style="border:none; background:transparent; cursor:pointer; font-size:14px; line-height:1; color:var(--ink-soft); padding:0 4px;">&times;</button></span>`;
+  }
+  function draw(){
+    const box = card.querySelector('#sm-body');
+    box.innerHTML = '';
+    const filterText = (card.querySelector('#sm-filter').value||'').trim().toLowerCase();
+    let any = false;
+    suggestionGroups().forEach(grp=>{
+      const filtered = filterText ? grp.list.filter(s=>s.toLowerCase().includes(filterText)) : grp.list;
+      if(!filtered.length) return;
+      any = true;
+      const block = el(`<div style="margin-top:14px;"><div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:6px;">${escapeHtml(grp.label)}</div><div style="display:flex; flex-wrap:wrap; gap:6px;">${filtered.map(chipHtml).join('')}</div></div>`);
+      box.appendChild(block);
+    });
+    if(!any) box.appendChild(el(`<p class="empty" style="margin-top:10px;">${filterText ? 'No matching suggestions.' : 'No suggestions yet.'}</p>`));
+    box.querySelectorAll('.sm-hide-btn').forEach(btn=>{
+      btn.onclick = ()=>{
+        const term = btn.dataset.term;
+        if(!Array.isArray(state.suppressedDescSuggestions)) state.suppressedDescSuggestions = [];
+        if(!state.suppressedDescSuggestions.includes(term)) state.suppressedDescSuggestions.push(term);
+        saveState(); draw(); drawSuppressed();
+      };
+    });
+  }
+  function drawSuppressed(){
+    const box = card.querySelector('#sm-suppressed-body');
+    box.innerHTML = '';
+    const list = state.suppressedDescSuggestions||[];
+    if(!list.length){ box.appendChild(el(`<p class="empty">None hidden.</p>`)); return; }
+    const wrap = el(`<div style="display:flex; flex-wrap:wrap; gap:6px;">${list.map(term=>`<button type="button" class="sm-restore-btn" data-term="${escapeHtml(term)}" style="display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px dashed var(--line); border-radius:20px; padding:4px 12px; font-size:12.5px; cursor:pointer; color:var(--ink-soft);">&#8635; ${escapeHtml(term)}</button>`).join('')}</div>`);
+    box.appendChild(wrap);
+    box.querySelectorAll('.sm-restore-btn').forEach(btn=>{
+      btn.onclick = ()=>{
+        const term = btn.dataset.term;
+        state.suppressedDescSuggestions = (state.suppressedDescSuggestions||[]).filter(t=>t!==term);
+        saveState(); draw(); drawSuppressed();
+      };
+    });
+  }
+  draw();
+  drawSuppressed();
+  card.querySelector('#sm-filter').addEventListener('input', draw);
+  return card;
+}
+
 /* --- Recurring Entry Templates: save a category+description+amount combo
    once, then add it as a new voucher with one click - handy for monthly
    recurring costs like rent, internet, or a fixed salary top-up. --- */
@@ -10354,7 +10442,19 @@ function descriptionSuggestions(catKey){
       splitDescIntoSuggestionParts(v.desc.trim()).forEach(t=>seen.add(t));
     }
   });
-  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
+}
+/* Every description/note suggestion list below is derived live from real
+   past entries - there's no separately-stored list to edit. So "deleting a
+   suggestion" can't mean deleting the underlying voucher/entry text; it
+   means keeping a small blocklist of terms to hide from the dropdown going
+   forward (see renderSuggestManagerCard), applied here as a final filter
+   before each list is returned. */
+function filterSuppressedSuggestions(list){
+  const blocked = state.suppressedDescSuggestions||[];
+  if(!blocked.length) return list;
+  const blockedSet = new Set(blocked);
+  return list.filter(s=>!blockedSet.has(s));
 }
 /* Same suggestion-splitting logic as descriptionSuggestions(), but
    sourced from every "Collected from (head)" ever typed under Misc
@@ -10369,7 +10469,7 @@ function miscCollectionDescSuggestions(){
       }
     });
   });
-  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
 }
 function iouDescSuggestions(){
   const seen = new Set();
@@ -10383,14 +10483,14 @@ function iouDescSuggestions(){
       }
     }
   });
-  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
 }
 function transferNoteSuggestions(field){
   const seen = new Set();
   allDaysEverywhere().forEach(day=>{
     (day[field]||[]).forEach(item=>{ if(item.note && item.note.trim()) seen.add(item.note.trim()); });
   });
-  return Array.from(seen).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
 }
 
 /* Plain Levenshtein edit distance between two strings - used only for the
