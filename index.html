@@ -2877,7 +2877,13 @@ function migrateState(){
   if(!state.customHistoricalCategories) state.customHistoricalCategories = [];
   if(!state.synonymGroups) state.synonymGroups = [];
   if(!Array.isArray(state.meterLoadLog)) state.meterLoadLog = [];
-  if(!Array.isArray(state.suppressedDescSuggestions)) state.suppressedDescSuggestions = [];
+  if(Array.isArray(state.suppressedDescSuggestions)){
+    // Migrate the old flat/global blocklist to the new per-scope shape,
+    // keeping old entries under "_global" (checked by every scope in
+    // filterSuppressedSuggestions) so nothing already hidden reappears.
+    state.suppressedDescSuggestions = state.suppressedDescSuggestions.length ? {_global: state.suppressedDescSuggestions} : {};
+  }
+  if(!state.suppressedDescSuggestions || typeof state.suppressedDescSuggestions!=='object') state.suppressedDescSuggestions = {};
   Object.values((state.monthlyLedger&&state.monthlyLedger.months)||{}).forEach(rec=>{
     if(!rec.balanceSheet) rec.balanceSheet = { cashInHandOverride:null, advancePayment:0 };
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
@@ -3097,7 +3103,7 @@ function wirePasswordToggle(inputEl){
   wrap.appendChild(btn);
 }
 
-function wireLockableTextInput(inputEl){
+function wireLockableTextInput(inputEl, scope){
   let auditFocusVal = inputEl.value;
   inputEl.addEventListener('focus', ()=>{ auditFocusVal = inputEl.value; });
   const syncLock = ()=>{
@@ -3139,13 +3145,17 @@ function wireLockableTextInput(inputEl){
   // typing), checks the text against every description word used
   // elsewhere in the tool before and shows any likely typo as a clickable
   // "wrong -> right" chip. Harmless no-op on Bangla note fields since only
-  // Latin-script words are indexed/checked.
+  // Latin-script words are indexed/checked. `scope` restricts the word
+  // list to the same source this input belongs to (a COA category key,
+  // 'misc-collection', 'iou', 'payable', or 'transfer:<field>') so a word
+  // typed under one category never surfaces as a spelling suggestion in a
+  // different one; omit scope to keep the old tool-wide word list.
   inputEl.addEventListener('blur', ()=>{
     const host = inputEl.parentElement;
     if(!host) return;
     const existing = host.querySelector('.spell-suggest-strip');
     if(existing) existing.remove();
-    const suggestions = findSpellingSuggestions(inputEl.value, descriptionWordIndex());
+    const suggestions = findSpellingSuggestions(inputEl.value, descriptionWordIndex(scope));
     if(!suggestions.length) return;
     const strip = el(`<div class="spell-suggest-strip" style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>`);
     strip.appendChild(el(`<span style="opacity:.7;">Spelling?</span>`));
@@ -3651,7 +3661,7 @@ function showSettleIouModal(day, item){
         </div>
       `);
       const descInp = row.querySelector('.settle-sec-desc');
-      wireLockableTextInput(descInp);
+      wireLockableTextInput(descInp, 'iou');
       descInp.oninput = ()=>{ sec.desc = descInp.value; };
       wireAmountInput(row.querySelector('.settle-sec-amt'), (num)=>{ sec.amount = num; updatePreview(); });
       const removeBtn = row.querySelector('button.danger');
@@ -8847,15 +8857,18 @@ function renderMeterLoadCard(){
    IOU description, Bank Transfer notes) is built live from real past
    entries - there's no separately-stored list. So this card can't delete
    a suggestion by deleting data; it keeps a small blocklist
-   (state.suppressedDescSuggestions) of exact terms to hide from those
-   dropdowns going forward, which every *Suggestions() function above
-   filters through via filterSuppressedSuggestions(). Hiding a term here
-   never touches the actual vouchers/entries that produced it. --- */
+   (state.suppressedDescSuggestions, keyed per source/category - see
+   filterSuppressedSuggestions()) of exact terms to hide from a dropdown
+   going forward. Scoping it per source matters: the same word can be a
+   legitimate suggestion under more than one category, so hiding it while
+   managing Utility must not also remove it from Transport, Misc
+   Collection, etc. Hiding a term here never touches the actual
+   vouchers/entries that produced it. --- */
 function renderSuggestManagerCard(){
   const card = el(`
     <div class="card">
       <h3><span class="num">&#128269;</span> Manage Suggestions</h3>
-      <p class="subnote">The suggestions that pop up while typing a description or note are built automatically from real past entries. Removing one here only hides that exact word/phrase from future suggestions - it does not delete or change any voucher or entry that used it.</p>
+      <p class="subnote">The suggestions that pop up while typing a description or note are built automatically from real past entries. Each category/source below is separate - hiding a word in one category never hides it in another. Removing one here only hides that exact word/phrase from future suggestions - it does not delete or change any voucher or entry that used it.</p>
       <div class="field" style="max-width:280px;">
         <label>Filter</label>
         <input type="text" id="sm-filter" placeholder="Type to filter the list below">
@@ -8867,20 +8880,29 @@ function renderSuggestManagerCard(){
       </div>
     </div>
   `);
+  function scopeLabel(scope){
+    if(scope==='_global') return 'General (hidden before categories were separated)';
+    if(scope==='misc-collection') return 'Misc Collection (Collected from)';
+    if(scope==='iou') return 'IOU description';
+    if(scope==='transfer:withdrawals') return 'Bank Transfer note - Cash Withdrawn from Bank';
+    if(scope==='transfer:deposits') return 'Bank Transfer note - Cash Deposited to Bank';
+    const coa = COA.find(c=>c.key===scope);
+    return coa ? coa.label : scope;
+  }
   function suggestionGroups(){
     const groups = [];
     COA.forEach(c=>{
       const list = descriptionSuggestions(c.key);
-      if(list.length) groups.push({label: c.label, list});
+      if(list.length) groups.push({label: c.label, scope: c.key, list});
     });
-    const misc = miscCollectionDescSuggestions(); if(misc.length) groups.push({label:'Misc Collection (Collected from)', list:misc});
-    const iou = iouDescSuggestions(); if(iou.length) groups.push({label:'IOU description', list:iou});
-    const wd = transferNoteSuggestions('withdrawals'); if(wd.length) groups.push({label:'Bank Transfer note - Cash Withdrawn from Bank', list:wd});
-    const dp = transferNoteSuggestions('deposits'); if(dp.length) groups.push({label:'Bank Transfer note - Cash Deposited to Bank', list:dp});
+    const misc = miscCollectionDescSuggestions(); if(misc.length) groups.push({label:'Misc Collection (Collected from)', scope:'misc-collection', list:misc});
+    const iou = iouDescSuggestions(); if(iou.length) groups.push({label:'IOU description', scope:'iou', list:iou});
+    const wd = transferNoteSuggestions('withdrawals'); if(wd.length) groups.push({label:'Bank Transfer note - Cash Withdrawn from Bank', scope:'transfer:withdrawals', list:wd});
+    const dp = transferNoteSuggestions('deposits'); if(dp.length) groups.push({label:'Bank Transfer note - Cash Deposited to Bank', scope:'transfer:deposits', list:dp});
     return groups;
   }
-  function chipHtml(term){
-    return `<span class="sm-chip" style="display:inline-flex; align-items:center; gap:6px; background:#f1efe6; border:1px solid var(--line); border-radius:20px; padding:4px 6px 4px 12px; font-size:12.5px;">${escapeHtml(term)} <button type="button" class="sm-hide-btn" data-term="${escapeHtml(term)}" title="Hide this suggestion going forward" style="border:none; background:transparent; cursor:pointer; font-size:14px; line-height:1; color:var(--ink-soft); padding:0 4px;">&times;</button></span>`;
+  function chipHtml(term, scope){
+    return `<span class="sm-chip" style="display:inline-flex; align-items:center; gap:6px; background:#f1efe6; border:1px solid var(--line); border-radius:20px; padding:4px 6px 4px 12px; font-size:12.5px;">${escapeHtml(term)} <button type="button" class="sm-hide-btn" data-scope="${escapeHtml(scope)}" data-term="${escapeHtml(term)}" title="Hide this suggestion in this category only" style="border:none; background:transparent; cursor:pointer; font-size:14px; line-height:1; color:var(--ink-soft); padding:0 4px;">&times;</button></span>`;
   }
   function draw(){
     const box = card.querySelector('#sm-body');
@@ -8891,15 +8913,16 @@ function renderSuggestManagerCard(){
       const filtered = filterText ? grp.list.filter(s=>s.toLowerCase().includes(filterText)) : grp.list;
       if(!filtered.length) return;
       any = true;
-      const block = el(`<div style="margin-top:14px;"><div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:6px;">${escapeHtml(grp.label)}</div><div style="display:flex; flex-wrap:wrap; gap:6px;">${filtered.map(chipHtml).join('')}</div></div>`);
+      const block = el(`<div style="margin-top:14px;"><div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:6px;">${escapeHtml(grp.label)}</div><div style="display:flex; flex-wrap:wrap; gap:6px;">${filtered.map(t=>chipHtml(t, grp.scope)).join('')}</div></div>`);
       box.appendChild(block);
     });
     if(!any) box.appendChild(el(`<p class="empty" style="margin-top:10px;">${filterText ? 'No matching suggestions.' : 'No suggestions yet.'}</p>`));
     box.querySelectorAll('.sm-hide-btn').forEach(btn=>{
       btn.onclick = ()=>{
-        const term = btn.dataset.term;
-        if(!Array.isArray(state.suppressedDescSuggestions)) state.suppressedDescSuggestions = [];
-        if(!state.suppressedDescSuggestions.includes(term)) state.suppressedDescSuggestions.push(term);
+        const scope = btn.dataset.scope, term = btn.dataset.term;
+        if(!state.suppressedDescSuggestions || typeof state.suppressedDescSuggestions!=='object' || Array.isArray(state.suppressedDescSuggestions)) state.suppressedDescSuggestions = {};
+        if(!Array.isArray(state.suppressedDescSuggestions[scope])) state.suppressedDescSuggestions[scope] = [];
+        if(!state.suppressedDescSuggestions[scope].includes(term)) state.suppressedDescSuggestions[scope].push(term);
         saveState(); draw(); drawSuppressed();
       };
     });
@@ -8907,14 +8930,19 @@ function renderSuggestManagerCard(){
   function drawSuppressed(){
     const box = card.querySelector('#sm-suppressed-body');
     box.innerHTML = '';
-    const list = state.suppressedDescSuggestions||[];
-    if(!list.length){ box.appendChild(el(`<p class="empty">None hidden.</p>`)); return; }
-    const wrap = el(`<div style="display:flex; flex-wrap:wrap; gap:6px;">${list.map(term=>`<button type="button" class="sm-restore-btn" data-term="${escapeHtml(term)}" style="display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px dashed var(--line); border-radius:20px; padding:4px 12px; font-size:12.5px; cursor:pointer; color:var(--ink-soft);">&#8635; ${escapeHtml(term)}</button>`).join('')}</div>`);
-    box.appendChild(wrap);
+    const map = state.suppressedDescSuggestions||{};
+    const scopes = Object.keys(map).filter(k=>(map[k]||[]).length);
+    if(!scopes.length){ box.appendChild(el(`<p class="empty">None hidden.</p>`)); return; }
+    scopes.forEach(scope=>{
+      const list = map[scope]||[];
+      if(!list.length) return;
+      const block = el(`<div style="margin-top:10px;"><div style="font-size:11.5px; font-weight:700; opacity:.65; margin-bottom:4px;">${escapeHtml(scopeLabel(scope))}</div><div style="display:flex; flex-wrap:wrap; gap:6px;">${list.map(term=>`<button type="button" class="sm-restore-btn" data-scope="${escapeHtml(scope)}" data-term="${escapeHtml(term)}" style="display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px dashed var(--line); border-radius:20px; padding:4px 12px; font-size:12.5px; cursor:pointer; color:var(--ink-soft);">&#8635; ${escapeHtml(term)}</button>`).join('')}</div></div>`);
+      box.appendChild(block);
+    });
     box.querySelectorAll('.sm-restore-btn').forEach(btn=>{
       btn.onclick = ()=>{
-        const term = btn.dataset.term;
-        state.suppressedDescSuggestions = (state.suppressedDescSuggestions||[]).filter(t=>t!==term);
+        const scope = btn.dataset.scope, term = btn.dataset.term;
+        if(state.suppressedDescSuggestions[scope]) state.suppressedDescSuggestions[scope] = state.suppressedDescSuggestions[scope].filter(t=>t!==term);
         saveState(); draw(); drawSuppressed();
       };
     });
@@ -10369,7 +10397,7 @@ function drawTransferList(container, day, field, emptyText){
     const amtInp = row.querySelector('.amt-input');
     sel.onchange = ()=>{ item.bankId = sel.value; refreshComputedOnly(); };
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
-    wireLockableTextInput(noteInp);
+    wireLockableTextInput(noteInp, `transfer:${field}`);
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
@@ -10442,19 +10470,23 @@ function descriptionSuggestions(catKey){
       splitDescIntoSuggestionParts(v.desc.trim()).forEach(t=>seen.add(t));
     }
   });
-  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen), catKey).sort((a,b)=>a.localeCompare(b));
 }
 /* Every description/note suggestion list below is derived live from real
    past entries - there's no separately-stored list to edit. So "deleting a
    suggestion" can't mean deleting the underlying voucher/entry text; it
    means keeping a small blocklist of terms to hide from the dropdown going
-   forward (see renderSuggestManagerCard), applied here as a final filter
-   before each list is returned. */
-function filterSuppressedSuggestions(list){
-  const blocked = state.suppressedDescSuggestions||[];
-  if(!blocked.length) return list;
-  const blockedSet = new Set(blocked);
-  return list.filter(s=>!blockedSet.has(s));
+   forward (see renderSuggestManagerCard). The blocklist is scoped per
+   source (one COA category key, 'misc-collection', 'iou', or
+   'transfer:<field>') so hiding a term under one category/source never
+   touches the same word showing up as a separate, legitimate suggestion
+   somewhere else - plus a "_global" bucket that every scope also checks,
+   just for entries hidden before this per-scope split existed. */
+function filterSuppressedSuggestions(list, scope){
+  const map = state.suppressedDescSuggestions||{};
+  const blocked = new Set([...(map[scope]||[]), ...(map._global||[])]);
+  if(!blocked.size) return list;
+  return list.filter(s=>!blocked.has(s));
 }
 /* Same suggestion-splitting logic as descriptionSuggestions(), but
    sourced from every "Collected from (head)" ever typed under Misc
@@ -10469,7 +10501,7 @@ function miscCollectionDescSuggestions(){
       }
     });
   });
-  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen), 'misc-collection').sort((a,b)=>a.localeCompare(b));
 }
 function iouDescSuggestions(){
   const seen = new Set();
@@ -10483,14 +10515,14 @@ function iouDescSuggestions(){
       }
     }
   });
-  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen), 'iou').sort((a,b)=>a.localeCompare(b));
 }
 function transferNoteSuggestions(field){
   const seen = new Set();
   allDaysEverywhere().forEach(day=>{
     (day[field]||[]).forEach(item=>{ if(item.note && item.note.trim()) seen.add(item.note.trim()); });
   });
-  return filterSuppressedSuggestions(Array.from(seen)).sort((a,b)=>a.localeCompare(b));
+  return filterSuppressedSuggestions(Array.from(seen), `transfer:${field}`).sort((a,b)=>a.localeCompare(b));
 }
 
 /* Plain Levenshtein edit distance between two strings - used only for the
@@ -10515,7 +10547,7 @@ function levenshtein(a, b){
    what's actually been typed (and reused) before. Tracks the most-used
    original casing per word so a suggestion reads naturally, e.g.
    "Tuition" rather than "tuition". */
-function descriptionWordIndex(){
+function descriptionWordIndex(scope){
   const idx = new Map();
   const addText = (text)=>{
     if(!text) return;
@@ -10528,13 +10560,27 @@ function descriptionWordIndex(){
       e.forms.set(raw, (e.forms.get(raw)||0)+1);
     });
   };
-  allVouchers().forEach(v=>addText(v.desc));
-  allDaysEverywhere().forEach(d=>{
-    (d.miscCollectionSections||[]).forEach(sec=>addText(sec.desc));
-  });
-  (state.iouRegistry||[]).forEach(i=>addText(i.desc));
-  (state.payableRegistry||[]).forEach(i=>addText(i.desc));
-  (state.templates||[]).forEach(t=>addText(t.desc));
+  const isCoaKey = scope && COA.some(c=>c.key===scope);
+  if(!scope){
+    allVouchers().forEach(v=>addText(v.desc));
+    allDaysEverywhere().forEach(d=>{
+      (d.miscCollectionSections||[]).forEach(sec=>addText(sec.desc));
+    });
+    (state.iouRegistry||[]).forEach(i=>addText(i.desc));
+    (state.payableRegistry||[]).forEach(i=>addText(i.desc));
+    (state.templates||[]).forEach(t=>addText(t.desc));
+  } else if(isCoaKey){
+    allVouchers().forEach(v=>{ if(v.catKey===scope) addText(v.desc); });
+  } else if(scope==='misc-collection'){
+    allDaysEverywhere().forEach(d=>{ (d.miscCollectionSections||[]).forEach(sec=>addText(sec.desc)); });
+  } else if(scope==='iou'){
+    (state.iouRegistry||[]).forEach(i=>addText(i.desc));
+  } else if(scope==='payable'){
+    (state.payableRegistry||[]).forEach(i=>addText(i.desc));
+  } else if(scope.indexOf('transfer:')===0){
+    const field = scope.slice('transfer:'.length);
+    allDaysEverywhere().forEach(day=>{ (day[field]||[]).forEach(item=>addText(item.note)); });
+  }
   return idx;
 }
 /* Flags words in `text` that don't exactly match the known vocabulary
@@ -10667,7 +10713,7 @@ function drawMiscCollectionList(container, day){
     `);
     const descInp = row.querySelector('.desc-input');
     descInp.oninput = ()=>{ sec.desc = descInp.value; saveState(); };
-    wireLockableTextInput(descInp);
+    wireLockableTextInput(descInp, 'misc-collection');
     wireAmountInput(row.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncMiscCollectionFromSections(day); refreshComputedOnly(); setText('misc-collection-total', money(day.miscCollection)); });
     container.appendChild(row);
   });
@@ -10736,7 +10782,7 @@ function drawCoaList(container, day, catKey, arr){
       const secDescInp = secRow.querySelector('.desc-input');
       secDescInp.setAttribute('list', datalistId);
       secDescInp.oninput = (e)=>{ sec.desc = e.target.value; syncCoaItemFromSections(item); saveState(); };
-      wireLockableTextInput(secDescInp);
+      wireLockableTextInput(secDescInp, catKey);
       wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); });
       extraWrap.appendChild(secRow);
     });
@@ -10751,7 +10797,7 @@ function drawCoaList(container, day, catKey, arr){
     const amtInp = row.querySelector('.amt-input');
     descInp.setAttribute('list', datalistId);
     descInp.oninput = ()=>{ sec0.desc = descInp.value; syncCoaItemFromSections(item); saveState(); };
-    wireLockableTextInput(descInp);
+    wireLockableTextInput(descInp, catKey);
     wireAmountInput(amtInp, (num)=>{
       sec0.amount = num;
       syncCoaItemFromSections(item);
@@ -10810,7 +10856,7 @@ function drawCoaList(container, day, catKey, arr){
     if(meterRow) container.appendChild(meterRow);
     const noteInp = noteRow.querySelector('.note-input');
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
-    wireLockableTextInput(noteInp);
+    wireLockableTextInput(noteInp, catKey);
     container.appendChild(noteRow);
 
     // Fixed Asset Register link - Miscellaneous is the category a durable
@@ -10902,7 +10948,7 @@ function drawIouList(container, day){
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
-    wireLockableTextInput(descInp);
+    wireLockableTextInput(descInp, 'iou');
     const syncDescRequired = ()=>{ descInp.classList.toggle('input-missing', !descInp.value.trim()); };
     syncDescRequired();
     descInp.addEventListener('blur', syncDescRequired);
@@ -10935,7 +10981,7 @@ function drawPayableList(container, day){
     const descInp = row.querySelector('.desc-input');
     const amtInp = row.querySelector('.amt-input');
     descInp.oninput = ()=>{ item.desc = descInp.value; saveState(); };
-    wireLockableTextInput(descInp);
+    wireLockableTextInput(descInp, 'payable');
     wireAmountInput(amtInp, (num)=>{ item.amount = num; refreshComputedOnly(); });
     container.appendChild(row);
   });
