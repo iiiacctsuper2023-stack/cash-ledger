@@ -245,7 +245,7 @@
     font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;
     color:var(--accent-soft);text-align:center;padding:0 6px 6px;opacity:.8;white-space:nowrap;
   }
-  .desc-input.input-missing{border-color:var(--danger,#B3261E);box-shadow:0 0 0 1px var(--danger,#B3261E) inset;}
+  .desc-input.input-missing, .amt-input.input-missing{border-color:var(--danger,#B3261E);box-shadow:0 0 0 1px var(--danger,#B3261E) inset;}
   .flash-highlight{animation:flashHighlight 2.2s ease-out;}
   @keyframes flashHighlight{
     0%{box-shadow:0 0 0 3px var(--danger,#B3261E); border-color:var(--danger,#B3261E);}
@@ -10749,6 +10749,29 @@ function removeMeterLoadLogEntryForItem(item){
   state.meterLoadLog = (state.meterLoadLog||[]).filter(e=>e.id!==item.meterLoadLogId);
 }
 
+/* Cash Disbursed (COA/expenditure) amounts must never sit at 0 - a
+   0-amount voucher line silently disappears from every total, report and
+   export (they all skip amount<=0), so leaving one at 0 looks like data
+   loss later. Flags the box red (same visual as a missing description),
+   and on blur - if it's still 0 - shows a blocking modal and refocuses
+   the box the moment it's dismissed, so the user can't move on to
+   another field while it's still 0 (removing the voucher line entirely
+   is still allowed - that's a valid way out, not a way to bypass this). */
+function wireZeroAmountGuard(inputEl, getAmount){
+  const sync = ()=>{ inputEl.classList.toggle('input-missing', !(getAmount()>0)); };
+  sync();
+  inputEl.addEventListener('input', sync);
+  inputEl.addEventListener('blur', ()=>{
+    sync();
+    if(!(getAmount()>0)){
+      showModal({
+        message: 'Amount cannot be 0 for a Cash Disbursed voucher - enter the actual amount, or remove this line if it is not needed.',
+        confirmText: 'OK',
+        onConfirm: ()=>{ inputEl.focus(); inputEl.select(); }
+      });
+    }
+  });
+}
 function drawCoaList(container, day, catKey, arr){
   container.innerHTML = '';
   if(arr.length===0){ container.appendChild(el(`<p class="empty">No vouchers yet.</p>`)); return; }
@@ -10763,7 +10786,7 @@ function drawCoaList(container, day, catKey, arr){
         <div class="voucher-badge mono">${item.voucher}</div>
         <button type="button" class="status-badge status-${item.status}" data-action="cycle-status" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Click to change review status" ${day.locked?'disabled':''}>${statusLabel(item.status)}</button>
         <div class="field desc" style="margin-bottom:0;"><label>Description <span style="color:var(--danger);">*</span></label><input type="text" class="desc-input" list="${datalistId}" autocomplete="off" value="${escapeHtml(sec0.desc)}" placeholder="What was this voucher for?" required></div>
-        <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec0.amount)}"></div>
+        <div class="field amt" style="margin-bottom:0;"><label>Amount <span style="color:var(--danger);">*</span></label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec0.amount)}"></div>
         <button class="secondary small" type="button" data-action="open-move-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Move to a different category" ${day.locked?'disabled':''}>&#8646; Move</button>
         <button class="secondary small" type="button" data-action="print-coa-voucher" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Print this voucher">&#128424; Print</button>
         <button class="danger small" type="button" data-action="remove-coa" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" title="Remove">&times;</button>
@@ -10775,7 +10798,7 @@ function drawCoaList(container, day, catKey, arr){
         <div class="line-item" style="margin-left:22px;">
           <span class="mono" style="font-size:11px;color:var(--ink-soft);width:16px;">${sIdx+2}.</span>
           <div class="field desc" style="margin-bottom:0;"><label>Section description</label><input type="text" class="desc-input" list="${datalistId}" autocomplete="off" value="${escapeHtml(sec.desc)}" placeholder="Second item under this same voucher"></div>
-          <div class="field amt" style="margin-bottom:0;"><label>Amount</label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
+          <div class="field amt" style="margin-bottom:0;"><label>Amount <span style="color:var(--danger);">*</span></label><input type="text" inputmode="decimal" class="amt-input" value="${formatAsianAmount(sec.amount)}"></div>
           <button class="danger small" type="button" data-action="remove-coa-section" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}" data-section="${sec.id}" title="Remove this section">&times;</button>
         </div>
       `);
@@ -10783,7 +10806,9 @@ function drawCoaList(container, day, catKey, arr){
       secDescInp.setAttribute('list', datalistId);
       secDescInp.oninput = (e)=>{ sec.desc = e.target.value; syncCoaItemFromSections(item); saveState(); };
       wireLockableTextInput(secDescInp, catKey);
-      wireAmountInput(secRow.querySelector('.amt-input'), (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); });
+      const secAmtInp = secRow.querySelector('.amt-input');
+      wireAmountInput(secAmtInp, (num)=>{ sec.amount = num; syncCoaItemFromSections(item); refreshComputedOnly(); setText('coa-sections-total-'+item.id, money(item.amount)); });
+      wireZeroAmountGuard(secAmtInp, ()=>Number(sec.amount)||0);
       extraWrap.appendChild(secRow);
     });
     const addSecBtn = el(`<button class="secondary small" type="button" style="margin-left:22px;" data-action="add-coa-section" data-day="${day.id}" data-cat="${catKey}" data-item="${item.id}">+ Add section (another item, same voucher)</button>`);
@@ -10806,8 +10831,18 @@ function drawCoaList(container, day, catKey, arr){
     }, ()=>{
       /* Fires only once the amount box already held a plain resolved
          number when Enter was pressed - i.e. the user is really done
-         with this line, not just finishing a calculation. */
+         with this line, not just finishing a calculation. Blocked the
+         same way as blur if this line is still sitting at 0 - Enter
+         should not be a way to stack up more unfilled 0-amount lines. */
       if(day.locked) return;
+      if(!(Number(sec0.amount)>0)){
+        showModal({
+          message: 'Amount cannot be 0 for a Cash Disbursed voucher - enter the actual amount before adding another line.',
+          confirmText: 'OK',
+          onConfirm: ()=>{ amtInp.focus(); amtInp.select(); }
+        });
+        return;
+      }
       addCoaVoucher(day, catKey);
       saveState();
       render();
@@ -10818,6 +10853,7 @@ function drawCoaList(container, day, catKey, arr){
         if(last) last.focus();
       }
     });
+    wireZeroAmountGuard(amtInp, ()=>Number(sec0.amount)||0);
     amtInp.addEventListener('blur', ()=>{
       const msg = checkDuplicateAmount(day, item.amount, item.id);
       if(msg) showDuplicateWarning(msg);
