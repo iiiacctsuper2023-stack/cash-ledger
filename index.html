@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Daily Cash & Bank Ledger</title>
-<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIkRhaWx5IENhc2ggJiBCYW5rIExlZGdlciIsICJzaG9ydF9uYW1lIjogIkNhc2ggTGVkZ2VyIiwgImRlc2NyaXB0aW9uIjogIkRhaWx5IENhc2ggJiBCYW5rIExlZGdlciBmb3IgdGhlIEludGVybmF0aW9uYWwgSXNsYW1pYyBJbnN0aXR1dGUiLCAic3RhcnRfdXJsIjogIi4iLCAic2NvcGUiOiAiLiIsICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLCAiYmFja2dyb3VuZF9jb2xvciI6ICIjRUVGMEU2IiwgInRoZW1lX2NvbG9yIjogIiMxQjRCNDMiLCAiaWNvbnMiOiBbeyJzcmMiOiAiZGF0YTppbWFnZS9zdmcreG1sO2Jhc2U2NCxQSE4yWnlCNGJXeHVjejBpYUhSMGNEb3ZMM2QzZHk1M015NXZjbWN2TWpBd01DOXpkbWNpSUhacFpYZENiM2c5SWpBZ01DQXlNREFnTWpBd0lqNEtQSEpsWTNRZ2QybGtkR2c5SWpJd01DSWdhR1ZwWjJoMFBTSXlNREFpSUhKNFBTSXlPQ0lnWm1sc2JEMGlJekZDTkVJME15SXZQZ284ZEdWNGRDQjRQU0l4TURBaUlIazlJakV6T0NJZ1ptOXVkQzFtWVcxcGJIazlJa2RsYjNKbmFXRXNJQ2RVYVcxbGN5Qk9aWGNnVW05dFlXNG5MQ0J6WlhKcFppSWdabTl1ZEMxemFYcGxQU0l4TWpBaUlHWnZiblF0ZDJWcFoyaDBQU0kzTURBaUlHWnBiR3c5SWlORlFVUkdRelVpSUhSbGVIUXRZVzVqYUc5eVBTSnRhV1JrYkdVaVB1Q25zend2ZEdWNGRENEtQQzl6ZG1jKyIsICJzaXplcyI6ICJhbnkiLCAidHlwZSI6ICJpbWFnZS9zdmcreG1sIiwgInB1cnBvc2UiOiAiYW55IG1hc2thYmxlIn1dfQ==">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj4KPHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIHJ4PSIyOCIgZmlsbD0iIzFCNEI0MyIvPgo8dGV4dCB4PSIxMDAiIHk9IjEzOCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSIxMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNFQURGQzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuCnszwvdGV4dD4KPC9zdmc+">
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj4KPHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIHJ4PSIyOCIgZmlsbD0iIzFCNEI0MyIvPgo8dGV4dCB4PSIxMDAiIHk9IjEzOCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSIxMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNFQURGQzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuCnszwvdGV4dD4KPC9zdmc+">
 <meta name="theme-color" content="#1B4B43">
@@ -2635,16 +2635,155 @@ function idbDelete(key){
     }catch(e){ resolve(false); }
   });
 }
-async function writeStateToConnectedFile(preSerialized){
-  if(!fsFileHandle) return;
+/* --- Connected-file writing -------------------------------------------
+   Previously every failure here was silent: if the browser had dropped its
+   permission to the file (it does this after a restart or once the tab has
+   been idle) or the write threw, nothing was written, yet the header kept
+   showing a green "Auto-saving". Now: writes are queued one at a time (the
+   newest state always wins - no out-of-order overwrite), each write is
+   verified by reading the file size back, and any failure raises a red
+   banner with a Reconnect button until saving works again. */
+let fsPendingHandle = null;      // remembered file whose permission must be re-granted with a click
+let fsLastSavedAt = null;        // Date of the last VERIFIED write
+let fsLastError = '';            // why saving is currently failing ('' = fine)
+let fsQueuedText = null, fsWriting = false;
+let fsNeedsGrant = false, fsAskedAt = 0;   // permission lapsed / last time we asked the person to re-grant it
+
+function fsBadgeText(){
+  if(fsLastError) return '\u{1F534} NOT saving to ' + fsFileName;
+  return '\u{1F7E2} Auto-saving to ' + fsFileName + (fsLastSavedAt ? ' \u00B7 last saved ' + fsLastSavedAt.toLocaleTimeString() : '');
+}
+function fsRefreshUi(){
+  const badge = document.getElementById('fs-status-badge');
+  if(badge){
+    badge.textContent = fsBadgeText();
+    badge.style.background = fsLastError ? '#FBE3E1' : '#DDEEE3';
+    badge.style.color = fsLastError ? '#B3261E' : '';
+  }
+  let b = document.getElementById('fs-warning-banner');
+  const paused = !!fsLastError;
+  if(!paused){ if(b) b.remove(); return; }
+  if(!b){
+    b = document.createElement('div');
+    b.id = 'fs-warning-banner';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#B3261E;color:#fff;padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top,0px));font:600 13px/1.4 system-ui,sans-serif;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;';
+    document.body.appendChild(b);
+  }
+  b.innerHTML = '';
+  const msg = document.createElement('span');
+  msg.textContent = '\u26A0 Your data is NOT being saved to "' + (fsFileName||'the connected file') + '": ' + fsLastError + ' (it is still kept in this browser).';
+  const btn = document.createElement('button');
+  btn.textContent = 'Reconnect & save now';
+  btn.style.cssText = 'background:#fff;color:#B3261E;border:0;border-radius:6px;padding:4px 10px;font-weight:700;cursor:pointer;';
+  btn.onclick = ()=>{ fsReconnectNow(); };
+  b.appendChild(msg); b.appendChild(btn);
+}
+async function fsWriteOnce(text){
   try{
     const perm = await fsFileHandle.queryPermission({mode:'readwrite'});
-    if(perm!=='granted') return; // don't block saving elsewhere; UI offers "Reconnect"
-    const text = preSerialized!==undefined ? preSerialized : await serializeForPersistence(JSON.stringify(state, null, 2));
+    if(perm!=='granted'){
+      fsLastError = 'the browser paused access to the file (it does this when the app has been in the background or was reopened)';
+      fsNeedsGrant = true;
+      fsPendingHandle = fsFileHandle;
+      fsRefreshUi(); return;
+    }
     const writable = await fsFileHandle.createWritable();
     await writable.write(text);
     await writable.close();
-  }catch(e){ /* disk write failed - window.storage/localStorage still has the data */ }
+    const f = await fsFileHandle.getFile();
+    if(f.size !== new TextEncoder().encode(text).length) throw new Error('the file on disk does not match what was written');
+    fsLastSavedAt = new Date(); fsLastError = ''; fsPendingHandle = null; fsNeedsGrant = false;
+  }catch(e){
+    fsLastError = (e && e.message) ? e.message : String(e);
+  }
+  fsRefreshUi();
+}
+async function writeStateToConnectedFile(preSerialized){
+  if(!fsFileHandle) return;
+  if(vaultLocked) return; // state is only a placeholder while the encrypted data is still locked - never write that over the file
+  let text;
+  try{ text = preSerialized!==undefined ? preSerialized : await serializeForPersistence(JSON.stringify(state, null, 2)); }
+  catch(e){ fsLastError = 'could not prepare the data for saving'; fsRefreshUi(); return; }
+  fsQueuedText = text;          // newest state always replaces any older queued one
+  if(fsWriting) return;         // the running loop will pick it up
+  fsWriting = true;
+  try{
+    while(fsQueuedText!==null){
+      const t = fsQueuedText; fsQueuedText = null;
+      await fsWriteOnce(t);
+    }
+  } finally { fsWriting = false; }
+}
+/* Re-grant permission (needs this click) and save the CURRENT data. If the
+   file turns out to hold entries newer than what's in this browser, ask
+   before overwriting it. */
+async function fsReconnectNow(){
+  const h = fsFileHandle || fsPendingHandle || await idbGet('lastHandle');
+  if(!h){ connectToFile(); return; }
+  try{
+    const perm = await h.requestPermission({mode:'readwrite'});
+    if(perm!=='granted'){ showAlert('Permission to the file was not granted, so auto-save is still paused.'); return; }
+    let fileParsed = null;
+    try{
+      const text = await (await h.getFile()).text();
+      if(text && text.trim()){
+        const env = looksLikeVaultEnvelope(text);
+        if(env){ if(vaultKey && env.salt===vaultSaltB64) fileParsed = JSON.parse(await vaultDecrypt(env, vaultKey)); }
+        else fileParsed = JSON.parse(text);
+      }
+    }catch(e){ fileParsed = null; }
+    const latest = (st)=> ((st && st.days)||[]).reduce((m,d)=> (d.date && d.date>m) ? d.date : m, '');
+    const finish = async ()=>{
+      fsFileHandle = h; fsFileName = h.name; fsPendingHandle = null; fsLastError = '';
+      await idbSet('lastHandle', h);
+      await writeStateToConnectedFile();
+      render(); fsRefreshUi();
+    };
+    if(fileParsed && Array.isArray(fileParsed.days) && latest(fileParsed) > latest(state)){
+      showConfirm(`The file "${h.name}" has entries up to ${latest(fileParsed)}, but this browser only has data up to ${latest(state)||'(none)'}. Load the file's data now? (Choosing Cancel keeps this browser's data and does NOT overwrite the file.)`, async ()=>{
+        state = fileParsed; migrateState(); selectedDayId = null; locked = !!state.lockPasswordHash;
+        await finish(); await saveState(); render();
+      }, 'Load from file');
+      return;
+    }
+    await finish();
+  }catch(e){ showAlert('Could not reconnect to the file: ' + ((e&&e.message)||e)); }
+}
+/* Keeps auto-save honest while the app sits open for hours: checks the file
+   permission every 20 s (Chrome silently pauses it for backgrounded apps),
+   flushes when the window is hidden/closed, and - because re-granting needs
+   a click - asks for the permission again on the first click/keypress after
+   it lapsed (at most once a minute) instead of waiting for the person to
+   notice. Also asks the browser to keep this app's stored data permanently. */
+async function fsCheckNow(){
+  if(!fsFileHandle || fsWriting || vaultLocked) return;
+  try{
+    const perm = await fsFileHandle.queryPermission({mode:'readwrite'});
+    if(perm!=='granted'){
+      fsNeedsGrant = true;
+      if(!fsLastError){
+        fsLastError = 'the browser paused access to the file (it does this when the app has been in the background or was reopened)';
+        fsPendingHandle = fsFileHandle;
+        fsRefreshUi();
+      }
+    } else if(fsLastError){ await writeStateToConnectedFile(); }
+  }catch(e){ /* handle went stale - the next real save reports it */ }
+}
+function fsStartWatchers(){
+  setInterval(fsCheckNow, 20000);
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible') fsCheckNow();
+    else if(fsFileHandle && !fsLastError && !vaultLocked) writeStateToConnectedFile();
+  });
+  window.addEventListener('pagehide', ()=>{ if(fsFileHandle && !fsLastError && !vaultLocked) writeStateToConnectedFile(); });
+  const ask = ()=>{
+    if((fsNeedsGrant || fsLastError) && (fsPendingHandle || fsFileHandle) && Date.now()-fsAskedAt > 60000){
+      fsAskedAt = Date.now(); fsReconnectNow();
+    }
+  };
+  document.addEventListener('pointerdown', ask, true);
+  document.addEventListener('keydown', ask, true);
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 }
 async function connectToFile(){
   if(!fsApiSupported()){
@@ -2731,7 +2870,9 @@ async function createNewFile(){
 async function disconnectFile(){
   fsFileHandle = null;
   fsFileName = '';
+  fsPendingHandle = null; fsLastError = ''; fsLastSavedAt = null;
   await idbDelete('lastHandle');
+  fsRefreshUi();
   render();
 }
 async function tryReconnectFile(){
@@ -2741,8 +2882,14 @@ async function tryReconnectFile(){
   try{
     const perm = await handle.queryPermission({mode:'readwrite'});
     if(perm==='granted'){ fsFileHandle = handle; fsFileName = handle.name; }
-    // if not granted, leave fsFileHandle null - the header offers a
-    // "Reconnect" button, since browsers require a fresh click to re-grant
+    else {
+      // Browsers require a fresh click to re-grant: keep the handle and
+      // show the red banner + Reconnect button instead of silently not saving.
+      fsPendingHandle = handle; fsFileName = handle.name;
+      fsLastError = 'permission to the file has to be granted again after reopening the app';
+      fsNeedsGrant = true;
+      fsRefreshUi();
+    }
   }catch(e){ /* handle may be stale (file moved/deleted) */ }
 }
 
@@ -4086,8 +4233,8 @@ function renderSettingsPanelCard(){
           <input type="file" id="import-file-input" accept="application/json,.json" style="display:none;">
           ${fsApiSupported() ? (
             fsFileHandle
-              ? `<span class="tag" style="background:#DDEEE3;color:var(--primary-dark);border-color:var(--primary);padding:6px 10px;" title="Every change is being saved directly to this file">&#128994; Auto-saving to ${escapeHtml(fsFileName)}</span><button class="secondary" data-action="disconnect-file">Disconnect</button>`
-              : `<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
+              ? `<span id="fs-status-badge" class="tag" style="background:${fsLastError?'#FBE3E1':'#DDEEE3'};color:${fsLastError?'#B3261E':'var(--primary-dark)'};border-color:var(--primary);padding:6px 10px;" title="Shows whether the last change was really written to the file">${escapeHtml(fsBadgeText())}</span>${fsLastError ? `<button class="secondary" data-action="reconnect-file">&#128260; Reconnect &amp; save now</button>` : ''}<button class="secondary" data-action="disconnect-file">Disconnect</button>`
+              : `${fsPendingHandle ? `<button class="secondary" data-action="reconnect-file">&#128260; Reconnect to ${escapeHtml(fsFileName)}</button>` : ''}<button class="secondary" data-action="connect-file">&#128190; Connect to a file</button><button class="secondary" data-action="create-file">&#128190; Create new file</button>`
           ) : ''}
         </div>
       </div>
@@ -9836,7 +9983,7 @@ let lastDueImportReview = null;
 let lastDueImportStatus = null;
 let lastDueStudents = null;
 function renderDueRegisterCard(){
-  const targetKey = monthKeyFor(state.month, state.year) || monthlyLedgerViewKey || earliestTrackedMonthKey();
+  const targetKey = monthlyLedgerViewKey || monthKeyFor(state.month, state.year) || earliestTrackedMonthKey();
   const card = el(`
     <div class="card" id="section-due-register">
       <h3><span class="num">&#128220;</span> Import Due Register</h3>
@@ -9851,12 +9998,12 @@ function renderDueRegisterCard(){
       </div>
       <div id="dr-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;">${lastDueImportStatus ? escapeHtml(lastDueImportStatus) : ''}</div>
       <div id="dr-review">${lastDueImportReview && lastDueImportReview.length ? drDueReviewHtml(lastDueImportReview) : ''}</div>
-      ${(state.dueImportLog||[]).length ? `
+      ${logForMonth('due').length ? `
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
-        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        ${historyHeaderHtml('due', 'Saved history (also feeds Monthly Ledger)')}
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.dueImportLog.slice(-5).reverse().map(l=>`
+            ${logForMonth('due').slice().reverse().map(l=>`
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;" class="mono">${monthKeyLabel(l.targetKey)}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(Object.values(l.catTotals||{}).reduce((s,v)=>s+(v||0),0))}</td>
@@ -9869,7 +10016,7 @@ function renderDueRegisterCard(){
             `).join('')}
           </tbody>
         </table>
-      </div>` : ''}
+      </div>` : noHistoryNoteHtml('due')}
     </div>
   `);
   const fileInp = card.querySelector('#dr-file-input');
@@ -9991,21 +10138,66 @@ function buildCrossCheckResultsHtml(matched, missingFromStatement, unmatchedStmt
   }
   return html || '<p class="subnote">Nothing to compare - no app entries or statement lines found.</p>';
 }
+/* --- "Delete this month's files" (month picker): Online Payment (SSL Commerz), Import Due
+   Register and TBL Bank Statement Cross-Check each keep an embedded Excel
+   file per history entry for re-download. Once a month is done nobody needs
+   those files, but every figure (and everything feeding the Monthly Ledger
+   and the bank cross-check) must stay. This drops ONLY the embedded file
+   bytes of entries from months before the newest month in that log. --- */
+function fileLogConfig(which){
+  return {
+    due:   {key:'dueImportLog',       label:'Import Due Register',             month:l=>String(l.targetKey||'')},
+    online:{key:'onlinePaymentLog',   label:'Online Payment (SSL Commerz)',    month:l=>String(l.bankDate||'').slice(0,7)},
+    bank:  {key:'bankCrossCheckLog',  label:'TBL Bank Statement Cross-Check',  month:bankLogMonth}
+  }[which];
+}
+/* A cross-check log has no month field of its own: use the month most of its
+   rows fall in (the statement's own dates), else the day it was checked. */
+function bankLogMonth(l){
+  const counts = {};
+  [...(l.matched||[]), ...(l.missingFromStatement||[])].forEach(e=>{ const d=String(e.checkDate||''); if(d.length>=7) counts[d.slice(0,7)]=(counts[d.slice(0,7)]||0)+1; });
+  (l.unmatchedStmtRows||[]).forEach(r=>{ const d=String(r.date||''); if(d.length>=7) counts[d.slice(0,7)]=(counts[d.slice(0,7)]||0)+1; });
+  const best = Object.keys(counts).sort((x,y)=>counts[y]-counts[x] || (x<y?1:-1))[0];
+  return best || String(l.checkedAt||'').slice(0,7);
+}
+/* Entries of one log belonging to the month currently open in the Monthly Ledger. */
+function logForMonth(which){
+  const cfg = fileLogConfig(which);
+  const k = monthlyLedgerViewKey;
+  return (state[cfg.key]||[]).filter(l=> cfg.month(l)===k);
+}
+function noHistoryNoteHtml(which){
+  const total = (state[fileLogConfig(which).key]||[]).length;
+  if(!total || logForMonth(which).length || !monthlyLedgerViewKey) return '';
+  return `<p class="subnote" style="margin-top:12px;">No saved history for ${escapeHtml(monthKeyLabel(monthlyLedgerViewKey))}.</p>`;
+}
+function clearFilesButtonHtml(which){
+  const n = logForMonth(which).filter(l=>l.fileBase64).length;
+  if(!n) return '';
+  return `<button type="button" class="secondary small" data-action="clear-month-files" data-log="${which}" title="Delete the stored Excel files of this month. All figures and Monthly Ledger data stay.">&#129529; Delete this month's files (${n})</button>`;
+}
+function historyHeaderHtml(which, title){
+  return `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+          <div style="font-size:12px; font-weight:700; opacity:.7;">${title}</div>
+          ${clearFilesButtonHtml(which)}
+        </div>`;
+}
 function bankCrossCheckHistoryHtml(){
   if(!(state.bankCrossCheckLog||[]).length) return '';
+  if(!logForMonth('bank').length) return `<div id="bs-history-wrap">${noHistoryNoteHtml('bank')}</div>`;
   return `
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;" id="bs-history-wrap">
-        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history</div>
+        ${historyHeaderHtml('bank', 'Saved history')}
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.bankCrossCheckLog.slice(-5).reverse().map(l=>`
+            ${logForMonth('bank').slice().reverse().map(l=>`
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;" class="mono">${escapeHtml(l.fileName)}</td>
                 <td style="padding:4px 6px;">${l.checkedAt.slice(0,10)}</td>
                 <td style="padding:4px 6px; text-align:right;">${l.matchedCount} matched, ${l.missingCount+l.unmatchedCount} to check</td>
                 <td style="padding:4px 6px; text-align:right; white-space:nowrap;">
-                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="view-bank-cross-log" data-id="${l.id}" title="View this cross-check">&#128065;</button>
-                  <button type="button" class="secondary small" data-action="download-bank-cross-log" data-id="${l.id}" title="Download the uploaded statement">&#11015;</button>` : ''}
+                  ${l.matched ? `<button type="button" class="secondary small" data-action="view-bank-cross-log" data-id="${l.id}" title="View this cross-check">&#128065;</button>` : ''}
+                  ${l.fileBase64 ? `<button type="button" class="secondary small" data-action="download-bank-cross-log" data-id="${l.id}" title="Download the uploaded statement">&#11015;</button>` : ''}
                   <button type="button" class="danger small" data-action="delete-bank-cross-log" data-id="${l.id}" title="Delete this saved record">&times;</button>
                 </td>
               </tr>
@@ -10230,12 +10422,12 @@ function renderOnlinePaymentCard(){
       </div>
       <div id="op-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;"></div>
       <div id="op-preview-wrap"></div>
-      ${(state.onlinePaymentLog||[]).length ? `
+      ${logForMonth('online').length ? `
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
-        <div style="font-size:12px; font-weight:700; opacity:.7; margin-bottom:4px;">Saved history (also feeds Monthly Ledger)</div>
+        ${historyHeaderHtml('online', 'Saved history (also feeds Monthly Ledger)')}
         <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
           <tbody>
-            ${state.onlinePaymentLog.slice(-10).reverse().map(l=>`
+            ${logForMonth('online').slice().reverse().map(l=>`
               <tr style="border-bottom:1px solid var(--line-soft);">
                 <td style="padding:4px 6px;">${l.bankDate}</td>
                 <td style="padding:4px 6px; text-align:right;" class="mono">${money(l.grandTotal)}</td>
@@ -10248,7 +10440,7 @@ function renderOnlinePaymentCard(){
             `).join('')}
           </tbody>
         </table>
-      </div>` : ''}
+      </div>` : noHistoryNoteHtml('online')}
     </div>
   `);
   const fileInp = card.querySelector('#op-file-input');
@@ -11126,6 +11318,7 @@ function wireDelegation(){
     if(action==='export-backup'){ exportBackupJson(); return; }
     if(action==='import-backup'){ document.getElementById('import-file-input').click(); return; }
     if(action==='connect-file'){ connectToFile(); return; }
+    if(action==='reconnect-file'){ fsReconnectNow(); return; }
     if(action==='create-file'){ createNewFile(); return; }
     if(action==='disconnect-file'){ disconnectFile(); return; }
     if(action==='install-app'){
@@ -11233,6 +11426,16 @@ function wireDelegation(){
       if(l) downloadStoredWorkbook(l.fileBase64, l.fileName);
       return;
     }
+    if(action==='clear-month-files'){
+      const cfg = fileLogConfig(t.dataset.log);
+      const mk = monthlyLedgerViewKey;
+      const entries = logForMonth(t.dataset.log).filter(l=>l.fileBase64);
+      if(!mk || !entries.length){ showAlert('No stored files found for this month.'); return; }
+      showConfirm(`${cfg.label}: delete the stored Excel file${entries.length===1?'':'s'} of ${entries.length} entr${entries.length===1?'y':'ies'} for ${monthKeyLabel(mk)}? All figures and Monthly Ledger data stay exactly as they are - only the view/download files are removed. This can't be undone.`,
+        ()=>{ entries.forEach(l=>{ delete l.fileBase64; }); saveState(); render(); },
+        'Delete files');
+      return;
+    }
     if(action==='delete-online-payment-log'){
       const id = t.dataset.id;
       state.onlinePaymentLog = (state.onlinePaymentLog||[]).filter(l=>l.id!==id);
@@ -11280,7 +11483,7 @@ function wireDelegation(){
       const l = (state.bankCrossCheckLog||[]).find(x=>x.id===t.dataset.id);
       if(l) showHtmlModal(`${l.fileName} \u2014 ${l.checkedAt.slice(0,10)}`,
         buildCrossCheckResultsHtml(l.matched, l.missingFromStatement, l.unmatchedStmtRows),
-        {onDownload: ()=>downloadStoredWorkbook(l.fileBase64, l.fileName)});
+        l.fileBase64 ? {onDownload: ()=>downloadStoredWorkbook(l.fileBase64, l.fileName)} : {});
       return;
     }
     if(action==='download-bank-cross-log'){
@@ -13672,6 +13875,7 @@ if(typeof navigator!=='undefined' && 'serviceWorker' in navigator && typeof loca
   await loadState();
   locked = !!state.lockPasswordHash;
   await tryReconnectFile();
+  fsStartWatchers();
   wireDelegation();
   render();
   loadExcelJS().catch(()=>{});
