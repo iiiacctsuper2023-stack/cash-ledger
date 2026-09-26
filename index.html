@@ -655,6 +655,11 @@ const JOURNAL_EXPENSE_ACCOUNTS = Object.fromEntries(COA.map(c=>[c.key,
     ? {label:'Loan Receivable (III Assets Ltd)', type:'asset'}
     : {label:c.summaryLabel, type:'expense'}
 ]));
+/* A Loan voucher can be individually excluded from Balance Sheet Assets
+   (see item.assetInclude, set per voucher in the Daily Ledger) - money
+   given out that isn't tracked as owed back posts here instead of to the
+   Loan Receivable asset account above. */
+const JOURNAL_LOAN_EXPENSE_ACCOUNT = {label:'Loan Expense (not tracked as receivable)', type:'expense'};
 const JOURNAL_REVENUE_ACCOUNTS = Object.fromEntries(REVENUE_CATS.map(c=>[c.key, {label:c.label+' Income', type:'income'}]));
 const JOURNAL_MISC_ACCOUNT = {label:'Miscellaneous Collection Income', type:'income'};
 const JOURNAL_CASH_ACCOUNT = {label:'Cash', type:'asset'};
@@ -684,7 +689,7 @@ function buildJournalEntries(){
   });
   allVouchers().forEach(v=>{
     if(v.amount===0) return;
-    const acc = JOURNAL_EXPENSE_ACCOUNTS[v.catKey];
+    const acc = (v.catKey==='Loan' && v.assetInclude===false) ? JOURNAL_LOAN_EXPENSE_ACCOUNT : JOURNAL_EXPENSE_ACCOUNTS[v.catKey];
     entries.push({date:v.date, desc:(v.desc||'').trim()||v.cat.label, debitAccount:acc.label, creditAccount:JOURNAL_CASH_ACCOUNT.label, amount:v.amount, source:'Expenditure Voucher', voucher:v.voucher});
   });
   entries.sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1));
@@ -699,6 +704,7 @@ function journalAccountList(){
     ...REVENUE_CATS.map(c=>JOURNAL_REVENUE_ACCOUNTS[c.key].label),
     JOURNAL_MISC_ACCOUNT.label,
     ...COA.map(c=>JOURNAL_EXPENSE_ACCOUNTS[c.key].label),
+    JOURNAL_LOAN_EXPENSE_ACCOUNT.label,
   ];
 }
 function journalAccountType(label){
@@ -706,6 +712,7 @@ function journalAccountType(label){
   if(label===JOURNAL_MISC_ACCOUNT.label) return JOURNAL_MISC_ACCOUNT.type;
   const rev = REVENUE_CATS.find(c=>JOURNAL_REVENUE_ACCOUNTS[c.key].label===label);
   if(rev) return 'income';
+  if(label===JOURNAL_LOAN_EXPENSE_ACCOUNT.label) return JOURNAL_LOAN_EXPENSE_ACCOUNT.type;
   const exp = COA.find(c=>JOURNAL_EXPENSE_ACCOUNTS[c.key].label===label);
   if(exp) return JOURNAL_EXPENSE_ACCOUNTS[exp.key].type;
   return 'other';
@@ -971,7 +978,8 @@ function getMonthlyLedgerMonth(key){
       customRows:[],
       balanceSheet:{ cashInHandOverride:null, advancePayment:0,
         bankBalanceOverride:null, bankBreakdown:{},
-        otherAsset:{label:'Debt to III Assets Ltd', amount:250000} },
+        otherAsset:{label:'Debt to III Assets Ltd', amount:250000},
+        loanReceivableOverride:null },
       locked:false,
     };
   }
@@ -1080,6 +1088,20 @@ function yearlyCoaExpenditureBefore(coaKey, key){
    of calendar year, so those two are summed across every month ever
    recorded, not just the current year. */
 const YEARLY_RESET_EXEMPT_CATS = ['gratuity', 'eduAssist'];
+/* Cumulative Loan Receivable balance (III Assets Ltd): every Loan-category
+   voucher ever entered (real + historical/imported), except any voucher
+   the person has explicitly excluded from Balance Sheet Assets via its
+   own "Add to Balance Sheet Assets" checkbox (item.assetInclude===false).
+   A Balance Sheet position, not a yearly-reset revenue figure, so this
+   never resets on January 1 - it simply accumulates through the given
+   month (inclusive). */
+function loanReceivableThroughMonth(key){
+  return allVouchersAndHistorical().reduce((sum,v)=>{
+    if(v.catKey!=='Loan' || v.assetInclude===false) return sum;
+    if(!v.date || v.date.slice(0,7) > key) return sum;
+    return sum + (Number(v.amount)||0);
+  },0);
+}
 function yearlyRunningTotalBefore(key){
   const [yearStr, monStr] = key.split('-');
   const totals = Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0]));
@@ -1862,7 +1884,7 @@ function allVouchers(){
         const secs = (item.sections && item.sections.length) ? item.sections : [{desc:item.desc, amount:item.amount}];
         secs.forEach(sec=>{
           const amt = Number(sec.amount)||0;
-          if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:sec.desc||'', note:item.note||'', amount:amt});
+          if(amt>0) out.push({date:day.date, cat, catKey:cat.key, voucher:item.voucher, desc:sec.desc||'', note:item.note||'', amount:amt, assetInclude:item.assetInclude});
         });
       });
     });
@@ -3036,6 +3058,7 @@ function migrateState(){
     if(rec.balanceSheet.bankBalanceOverride===undefined) rec.balanceSheet.bankBalanceOverride = null;
     if(rec.balanceSheet.bankBreakdown===undefined) rec.balanceSheet.bankBreakdown = {};
     if(rec.balanceSheet.otherAsset===undefined) rec.balanceSheet.otherAsset = {label:'Debt to III Assets Ltd', amount:250000};
+    if(rec.balanceSheet.loanReceivableOverride===undefined) rec.balanceSheet.loanReceivableOverride = null;
     if(!rec.expenditureEntries) rec.expenditureEntries = [];
     if(!rec.customRows) rec.customRows = [];
     if(rec.locked===undefined) rec.locked = false;
@@ -5728,7 +5751,7 @@ function computeMonthlyLedgerFigures(key){
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expColAmounts, expTotal, totalBalance, cashInHandShown, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownHasData, bankBreakdownMismatch,
-    otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
+    otherAsset, otherAssetAmount, autoLoanReceivable, loanReceivableShown, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     gratuityPayable, eduAssistPayable, totalAssets, equity, customRowValues, metricValues, mandatoryIssues};
   } finally {
     _mlFigStack.delete(key);
@@ -5940,7 +5963,7 @@ function renderMonthlyLedgerCard(){
   const {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
     liveCoaTotals, expTotal, totalBalance, cashInHandShown, autoCashInHand, autoBankTotal,
     bankBalanceShown, formulaBankTotal, bankFormulaMismatch, bankBreakdownShown, bankBreakdownSum, bankBreakdownHasData, bankBreakdownMismatch,
-    otherAsset, otherAssetAmount, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
+    otherAsset, otherAssetAmount, autoLoanReceivable, loanReceivableShown, remainingBalance, noteTotal, noteTotalMismatch, totalLiabilities, assetLiabilityMismatch,
     gratuityPayable, eduAssistPayable, totalAssets, equity, mandatoryIssues} = f;
 
   const monthOptions = (()=>{
@@ -6097,6 +6120,16 @@ function renderMonthlyLedgerCard(){
       </div>
 
       <div class="computed"><span class="lbl">Due Payment</span><span id="ml-bs-due-payment">${money(totalDueSum)}</span></div>
+
+      <div class="row">
+        <div class="field">
+          <label>Loan Receivable (III Assets Ltd) ${rec.balanceSheet.loanReceivableOverride!=null?'<span class="tag">manually overridden</span>':'<span class="tag">auto: sum of Loan vouchers marked \'Add to Balance Sheet Assets\'</span>'}</label>
+          <input type="text" inputmode="decimal" id="ml-loan-receivable-amount" value="${formatAsianAmount(loanReceivableShown)}">
+          ${rec.balanceSheet.loanReceivableOverride!=null ? `<button type="button" class="secondary small" id="ml-loan-receivable-reset" title="Clear override, go back to the automatic total" style="margin-top:4px;">&#8635; Reset to auto (${money(autoLoanReceivable)})</button>` : ''}
+        </div>
+      </div>
+      <p class="subnote" style="margin-top:-8px;">Auto-fills as the sum of every Loan voucher (Daily Ledger &rarr; Loan) not individually excluded, from the start through this month - type over it to set a different figure instead. Use the checkbox on each Loan voucher there to leave a disbursement out of this total.</p>
+
       <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${moneyWhole(gratuityPayable)}</span></div>
       <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${moneyWhole(eduAssistPayable)}</span></div>
       <div class="computed"><span class="lbl">Advance Payment</span><span></span></div>
@@ -6210,6 +6243,10 @@ function renderMonthlyLedgerCard(){
   }
   const cashResetBtn = card.querySelector('#ml-cash-reset');
   if(cashResetBtn) cashResetBtn.onclick = ()=>{ rec.balanceSheet.cashInHandOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
+  const loanReceivableAmtInp = card.querySelector('#ml-loan-receivable-amount');
+  if(loanReceivableAmtInp) wireAmountInput(loanReceivableAmtInp, (num)=>{ rec.balanceSheet.loanReceivableOverride = num; saveState(); refreshMonthlyLedgerComputedOnly(); });
+  const loanReceivableResetBtn = card.querySelector('#ml-loan-receivable-reset');
+  if(loanReceivableResetBtn) loanReceivableResetBtn.onclick = ()=>{ rec.balanceSheet.loanReceivableOverride = null; saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace(); };
 
   drawMlRevenueList(card.querySelector('#ml-revenue-list'), rec, key);
   drawMlGrid(card.querySelector('#ml-total-due-grid'), rec.revenueTotalDue, 'due');
@@ -7490,9 +7527,16 @@ async function exportMonthlyLedger(key, previewOnly){
   exp.getCell(eduAssistRow,10).value = 4; exp.getCell(eduAssistRow,11).value = 'Education Assistance Payable';
   exp.getCell(eduAssistRow,14).value = {formula:`'Monthly Revenue'!${eduAssistColLetter}${yrtNewRow}`};
 
-  const totalRow = assetStartRow+4;
+  // Row 5, asset side only (no matching liability row): running Loan
+  // Receivable balance - every Loan voucher not individually excluded,
+  // from the start through this month. Sits right after "Debt to III
+  // Assets Ltd" per the person's own row ordering.
+  const loanReceivableRow = assetStartRow+4;
+  exp.getCell(loanReceivableRow,5).value = 5; exp.getCell(loanReceivableRow,6).value = 'Loan Receivable (III Assets Ltd)'; exp.getCell(loanReceivableRow,9).value = Number(mlFig.loanReceivableShown)||0;
+
+  const totalRow = assetStartRow+5;
   exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
-  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${assetStartRow+3})`};
+  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${loanReceivableRow})`};
   exp.getCell(totalRow,10).value = 'Total'; exp.getCell(totalRow,10).font = BOLD;
   exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow}:N${eduAssistRow})`};
   exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`};
@@ -11058,6 +11102,26 @@ function drawCoaList(container, day, catKey, arr){
     syncDescRequired();
     descInp.addEventListener('blur', syncDescRequired);
     descInp.addEventListener('input', syncDescRequired);
+    let loanAssetRow = null;
+    if(catKey==='Loan'){
+      const included = item.assetInclude!==false;
+      loanAssetRow = el(`
+        <div class="coa-loan-asset-row" style="margin:-4px 0 8px 0;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:normal;">
+            <input type="checkbox" class="loan-asset-checkbox" ${included?'checked':''}>
+            Add to Balance Sheet Assets (Loan Receivable, III Assets Ltd)
+          </label>
+          <p class="subnote" style="margin:2px 0 0 22px;">${included ? 'Counted as money owed back to us - included in the Balance Sheet\'s Loan Receivable total.' : 'Not tracked as owed back - posted as a Loan Expense instead, left out of the Balance Sheet.'}</p>
+        </div>
+      `);
+      const loanCheckbox = loanAssetRow.querySelector('.loan-asset-checkbox');
+      loanCheckbox.onchange = ()=>{
+        item.assetInclude = loanCheckbox.checked ? undefined : false;
+        saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
+        const freshContainer = document.getElementById('coa-list-'+catKey);
+        if(freshContainer) drawCoaList(freshContainer, day, catKey, arr);
+      };
+    }
     let meterRow = null;
     if(catKey==='Utility'){
       meterRow = el(`
@@ -11081,6 +11145,7 @@ function drawCoaList(container, day, catKey, arr){
     container.appendChild(extraWrap);
     container.appendChild(addSecBtn);
     container.appendChild(sectionsTotal);
+    if(loanAssetRow) container.appendChild(loanAssetRow);
     if(meterRow) container.appendChild(meterRow);
     const noteInp = noteRow.querySelector('.note-input');
     noteInp.oninput = ()=>{ item.note = noteInp.value; saveState(); };
