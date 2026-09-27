@@ -1095,12 +1095,46 @@ const YEARLY_RESET_EXEMPT_CATS = ['gratuity', 'eduAssist'];
    A Balance Sheet position, not a yearly-reset revenue figure, so this
    never resets on January 1 - it simply accumulates through the given
    month (inclusive). */
+/* PERFORMANCE: computeMonthlyLedgerFigures() can recurse many months
+   deep (see _mlFigStack/MLFIG_MAX_DEPTH above - a month's Beginning
+   Balance looks back through every earlier month) and is called once
+   per day the Daily Ledger renders, so anything called from inside it
+   must be O(1)-ish per call, NOT re-scan the full voucher history every
+   time. This cache builds the whole Loan-Receivable-by-month table in
+   one pass, the first time it's needed after a change, and every call
+   afterwards just looks it up - invalidated from saveState() below so
+   it can never go stale. */
+let _loanReceivableCache = null;
+function invalidateLoanReceivableCache(){ _loanReceivableCache = null; }
+function buildLoanReceivableCache(){
+  const perMonth = {};
+  const add = (mk, amt)=>{ if(mk && amt) perMonth[mk] = (perMonth[mk]||0) + amt; };
+  allDaysEverywhere().forEach(day=>{
+    const arr = day.coa && day.coa['Loan'];
+    if(!arr || !arr.length) return;
+    const mk = (day.date||'').slice(0,7);
+    arr.forEach(item=>{ if(item.assetInclude!==false) add(mk, Number(item.amount)||0); });
+  });
+  allHistoricalVouchers().forEach(v=>{
+    if(v.catKey==='Loan' && v.assetInclude!==false) add((v.date||'').slice(0,7), Number(v.amount)||0);
+  });
+  monthlyLedgerImportedVouchers().forEach(v=>{
+    if(v.catKey==='Loan') add((v.date||'').slice(0,7), Number(v.amount)||0); // no per-voucher flag on these - include by default, same as before this feature existed
+  });
+  const sortedKeys = Object.keys(perMonth).sort();
+  let running = 0;
+  const cumulative = {};
+  sortedKeys.forEach(mk=>{ running += perMonth[mk]; cumulative[mk] = running; });
+  _loanReceivableCache = {sortedKeys, cumulative};
+}
 function loanReceivableThroughMonth(key){
-  return allVouchersAndHistorical().reduce((sum,v)=>{
-    if(v.catKey!=='Loan' || v.assetInclude===false) return sum;
-    if(!v.date || v.date.slice(0,7) > key) return sum;
-    return sum + (Number(v.amount)||0);
-  },0);
+  if(!_loanReceivableCache) buildLoanReceivableCache();
+  const {sortedKeys, cumulative} = _loanReceivableCache;
+  let result = 0;
+  for(let i=0;i<sortedKeys.length;i++){
+    if(sortedKeys[i] <= key) result = cumulative[sortedKeys[i]]; else break;
+  }
+  return result;
 }
 function yearlyRunningTotalBefore(key){
   const [yearStr, monStr] = key.split('-');
@@ -2916,6 +2950,7 @@ async function tryReconnectFile(){
 }
 
 async function saveState(){
+  invalidateLoanReceivableCache();
   if(vaultLocked) return; // never overwrite still-encrypted storage with the placeholder state
   const plainJson = JSON.stringify(state);
   const toWrite = await serializeForPersistence(plainJson);
@@ -5599,7 +5634,7 @@ function computeMonthlyLedgerFigures(key){
       revTotalIncome:0, yrtBefore:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])), yrtNew:Object.fromEntries(REVENUE_CATS.map(c=>[c.key,0])),
       totalDueSum:0, totalAmount:0, liveCoaTotals:Object.fromEntries(COA.map(c=>[c.key,0])), expColAmounts:[], expTotal:0, totalBalance:0,
       cashInHandShown:0, autoBankTotal:null, bankBalanceShown:0, formulaBankTotal:0, bankFormulaMismatch:false,
-      bankBreakdownShown:null, bankBreakdownSum:0, bankBreakdownHasData:false, bankBreakdownMismatch:false, otherAsset:rec0.balanceSheet.otherAsset||{label:'',amount:0}, otherAssetAmount:0,
+      bankBreakdownShown:null, bankBreakdownSum:0, bankBreakdownHasData:false, bankBreakdownMismatch:false, otherAsset:rec0.balanceSheet.otherAsset||{label:'',amount:0}, otherAssetAmount:0, autoLoanReceivable:0, loanReceivableShown:0,
       remainingBalance:0, noteTotal:0, noteTotalMismatch:false, totalLiabilities:0, assetLiabilityMismatch:false,
       gratuityPayable:0, eduAssistPayable:0, totalAssets:0, equity:0, customRowValues:{}, metricValues:{}, mandatoryIssues:[]};
   }
@@ -5704,6 +5739,10 @@ function computeMonthlyLedgerFigures(key){
   const otherAsset = rec.balanceSheet.otherAsset || {label:'Debt to III Assets Ltd', amount:250000};
   const otherAssetAmount = Number(otherAsset.amount)||0;
 
+  const autoLoanReceivable = loanReceivableThroughMonth(key);
+  const loanReceivableShown = (rec.balanceSheet.loanReceivableOverride!==null && rec.balanceSheet.loanReceivableOverride!==undefined)
+    ? Number(rec.balanceSheet.loanReceivableOverride)||0 : autoLoanReceivable;
+
   // Head-wise distribution of the bank balance (Gratuity + Education
   // Assistance + Remaining = Total), where Total should match "Balance in
   // Bank Account" above.
@@ -5711,7 +5750,7 @@ function computeMonthlyLedgerFigures(key){
   const noteTotal = gratuityPayable + eduAssistPayable + remainingBalance;
   const noteTotalMismatch = bankBalanceShown!==null && Math.abs(noteTotal - (Number(bankBalanceShown)||0)) > 1;
 
-  const totalAssets = (Number(cashInHandShown)||0) + (Number(bankBalanceShown)||0) + totalDueSum + otherAssetAmount;
+  const totalAssets = (Number(cashInHandShown)||0) + (Number(bankBalanceShown)||0) + totalDueSum + otherAssetAmount + loanReceivableShown;
   const equity = totalAssets - (Number(rec.balanceSheet.advancePayment)||0) - gratuityPayable - eduAssistPayable;
   const totalLiabilities = equity + (Number(rec.balanceSheet.advancePayment)||0) + gratuityPayable + eduAssistPayable;
   const assetLiabilityMismatch = Math.abs(totalAssets - totalLiabilities) > 1;
