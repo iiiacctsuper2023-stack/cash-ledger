@@ -689,7 +689,7 @@ function buildJournalEntries(){
   });
   allVouchers().forEach(v=>{
     if(v.amount===0) return;
-    const acc = (v.catKey==='Loan' && v.assetInclude===false) ? JOURNAL_LOAN_EXPENSE_ACCOUNT : JOURNAL_EXPENSE_ACCOUNTS[v.catKey];
+    const acc = (v.catKey==='Loan' && v.assetInclude!==true) ? JOURNAL_LOAN_EXPENSE_ACCOUNT : JOURNAL_EXPENSE_ACCOUNTS[v.catKey];
     entries.push({date:v.date, desc:(v.desc||'').trim()||v.cat.label, debitAccount:acc.label, creditAccount:JOURNAL_CASH_ACCOUNT.label, amount:v.amount, source:'Expenditure Voucher', voucher:v.voucher});
   });
   entries.sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1));
@@ -1088,13 +1088,14 @@ function yearlyCoaExpenditureBefore(coaKey, key){
    of calendar year, so those two are summed across every month ever
    recorded, not just the current year. */
 const YEARLY_RESET_EXEMPT_CATS = ['gratuity', 'eduAssist'];
-/* Cumulative Loan Receivable balance (III Assets Ltd): every Loan-category
-   voucher ever entered (real + historical/imported), except any voucher
-   the person has explicitly excluded from Balance Sheet Assets via its
-   own "Add to Balance Sheet Assets" checkbox (item.assetInclude===false).
-   A Balance Sheet position, not a yearly-reset revenue figure, so this
-   never resets on January 1 - it simply accumulates through the given
-   month (inclusive). */
+/* Cumulative Loan Receivable balance (III Assets Ltd): only Loan-category
+   vouchers the person has explicitly ticked "Add to Balance Sheet Assets"
+   (item.assetInclude===true) count here - every Loan voucher defaults to
+   NOT being a tracked receivable (posts as a plain Loan Expense instead)
+   until that box is checked, including every voucher entered before this
+   feature existed. A Balance Sheet position, not a yearly-reset revenue
+   figure, so once ticked it never resets on January 1 - it simply
+   accumulates through the given month (inclusive). */
 /* PERFORMANCE: computeMonthlyLedgerFigures() can recurse many months
    deep (see _mlFigStack/MLFIG_MAX_DEPTH above - a month's Beginning
    Balance looks back through every earlier month) and is called once
@@ -1113,14 +1114,15 @@ function buildLoanReceivableCache(){
     const arr = day.coa && day.coa['Loan'];
     if(!arr || !arr.length) return;
     const mk = (day.date||'').slice(0,7);
-    arr.forEach(item=>{ if(item.assetInclude!==false) add(mk, Number(item.amount)||0); });
+    arr.forEach(item=>{ if(item.assetInclude===true) add(mk, Number(item.amount)||0); });
   });
   allHistoricalVouchers().forEach(v=>{
-    if(v.catKey==='Loan' && v.assetInclude!==false) add((v.date||'').slice(0,7), Number(v.amount)||0);
+    if(v.catKey==='Loan' && v.assetInclude===true) add((v.date||'').slice(0,7), Number(v.amount)||0);
   });
-  monthlyLedgerImportedVouchers().forEach(v=>{
-    if(v.catKey==='Loan') add((v.date||'').slice(0,7), Number(v.amount)||0); // no per-voucher flag on these - include by default, same as before this feature existed
-  });
+  // monthlyLedgerImportedVouchers() (pre-day-by-day-ledger imported months)
+  // carries no per-voucher checkbox at all, so those Loan amounts are
+  // excluded by default too, same as every other Loan voucher - nothing
+  // to add here unless that changes.
   const sortedKeys = Object.keys(perMonth).sort();
   let running = 0;
   const cumulative = {};
@@ -6167,7 +6169,7 @@ function renderMonthlyLedgerCard(){
           ${rec.balanceSheet.loanReceivableOverride!=null ? `<button type="button" class="secondary small" id="ml-loan-receivable-reset" title="Clear override, go back to the automatic total" style="margin-top:4px;">&#8635; Reset to auto (${money(autoLoanReceivable)})</button>` : ''}
         </div>
       </div>
-      <p class="subnote" style="margin-top:-8px;">Auto-fills as the sum of every Loan voucher (Daily Ledger &rarr; Loan) not individually excluded, from the start through this month - type over it to set a different figure instead. Use the checkbox on each Loan voucher there to leave a disbursement out of this total.</p>
+      <p class="subnote" style="margin-top:-8px;">Auto-fills as the sum of every Loan voucher (Daily Ledger &rarr; Loan) individually ticked 'Add to Balance Sheet Assets', from the start through this month - type over it to set a different figure instead. A Loan voucher counts here only once its own checkbox is ticked; everything else posts as a plain Loan Expense.</p>
 
       <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${moneyWhole(gratuityPayable)}</span></div>
       <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${moneyWhole(eduAssistPayable)}</span></div>
@@ -11143,7 +11145,7 @@ function drawCoaList(container, day, catKey, arr){
     descInp.addEventListener('input', syncDescRequired);
     let loanAssetRow = null;
     if(catKey==='Loan'){
-      const included = item.assetInclude!==false;
+      const included = item.assetInclude===true;
       loanAssetRow = el(`
         <div class="coa-loan-asset-row" style="margin:-4px 0 8px 0;">
           <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:normal;">
@@ -11155,7 +11157,7 @@ function drawCoaList(container, day, catKey, arr){
       `);
       const loanCheckbox = loanAssetRow.querySelector('.loan-asset-checkbox');
       loanCheckbox.onchange = ()=>{
-        item.assetInclude = loanCheckbox.checked ? undefined : false;
+        item.assetInclude = loanCheckbox.checked ? true : undefined;
         saveState(); refreshMonthlyLedgerComputedOnly(); renderMonthlyLedgerWindowInPlace();
         const freshContainer = document.getElementById('coa-list-'+catKey);
         if(freshContainer) drawCoaList(freshContainer, day, catKey, arr);
