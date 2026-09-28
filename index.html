@@ -12826,6 +12826,50 @@ function formatMultiItemAmounts(item){
   return item.sections.map(s=>formatTakaBox(Number(s.amount)||0)).join('\n');
 }
 
+/* Excel Debit Voucher: the Description box is ONE merged cell, so Excel
+   decides where long lines wrap - which used to push a later khat's text
+   further down than its amount (amounts were just stacked one per line).
+   Fix: wrap each numbered khat ourselves at a width safely inside the box
+   (so Excel never re-wraps it) and put each amount on the SAME line the
+   khat's name starts on, blank lines under it for the khat's wrapped
+   remainder. E.g. khat 1 taking 3 lines puts khat 2 (and its amount) on
+   line 4. Returns {desc, amt} strings for B14 and G14. */
+const VOUCHER_DESC_WRAP_CHARS = 42; // Description box is ~45 chars wide (B:F) at 11pt - stay under so Excel never adds its own wrap
+function wrapVoucherText(text, maxChars){
+  const out = [];
+  String(text||'').split('\n').forEach(par=>{
+    let line = '';
+    par.split(/\s+/).filter(Boolean).forEach(word=>{
+      while(word.length > maxChars){ // a single very long word - hard split it
+        if(line){ out.push(line); line = ''; }
+        out.push(word.slice(0, maxChars)); word = word.slice(maxChars);
+      }
+      if(!line) line = word;
+      else if((line+' '+word).length <= maxChars) line += ' ' + word;
+      else { out.push(line); line = word; }
+    });
+    out.push(line);
+  });
+  return out.length ? out : [''];
+}
+function alignedVoucherDescAndAmounts(label, item){
+  const khats = formatMultiItemDescription(label).split('\n');
+  const secs = item.sections || [];
+  if(secs.length<=1 || khats.length!==secs.length){
+    // single khat, or numbering doesn't match the sections: keep the plain layout
+    return {desc: formatMultiItemDescription(label), amt: formatMultiItemAmounts(item)};
+  }
+  const descLines = [], amtLines = [];
+  khats.forEach((k,i)=>{
+    const wrapped = wrapVoucherText(k, VOUCHER_DESC_WRAP_CHARS);
+    wrapped.forEach((ln,j)=>{
+      descLines.push(ln);
+      amtLines.push(j===0 ? formatTakaBox(Number(secs[i].amount)||0) : '');
+    });
+  });
+  return {desc: descLines.join('\n'), amt: amtLines.join('\n')};
+}
+
 /* Adds one Debit Voucher sheet per Cash Disbursed (CoA) entry for the day,
    skipping blank-amount vouchers. `used` is the sheet-name set shared with
    the day's summary sheet so names never collide. */
@@ -12847,8 +12891,9 @@ async function appendDebitVoucherSheets(wb, day, used){
     const ws = cloneTemplateSheet(wb, srcWs, sheetName);
     ws.getCell('C9').value = item.voucher;
     ws.getCell('H9').value = dayLabelDDMonYY(day.date);
-    ws.getCell('B14').value = formatMultiItemDescription(label);
-    ws.getCell('G14').value = formatMultiItemAmounts(item);
+    const aligned = alignedVoucherDescAndAmounts(label, item);
+    ws.getCell('B14').value = aligned.desc;
+    ws.getCell('G14').value = aligned.amt;
     ws.getCell('B28').value = `In Words: ${takaInWords(amt)}`;
     ws.getCell('G28').value = formatTakaBox(amt);
 
