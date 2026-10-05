@@ -9932,6 +9932,28 @@ const DUE_ACCOUNT_TO_REVENUE_KEY = {
   'books & stationary':'booksSty', 'book and stationary':'booksSty',
   'event fee':'eventFee',
 };
+/* Normalise an account label from the raw export so spelling/spacing/entity
+   variants all land on the same key: HTML entities (&amp;), non-breaking
+   spaces, en/em dashes, stray spaces around "-", "&", ":" and case. */
+function normDueAccount(s){
+  return String(s==null?'':s)
+    .replace(/&amp;/gi,'&').replace(/&amp;/gi,'&').replace(/&nbsp;/gi,' ')
+    .replace(/[\u00A0\u2007\u202F]/g,' ')
+    .replace(/[\u2010-\u2015\u2212]/g,'-')
+    .toLowerCase()
+    .replace(/\s*([-&:])\s*/g,'$1')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+const DUE_ACCOUNT_NORM_MAP = (()=>{
+  const m = {};
+  Object.keys(DUE_ACCOUNT_TO_REVENUE_KEY).forEach(k=>{ m[normDueAccount(k)] = DUE_ACCOUNT_TO_REVENUE_KEY[k]; });
+  // explicit extras (already covered by normalisation, listed for clarity)
+  m[normDueAccount('Late Fine-AR')] = 'tuitionFee';
+  m[normDueAccount('Books & Stationeries')] = 'booksSty';
+  return m;
+})();
+function dueAccountKey(label){ return DUE_ACCOUNT_NORM_MAP[normDueAccount(label)] || null; }
 // Section titles for the Due List export, matching the accountant's own template wording
 const DUE_LIST_SECTION_TITLE = {
   tuitionFee:'Tuition Fee', admissionFee:'Admission Fee & Admission Form', transportFee:'Transport Fee Due',
@@ -9967,8 +9989,14 @@ async function parseDuesRegisterFile(arrayBuffer){
 
     if(duesAmt>0){
       const accList = duesAccounts.split(',').map(s=>s.trim()).filter(Boolean);
-      const singleKey = accList.length===1 ? DUE_ACCOUNT_TO_REVENUE_KEY[accList[0].toLowerCase()] : null;
-      if(accList.length!==1 || !singleKey){
+      // A row is imported automatically only when EVERY account it names is
+      // recognised and they all land on the SAME category - e.g. "Tuition Fee,
+      // Late Fine-AR" -> the whole amount goes to Tuition Fee. If any account
+      // belongs to a different category (or is unrecognised), the whole row
+      // goes to manual review instead - never split or guessed at.
+      const accKeys = accList.map(dueAccountKey);
+      const singleKey = (accList.length>=1 && accKeys.every(k=>k && k===accKeys[0])) ? accKeys[0] : null;
+      if(!singleKey){
         needsReview.push({studentId, name, amount:duesAmt, accounts:duesAccounts, monthLabel:duesMonthLabel, type:'due'});
       } else {
         dueTotals[singleKey] = (dueTotals[singleKey]||0) + duesAmt;
@@ -10079,10 +10107,10 @@ function renderDueRegisterCard(){
           <input type="file" id="dr-file-input" accept=".xlsx">
         </div>
         <button class="secondary" type="button" id="dr-import-btn">&#11014; Import</button>
-        ${lastDueStudents ? `<button class="secondary" type="button" id="dr-export-btn">&#128190; Export Due List (.xlsx)</button>` : ''}
+        ${(lastDueStudents && logForMonth('due').length) ? `<button class="secondary" type="button" id="dr-export-btn">&#128190; Export Due List (.xlsx)</button>` : ''}
       </div>
-      <div id="dr-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;">${lastDueImportStatus ? escapeHtml(lastDueImportStatus) : ''}</div>
-      <div id="dr-review">${lastDueImportReview && lastDueImportReview.length ? drDueReviewHtml(lastDueImportReview) : ''}</div>
+      <div id="dr-status" style="font-size:12.5px; color:var(--ink-soft); margin-top:6px;">${(lastDueImportStatus && logForMonth('due').length) ? escapeHtml(lastDueImportStatus) : ''}</div>
+      <div id="dr-review">${(()=>{ const rv = logForMonth('due').flatMap(l=>l.needsReview||[]); return rv.length ? drDueReviewHtml(rv) : ''; })()}</div>
       ${logForMonth('due').length ? `
       <div style="margin-top:12px; border-top:1px solid var(--line-soft); padding-top:8px;">
         ${historyHeaderHtml('due', 'Saved history (also feeds Monthly Ledger)')}
@@ -10133,7 +10161,7 @@ function renderDueRegisterCard(){
       state.dueImportLog.push({
         id:uid(), appliedAt:new Date().toISOString(), targetKey,
         catTotals:dueTotals, prevCatTotals, advanceTotal, prevAdvancePayment, advanceApplied,
-        fileName, fileBase64
+        needsReview, fileName, fileBase64
       });
       saveState();
       render();
@@ -11537,8 +11565,8 @@ function wireDelegation(){
       const mk = monthlyLedgerViewKey;
       const entries = logForMonth(t.dataset.log).filter(l=>l.fileBase64);
       if(!mk || !entries.length){ showAlert('No stored files found for this month.'); return; }
-      showConfirm(`${cfg.label}: delete the stored Excel file${entries.length===1?'':'s'} of ${entries.length} entr${entries.length===1?'y':'ies'} for ${monthKeyLabel(mk)}? All figures and Monthly Ledger data stay exactly as they are - only the view/download files are removed. This can't be undone.`,
-        ()=>{ entries.forEach(l=>{ delete l.fileBase64; }); saveState(); render(); },
+      showConfirm(`${cfg.label}: delete the stored Excel file${entries.length===1?'':'s'} of ${entries.length} entr${entries.length===1?'y':'ies'} for ${monthKeyLabel(mk)}? All figures and Monthly Ledger data stay exactly as they are - only the view/download files${t.dataset.log==='due'?' and the "Needs your review" name list':''} are removed. This can't be undone.`,
+        ()=>{ entries.forEach(l=>{ delete l.fileBase64; if(t.dataset.log==='due'){ delete l.needsReview; } }); if(t.dataset.log==='due'){ lastDueImportReview = null; lastDueImportStatus = null; lastDueStudents = null; } saveState(); render(); },
         'Delete files');
       return;
     }
@@ -11573,6 +11601,7 @@ function wireDelegation(){
         }
       }
       state.dueImportLog = (state.dueImportLog||[]).filter(l=>l.id!==id);
+      if(!logForMonth('due').length){ lastDueImportReview = null; lastDueImportStatus = null; lastDueStudents = null; }
       saveState(); render(); return;
     }
     if(action==='view-due-log'){
