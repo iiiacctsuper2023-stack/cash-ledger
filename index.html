@@ -2975,6 +2975,100 @@ function warnSaveFailed(){
   saveFailWarned = true;
   showAlert("IMPORTANT: your latest change could NOT be saved (storage is full or unavailable - this often happens once the app's data grows very large). Please export a backup right now (Settings \u2192 Export backup) before closing the app, or this and any further changes will be lost.");
 }
+/* Monthly Ledger entries live INSIDE a month's own record. Editing an
+   entry's Date into a different month used to change only the date text -
+   the row stayed in the old month's record, so it kept showing (and
+   counting) there and never appeared in the new month. This moves the
+   entry into the record of the month its date now belongs to, remapping
+   expenditure columns (they're per-month) and keeping the matching saved
+   Deposit / Withdraw Notesheet history entry's month in step. */
+function mlRecKeyOf(rec){
+  const months = (state.monthlyLedger && state.monthlyLedger.months) || {};
+  return Object.keys(months).find(k=>months[k]===rec) || null;
+}
+function validEntryDate(d){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');
+  if(!m) return null;
+  const y = +m[1], mo = +m[2];
+  if(y<2000 || y>2100 || mo<1 || mo>12) return null;
+  return {y:m[1], mo};
+}
+function moveMlEntryToDateMonth(kind, rec, entry){
+  const parsed = validEntryDate(entry.date);
+  if(!parsed) return null;
+  const fromKey = mlRecKeyOf(rec);
+  const toKey = monthKeyFor(MONTHS[parsed.mo-1], parsed.y);
+  if(!fromKey || !toKey || fromKey===toKey) return null;
+  const target = getMonthlyLedgerMonth(toKey);
+  if(kind==='revenue'){
+    rec.revenueEntries = rec.revenueEntries.filter(e=>e!==entry);
+    target.revenueEntries.push(entry);
+  } else {
+    const newAmounts = {};
+    Object.keys(entry.amounts||{}).forEach(colId=>{
+      const src = rec.expenditureColumns.find(c=>c.id===colId);
+      if(!src) return;
+      let dst = target.expenditureColumns.find(c=>
+        (src.source==='coa' && c.source==='coa' && c.coaKey===src.coaKey) ||
+        (src.source!=='coa' && c.source===src.source && c.label===src.label));
+      if(!dst){
+        dst = {id:uid(), label:src.label, source:src.source};
+        if(src.coaKey!==undefined) dst.coaKey = src.coaKey;
+        target.expenditureColumns.push(dst);
+      }
+      newAmounts[dst.id] = (newAmounts[dst.id]||0) + (Number(entry.amounts[colId])||0);
+    });
+    entry.amounts = newAmounts;
+    rec.expenditureEntries = rec.expenditureEntries.filter(e=>e!==entry);
+    target.expenditureEntries.push(entry);
+  }
+  // keep the saved notesheet history in the same month as the ledger row
+  [state.depositNotesheetLog, state.withdrawNotesheetLog].forEach(log=>{
+    (log||[]).forEach(l=>{ if(l.id===entry.id) l.generatedDate = entry.date; });
+  });
+  if(kind==='revenue') depositHistoryMonthKey = toKey; else withdrawHistoryMonthKey = toKey;
+  return {fromKey, toKey};
+}
+/* After the user edits an entry's date in the Monthly Ledger: wait until
+   they've finished typing/picking (a half-typed year must not move
+   anything), then move it and tell them where it went. */
+function wireMlEntryDateMove(input, kind, rec, entry){
+  let timer = null;
+  const run = ()=>{
+    clearTimeout(timer);
+    const oldDate = input.dataset.prevDate || '';
+    const moved = moveMlEntryToDateMonth(kind, rec, entry);
+    if(!moved) { input.dataset.prevDate = entry.date; return; }
+    saveState();
+    pushUndo(`Moved to ${monthKeyLabel(moved.toKey)}.`, ()=>{
+      const cur = getMonthlyLedgerMonth(moved.toKey);
+      entry.date = oldDate;
+      moveMlEntryToDateMonth(kind, cur, entry);
+    });
+    render();
+  };
+  input.dataset.prevDate = entry.date || '';
+  input.addEventListener('input', ()=>{ clearTimeout(timer); timer = setTimeout(run, 900); });
+  input.addEventListener('blur', run);
+}
+/* Fixes rows already stranded by the old behaviour: a notesheet-generated
+   Monthly Ledger row whose date was edited into another month but which
+   still sits in the original month. Only rows tied to a saved notesheet
+   (entry id = notesheet history id) are touched, since their month always
+   matched their date when generated. */
+function reconcileNotesheetEntryMonths(){
+  try{
+    const wIds = new Set((state.withdrawNotesheetLog||[]).map(l=>l.id));
+    const dIds = new Set((state.depositNotesheetLog||[]).map(l=>l.id));
+    const months = state.monthlyLedger && state.monthlyLedger.months;
+    if(!months) return;
+    Object.keys(months).forEach(k=>{
+      const rec = months[k];
+      (rec.expenditureEntries||[]).slice().forEach(e=>{ if(wIds.has(e.id)) moveMlEntryToDateMonth('exp', rec, e); });
+      (rec.revenueEntries||[]).slice().forEach(e=>{ if(dIds.has(e.id)) moveMlEntryToDateMonth('revenue', rec, e); });
+    });
+  }catch(err){ /* never block loading over this */ }
+}
 function migrateState(){
   const d = defaultState();
   if(state.days && state.days.length) state.days.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
@@ -2998,6 +3092,7 @@ function migrateState(){
       if(Object.keys(amounts).length) mlRec.expenditureEntries.push({id:uid(), date:attribDate, desc:`Withdraw Notesheet ${log.summaryLabel||''}`, amounts});
     });
   }
+  reconcileNotesheetEntryMonths();
   // Every generated notesheet's full Excel file gets embedded (as base64)
   // in its log entry for later re-download - this grows without bound and
   // eventually pushes the whole saved state past the storage size limit,
@@ -6371,6 +6466,7 @@ function drawMlRevenueList(container, rec, monthKey){
       </div>
     `);
     row.querySelector('.ml-rev-date').oninput = (e)=>{ entry.date = e.target.value; saveState(); };
+    wireMlEntryDateMove(row.querySelector('.ml-rev-date'), 'revenue', rec, entry);
     wireLockableTextInput(row.querySelector('.ml-rev-desc'));
     row.querySelector('.ml-rev-desc').oninput = (e)=>{ entry.desc = e.target.value; saveState(); };
     row.querySelectorAll('.ml-rev-amt').forEach(inp=>{
@@ -6531,6 +6627,7 @@ function drawMlExpenditureEntryList(container, rec){
       </div>
     `);
     row.querySelector('.ml-expentry-date').oninput = (e)=>{ entry.date = e.target.value; saveState(); };
+    wireMlEntryDateMove(row.querySelector('.ml-expentry-date'), 'exp', rec, entry);
     wireLockableTextInput(row.querySelector('.ml-expentry-desc'));
     row.querySelector('.ml-expentry-desc').oninput = (e)=>{ entry.desc = e.target.value; saveState(); };
     row.querySelectorAll('.ml-expentry-amt').forEach(inp=>{
