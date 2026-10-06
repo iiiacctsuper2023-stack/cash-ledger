@@ -5881,7 +5881,10 @@ function computeMonthlyLedgerFigures(key){
   if(key>=MANDATORY_FIELDS_START_KEY){
     if(!effectiveHouseRentDeposit(key)) mandatoryIssues.push('House Rent Deposit (Revenue)');
     if(!effectiveSalaryByAccount(key)) mandatoryIssues.push('Salary by Account (Expenditure)');
-    if(!effectiveSalaryByCash(key)) mandatoryIssues.push('Salary by Cash (Expenditure)');
+    // An exceptional month can have NO cash salary at all (e.g. it was paid
+    // in the following month): the accountant confirms that explicitly with
+    // the "Salary by Cash was nil" button, which waives only this check.
+    if(!effectiveSalaryByCash(key) && !rec.salaryByCashNil) mandatoryIssues.push('Salary by Cash (Expenditure)');
   }
 
   return {rec, isLiveMonth, revTotals, revTotalIncome, yrtBefore, yrtNew, totalDueSum, totalAmount,
@@ -6144,6 +6147,8 @@ function renderMonthlyLedgerCard(){
 
       <div class="${rec.locked?'locked-day':''}">
       ${mandatoryIssues.length ? `<p class="subnote" style="color:var(--danger);">&#9888; Required before this month is complete: ${mandatoryIssues.map(escapeHtml).join(', ')}.</p>` : ''}
+      ${(mandatoryIssues.includes('Salary by Cash (Expenditure)') && !rec.locked) ? `<p class="subnote" style="margin-top:-4px;">No cash salary was paid this month (for example it was paid in the next month)? <button class="secondary small" type="button" data-action="ml-salary-cash-nil">Salary by Cash was nil this month</button></p>` : ''}
+      ${(rec.salaryByCashNil && !effectiveSalaryByCash(monthlyLedgerViewKey)) ? `<p class="subnote">&#9432; Salary by Cash is confirmed as nil for ${escapeHtml(monthKeyLabel(monthlyLedgerViewKey))} (shows 0 in the export). ${rec.locked?'':`<button class="secondary small" type="button" data-action="ml-salary-cash-nil-undo">Undo</button>`}</p>` : ''}
       <div class="divider"></div>
       <div class="ml-zone ml-zone-a">
       <h3 id="ml-section-revenue" style="font-size:14px;">Revenue</h3>
@@ -10556,21 +10561,31 @@ async function parseSSLCommerzTransactionFile(arrayBuffer){
   wb.calcProperties = {fullCalcOnLoad:true}; // force Excel to recalculate on open, never show a stale cached month/value
   await wb.xlsx.load(arrayBuffer);
   const ws = wb.worksheets[0];
+  // Header names are matched ignoring case, spaces and non-breaking spaces,
+  // so "TranDate" and "Tran Date", "Event Fee -I" and "Event\u00A0Fee -I"
+  // (different SSL Commerz export versions) are all the same column.
+  const hNorm = x => String(x==null?'':x).replace(/[\s\u00A0]+/g,'').toLowerCase();
   let headerRow = null, headers = {};
   for(let r=1;r<=15;r++){
     const found = {};
-    ws.getRow(r).eachCell((cell,colNum)=>{ found[String(cell.value||'').trim()] = colNum; });
-    if(found['TranDate']){ headerRow=r; headers=found; break; }
+    ws.getRow(r).eachCell((cell,colNum)=>{
+      const v = cell.value;
+      const txt = (v && typeof v==='object' && !(v instanceof Date)) ? (v.richText ? v.richText.map(t=>t.text).join('') : (v.result!==undefined ? v.result : (v.text||''))) : v;
+      const k = hNorm(txt);
+      if(k && !(k in found)) found[k] = colNum;
+    });
+    if(found['trandate']){ headerRow=r; headers=found; break; }
   }
-  if(!headerRow) throw new Error("Couldn't find the TranDate column header in this file.");
-  let eventFeeCol = headers['Event Fee -I'];
-  if(!eventFeeCol) Object.keys(headers).forEach(k=>{ if(/event\s*fee/i.test(k)) eventFeeCol = headers[k]; });
-  const get = (row,name)=>{ const c = headers[name]; return c ? (Number(row.getCell(c).value)||0) : 0; };
+  if(!headerRow) throw new Error("Couldn't find the Tran Date column header in this file.");
+  const colOf = name => headers[hNorm(name)];
+  let eventFeeCol = colOf('Event Fee -I');
+  if(!eventFeeCol) Object.keys(headers).forEach(k=>{ if(/^eventfee/.test(k)) eventFeeCol = headers[k]; });
+  const get = (row,name)=>{ const c = colOf(name); return c ? (Number(row.getCell(c).value)||0) : 0; };
   const buckets = {}; // creditDateISO -> {admissionFee, sessionFee, tuitionFee, mqmFee, booksSty, transportFee, uniform, eventFee, misc, total}
   const zeroCats = ()=>({admissionFee:0,sessionFee:0,tuitionFee:0,mqmFee:0,booksSty:0,transportFee:0,uniform:0,eventFee:0,misc:0,total:0});
   for(let r=headerRow+1; r<=ws.rowCount; r++){
     const row = ws.getRow(r);
-    const raw = row.getCell(headers['TranDate']).value;
+    const raw = row.getCell(colOf('TranDate')).value;
     if(!raw) continue;
     let tranISO = null;
     if(raw instanceof Date) tranISO = raw.toISOString().slice(0,10);
@@ -10591,7 +10606,7 @@ async function parseSSLCommerzTransactionFile(arrayBuffer){
     b.uniform      += get(row,'Uniform Fees -I');
     b.eventFee     += eventFeeCol ? (Number(row.getCell(eventFeeCol).value)||0) : 0;
     b.misc         += get(row,'Exam Fee -I') + get(row,'Late Fine-I');
-    b.total        += Number(row.getCell(headers['TotalAmount']).value)||0;
+    b.total        += colOf('TotalAmount') ? (Number(row.getCell(colOf('TotalAmount')).value)||0) : 0;
   }
   return Object.keys(buckets).sort().map(date=>({date, ...buckets[date]}));
 }
@@ -11742,6 +11757,12 @@ function wireDelegation(){
         monthlyLedgerViewKey = remaining.length ? remaining[remaining.length-1] : null;
         saveState(); render();
       });
+      return;
+    }
+    if(action==='ml-salary-cash-nil' || action==='ml-salary-cash-nil-undo'){
+      const rec = getMonthlyLedgerMonth(monthlyLedgerViewKey);
+      rec.salaryByCashNil = (action==='ml-salary-cash-nil');
+      saveState(); render();
       return;
     }
     if(action==='ml-lock-month'){
