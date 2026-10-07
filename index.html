@@ -652,7 +652,7 @@ const RECURRING_EXAM_COLUMN = {label:'MT (Monthly Test)', aliases:['mt','monthly
    by III Assets Ltd, not spent. */
 const JOURNAL_EXPENSE_ACCOUNTS = Object.fromEntries(COA.map(c=>[c.key,
   c.key==='Loan'
-    ? {label:'Loan Receivable (III Assets Ltd)', type:'asset'}
+    ? {label:'Loan Receivable (Messenger Munno)', type:'asset'}
     : {label:c.summaryLabel, type:'expense'}
 ]));
 /* A Loan voucher can be individually excluded from Balance Sheet Assets
@@ -956,6 +956,47 @@ function effectiveOpeningCashManual(day){
 }
 /* Gets (creating if needed) the persistent record for one month - never
    deleted by Daily Ledger month switches, unlike state.days. */
+/* Loan recovery schedule for Loan Receivable (Messenger Munno): a fixed
+   amount is deducted from his salary each month for a set number of months
+   (default 10,000 x 4: Oct 2026 - Jan 2027). Each scheduled month
+     - reduces the Balance Sheet's Loan Receivable by that amount, and
+     - adds the same amount to Miscellaneous Collection (one normal,
+       editable/deletable Revenue entry, created once per month).
+   His salary itself is paid 10,000 lower in the salary system. */
+const LOAN_RECOVERY_DEFAULT = {active:true, amount:10000, startMonth:'2026-10', months:4, label:"Messenger Munno's salary deduction"};
+function loanRecoveryMonthKeys(){
+  const cfg = state && state.loanRecovery;
+  if(!cfg || cfg.active===false) return [];
+  const m = /^(\d{4})-(\d{2})$/.exec(cfg.startMonth||'');
+  if(!m) return [];
+  let y = +m[1], mo = +m[2];
+  const out = [];
+  for(let i=0;i<(Number(cfg.months)||0);i++){
+    out.push(y+'-'+String(mo).padStart(2,'0'));
+    mo++; if(mo>12){ mo=1; y++; }
+  }
+  return out;
+}
+/* From the last scheduled recovery month onward, once the receivable is
+   fully repaid (balance 0), the Loan Receivable line is not shown at all
+   (Monthly Ledger screen and exported Balance Sheet). If a new loan is
+   ever added and the balance becomes non-zero, the line reappears. */
+function hideLoanReceivableLine(key, shownAmount){
+  const ks = loanRecoveryMonthKeys();
+  if(!ks.length) return false;
+  return key >= ks[ks.length-1] && Math.abs(Number(shownAmount)||0) < 0.5;
+}
+function ensureLoanRecoveryEntry(key, rec){
+  const cfg = state && state.loanRecovery;
+  if(!cfg || rec.loanRecoveryApplied || !loanRecoveryMonthKeys().includes(key)) return;
+  const [y,mo] = key.split('-').map(Number);
+  const last = new Date(y, mo, 0).getDate();
+  const entry = {id:'loanrec-'+key, date:`${key}-${String(last).padStart(2,'0')}`, desc:`Loan recovery - ${cfg.label||'salary deduction'}`};
+  REVENUE_CATS.forEach(c=>{ entry[c.key] = 0; });
+  entry.misc = Number(cfg.amount)||0;
+  rec.revenueEntries.push(entry);
+  rec.loanRecoveryApplied = true; // created once - if deleted on purpose it is NOT re-added
+}
 function getMonthlyLedgerMonth(key){
   if(!state.monthlyLedger.months[key]){
     state.monthlyLedger.months[key] = {
@@ -983,6 +1024,7 @@ function getMonthlyLedgerMonth(key){
       locked:false,
     };
   }
+  ensureLoanRecoveryEntry(key, state.monthlyLedger.months[key]);
   return state.monthlyLedger.months[key];
 }
 /* Revenue category totals actually earned in one month (sums entries). */
@@ -1088,7 +1130,7 @@ function yearlyCoaExpenditureBefore(coaKey, key){
    of calendar year, so those two are summed across every month ever
    recorded, not just the current year. */
 const YEARLY_RESET_EXEMPT_CATS = ['gratuity', 'eduAssist'];
-/* Cumulative Loan Receivable balance (III Assets Ltd): only Loan-category
+/* Cumulative Loan Receivable balance (Messenger Munno): only Loan-category
    vouchers the person has explicitly ticked "Add to Balance Sheet Assets"
    (item.assetInclude===true) count here - every Loan voucher defaults to
    NOT being a tracked receivable (posts as a plain Loan Expense instead)
@@ -1123,6 +1165,12 @@ function buildLoanReceivableCache(){
   // carries no per-voucher checkbox at all, so those Loan amounts are
   // excluded by default too, same as every other Loan voucher - nothing
   // to add here unless that changes.
+  // Scheduled recovery from Messenger Munno's salary: reduces the receivable
+  // by the agreed amount in each scheduled month (carries forward cumulatively).
+  const lrCfg = state.loanRecovery;
+  if(lrCfg && lrCfg.active!==false){
+    loanRecoveryMonthKeys().forEach(mk=>add(mk, -(Number(lrCfg.amount)||0)));
+  }
   const sortedKeys = Object.keys(perMonth).sort();
   let running = 0;
   const cumulative = {};
@@ -1159,6 +1207,15 @@ function yearlyRunningTotalBefore(key){
       const exempt = YEARLY_RESET_EXEMPT_CATS.includes(c.key);
       if(!exempt && ky!==yearStr) return; // non-exempt categories only accumulate within the same year
       let contrib = monthTotals[c.key] + effectiveRevenueTransfer(rec, c.key);
+      // House Rent Deposit entered day-by-day in the Daily Ledger is exported
+      // into the Miscellaneous Collection column of that month's Monthly
+      // Revenue sheet (so it's part of that sheet's running total), but it
+      // isn't a revenueEntries row - without this the next month's "Yearly
+      // Running Total from Previous Month" silently dropped it and started
+      // lower than the previous month's closing figure. Mirrors the export:
+      // only the dated, day-by-day case (a legacy flat manual figure never
+      // goes into the Misc column there).
+      if(c.key==='misc' && (Number(rec.houseRentDeposit)||0)===0) contrib += sumDailyBankFieldForMonth(k, 'houseRentDeposit');
       if(c.key==='eduAssist') contrib -= monthExpenditureColTotalForCoa(k, 'EduAssist');
       totals[c.key] += contrib;
     });
@@ -3092,6 +3149,8 @@ function migrateState(){
       if(Object.keys(amounts).length) mlRec.expenditureEntries.push({id:uid(), date:attribDate, desc:`Withdraw Notesheet ${log.summaryLabel||''}`, amounts});
     });
   }
+  if(!state.loanRecovery) state.loanRecovery = JSON.parse(JSON.stringify(LOAN_RECOVERY_DEFAULT));
+  Object.keys(state.monthlyLedger.months||{}).forEach(k=>{ ensureLoanRecoveryEntry(k, state.monthlyLedger.months[k]); });
   reconcileNotesheetEntryMonths();
   // Every generated notesheet's full Excel file gets embedded (as base64)
   // in its log entry for later re-download - this grows without bound and
@@ -6262,14 +6321,16 @@ function renderMonthlyLedgerCard(){
 
       <div class="computed"><span class="lbl">Due Payment</span><span id="ml-bs-due-payment">${money(totalDueSum)}</span></div>
 
+      ${hideLoanReceivableLine(key, loanReceivableShown) ? '' : `
       <div class="row">
         <div class="field">
-          <label>Loan Receivable (III Assets Ltd) ${rec.balanceSheet.loanReceivableOverride!=null?'<span class="tag">manually overridden</span>':'<span class="tag">auto: sum of Loan vouchers marked \'Add to Balance Sheet Assets\'</span>'}</label>
+          <label>Loan Receivable (Messenger Munno) ${rec.balanceSheet.loanReceivableOverride!=null?'<span class="tag">manually overridden</span>':'<span class="tag">auto: sum of Loan vouchers marked \'Add to Balance Sheet Assets\'</span>'}</label>
           <input type="text" inputmode="decimal" id="ml-loan-receivable-amount" value="${formatAsianAmount(loanReceivableShown)}">
           ${rec.balanceSheet.loanReceivableOverride!=null ? `<button type="button" class="secondary small" id="ml-loan-receivable-reset" title="Clear override, go back to the automatic total" style="margin-top:4px;">&#8635; Reset to auto (${money(autoLoanReceivable)})</button>` : ''}
         </div>
       </div>
       <p class="subnote" style="margin-top:-8px;">Auto-fills as the sum of every Loan voucher (Daily Ledger &rarr; Loan) individually ticked 'Add to Balance Sheet Assets', from the start through this month - type over it to set a different figure instead. A Loan voucher counts here only once its own checkbox is ticked; everything else posts as a plain Loan Expense.</p>
+`}
 
       <div class="computed"><span class="lbl">Gratuity Payable</span><span id="ml-bs-gratuity">${moneyWhole(gratuityPayable)}</span></div>
       <div class="computed"><span class="lbl">Education Assistance Payable</span><span id="ml-bs-eduassist">${moneyWhole(eduAssistPayable)}</span></div>
@@ -7675,11 +7736,14 @@ async function exportMonthlyLedger(key, previewOnly){
   // from the start through this month. Sits right after "Debt to III
   // Assets Ltd" per the person's own row ordering.
   const loanReceivableRow = assetStartRow+4;
-  exp.getCell(loanReceivableRow,5).value = 5; exp.getCell(loanReceivableRow,6).value = 'Loan Receivable (III Assets Ltd)'; exp.getCell(loanReceivableRow,9).value = Number(mlFig.loanReceivableShown)||0;
+  const hideLoanRow = hideLoanReceivableLine(key, mlFig.loanReceivableShown);
+  if(!hideLoanRow){
+    exp.getCell(loanReceivableRow,5).value = 5; exp.getCell(loanReceivableRow,6).value = 'Loan Receivable (Messenger Munno)'; exp.getCell(loanReceivableRow,9).value = Number(mlFig.loanReceivableShown)||0;
+  }
 
-  const totalRow = assetStartRow+5;
+  const totalRow = hideLoanRow ? assetStartRow+4 : assetStartRow+5;
   exp.getCell(totalRow,5).value = 'Total'; exp.getCell(totalRow,5).font = BOLD;
-  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${loanReceivableRow})`};
+  exp.getCell(totalRow,9).value = {formula:`SUM(I${assetStartRow}:I${hideLoanRow ? loanReceivableRow-1 : loanReceivableRow})`};
   exp.getCell(totalRow,10).value = 'Total'; exp.getCell(totalRow,10).font = BOLD;
   exp.getCell(totalRow,14).value = {formula:`SUM(N${assetStartRow}:N${eduAssistRow})`};
   exp.getCell(assetStartRow,14).value = {formula:`I${totalRow}-N${assetStartRow+1}-N${assetStartRow+2}-N${eduAssistRow}`};
@@ -8910,7 +8974,7 @@ function renderRatioCashFlowCard(){
           <div class="computed" style="padding-left:16px;"><span class="lbl">Cash paid for operating expenses</span><span>(${money(operatingOut)})</span></div>
           <div class="computed total"><span class="lbl">Net cash from Operating</span><span>${money(netOperating)}</span></div>
           <div class="computed" style="margin-top:10px;"><span class="lbl">Cash from Investing Activities</span><span></span></div>
-          <div class="computed" style="padding-left:16px;"><span class="lbl">Loan disbursed (III Assets Ltd)</span><span>(${money(investingOut)})</span></div>
+          <div class="computed" style="padding-left:16px;"><span class="lbl">Loan disbursed (Messenger Munno)</span><span>(${money(investingOut)})</span></div>
           <div class="computed total"><span class="lbl">Net cash from Investing</span><span>${money(netInvesting)}</span></div>
           <div class="computed" style="margin-top:10px;"><span class="lbl">Cash from Financing Activities</span><span></span></div>
           <div class="computed" style="padding-left:16px;"><span class="lbl">None recorded</span><span>${money(0)}</span></div>
@@ -11290,7 +11354,7 @@ function drawCoaList(container, day, catKey, arr){
         <div class="coa-loan-asset-row" style="margin:-4px 0 8px 0;">
           <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:normal;">
             <input type="checkbox" class="loan-asset-checkbox" ${included?'checked':''}>
-            Add to Balance Sheet Assets (Loan Receivable, III Assets Ltd)
+            Add to Balance Sheet Assets (Loan Receivable, Messenger Munno)
           </label>
           <p class="subnote" style="margin:2px 0 0 22px;">${included ? 'Counted as money owed back to us - included in the Balance Sheet\'s Loan Receivable total.' : 'Not tracked as owed back - posted as a Loan Expense instead, left out of the Balance Sheet.'}</p>
         </div>
