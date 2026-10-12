@@ -1288,6 +1288,7 @@ let selectedDayId = null;
 // ever entered. null = not yet resolved, defaults to the live month once
 // renderDayTabs first runs.
 let dayTabsViewMonth = null;
+let dlMonthKeyFollow = null; // which open day (and its month) dlMonthKey was last synced to
 let dlMonthKey = null; // "YYYY-MM" chosen in the footer's "Download whole month" selector - defaults to the selected day's month
 let notesheetRange = null; // {start, end} - lazily defaulted to the currently viewed month's recorded days
 let notesheetRangeMonthKey = null; // which month's days notesheetRange was last defaulted from - lets it re-default when the Daily Ledger switches to a different month, instead of staying stuck on whichever month it first saw
@@ -11543,6 +11544,17 @@ function currentSelectedMonthKey(){
 }
 function renderFooter(){
   const keys = distinctDayMonthKeys();
+  // The month to download follows the day tab you're on: opening a day in
+  // September points "Download whole month" at September (it used to stay
+  // stuck on the latest month, e.g. October). You can still pick another
+  // month from the dropdown - that choice holds until you switch days.
+  {
+    const ad = findDay(selectedDayId);
+    const adKey = (ad && ad.date) ? ad.date.slice(0,7) : null;
+    const follow = ad ? (ad.id+'|'+adKey) : null;
+    if(adKey && keys.includes(adKey) && follow!==dlMonthKeyFollow){ dlMonthKey = adKey; }
+    dlMonthKeyFollow = follow;
+  }
   if(keys.length && (!dlMonthKey || !keys.includes(dlMonthKey))){
     const activeDay = findDay(selectedDayId);
     const preferred = (activeDay && activeDay.date) ? activeDay.date.slice(0,7) : null;
