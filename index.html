@@ -2044,13 +2044,13 @@ function historyCategories(){
   )));
 }
 function findHistoryCategory(key){ return historyCategories().find(c=>c.key===key) || null; }
-function allHistoricalVouchers(){
+function allHistoricalVouchers(coverList){
   const out = [];
   // Historical notesheets are lookup-only: they must not be counted on top of
   // months/categories the Daily Ledger or the Monthly Ledger already cover,
   // and the same notesheet imported twice (different file names) counts once.
   const covered = new Set();
-  allVouchers().forEach(v=>covered.add(v.date.slice(0,7)+'|'+v.catKey));
+  (coverList || allVouchers()).forEach(v=>covered.add(v.date.slice(0,7)+'|'+v.catKey));
   const seenSig = new Set();
   (state.historicalImports||[]).forEach(imp=>{
     const cat = findHistoryCategory(imp.catKey);
@@ -2080,7 +2080,17 @@ function allHistoricalVouchers(){
    entered in the app's Daily Ledger (day.coa) are used; old imported
    Monthly Ledger figures and historical notesheets are added only when the
    "Include old imported data" box is ticked. */
-let includeOldImported = false;
+let oldDataMode = 'none'; // 'none' | 'detail' | 'ledger'
+/* 'detail': app vouchers + every old notesheet line (voucher-level detail),
+   with the old Monthly Ledger's lump entries used only for month/category
+   pairs that have no notesheet lines. */
+function allVouchersDetailFirst(){
+  const appList = allVouchers(false);
+  const hist = allHistoricalVouchers(appList);
+  const histKeys = new Set(hist.map(v=>v.date.slice(0,7)+'|'+v.catKey));
+  const lumps = monthlyLedgerImportedVouchers().filter(v=>!histKeys.has(v.date.slice(0,7)+'|'+v.catKey));
+  return appList.concat(lumps, hist).sort((a,b)=>a.date.localeCompare(b.date));
+}
 /* Date basis for Advanced Search / Category Summary:
    'entry'    = the voucher's own entry date (default, as before);
    'withdraw' = the date of the Withdraw Notesheet that paid it out. A voucher
@@ -2141,7 +2151,7 @@ function applyWithdrawBasis(list){
   return out;
 }
 function categorySearchVouchers(){
-  const list = includeOldImported ? allVouchersAndHistorical() : allVouchers(false);
+  const list = oldDataMode==='ledger' ? allVouchersAndHistorical() : (oldDataMode==='detail' ? allVouchersDetailFirst() : allVouchers(false));
   return searchDateBasis==='withdraw' ? applyWithdrawBasis(list) : list;
 }
 function searchSourceControlsHtml(){
@@ -2150,7 +2160,13 @@ function searchSourceControlsHtml(){
   const mism = (searchDateBasis==='withdraw' && withdrawMismatches.length)
     ? `<div class="subnote" style="margin:0 0 10px; padding:8px 10px; border:1px solid var(--danger); border-radius:8px; background:var(--danger-soft);"><b>Check:</b> these notesheets recorded a different category total than the vouchers show now (a voucher was probably moved to another category after the notesheet was made). The list below follows each voucher's current category:<br>${withdrawMismatches.map(m=>`Notesheet ${escapeHtml(m.sheet)} &middot; ${escapeHtml(m.cat)}: notesheet ${money(m.recorded)} vs vouchers ${money(m.current)}`).join('<br>')}</div>` : '';
   return `<div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px; margin:0 0 10px;">
-    <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:normal; margin:0;"><input type="checkbox" class="incl-old-chk" ${includeOldImported?'checked':''}> Include old imported data (previous Monthly Ledger &amp; historical notesheets). Unticked = only vouchers entered in this app.</label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:normal; margin:0;">Data
+      <select class="old-mode-sel">
+        <option value="none" ${oldDataMode==='none'?'selected':''}>Only vouchers entered in this app</option>
+        <option value="detail" ${oldDataMode==='detail'?'selected':''}>App + old notesheet detail lines (2024 onward)</option>
+        <option value="ledger" ${oldDataMode==='ledger'?'selected':''}>App + old Monthly Ledger totals (matches the Monthly Ledger)</option>
+      </select>
+    </label>
     <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:normal; margin:0;">Date basis
       <select class="date-basis-sel">
         <option value="entry" ${searchDateBasis==='entry'?'selected':''}>Entry date (voucher date)</option>
@@ -8218,7 +8234,7 @@ function renderSearchCard(){
       aiBtn.innerHTML = originalLabel;
     }
   };
-  card.querySelectorAll('.incl-old-chk').forEach(chk=>{ chk.onchange = ()=>{ includeOldImported = chk.checked; render(); }; });
+  card.querySelectorAll('.old-mode-sel').forEach(sel=>{ sel.onchange = ()=>{ oldDataMode = sel.value; render(); }; });
   card.querySelectorAll('.date-basis-sel').forEach(sel=>{ sel.onchange = ()=>{ searchDateBasis = sel.value; render(); }; });
   card.querySelector('#srch-cat').onchange = (e)=>{ searchFilters.catKey = e.target.value; drawResults(); };
   card.querySelector('#srch-year').onchange = (e)=>{ searchFilters.year = e.target.value; drawResults(); };
@@ -8368,7 +8384,7 @@ function renderCategorySummaryCard(){
     box.appendChild(el(`<div class="computed total" style="margin-top:10px;"><span class="lbl">${escapeHtml(selectedLabel())} grand total</span><span>${money(grand)}</span></div>`));
   }
   drawResults();
-  card.querySelectorAll('.incl-old-chk').forEach(chk=>{ chk.onchange = ()=>{ includeOldImported = chk.checked; render(); }; });
+  card.querySelectorAll('.old-mode-sel').forEach(sel=>{ sel.onchange = ()=>{ oldDataMode = sel.value; render(); }; });
   card.querySelectorAll('.date-basis-sel').forEach(sel=>{ sel.onchange = ()=>{ searchDateBasis = sel.value; render(); }; });
   card.querySelector('#sum-type').onchange = (e)=>{
     summaryFilters.type = e.target.value;
