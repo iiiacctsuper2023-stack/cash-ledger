@@ -10245,6 +10245,7 @@ const DUE_ACCOUNT_TO_REVENUE_KEY = {
   'late fine':'tuitionFee', 'late fine -ar':'tuitionFee', 'late fine-ar':'tuitionFee',
   'uniform fees':'uniform', 'uniform':'uniform',
   'admission fee':'admissionFee', 'admission fee & form':'admissionFee', 'admission fee -ar':'admissionFee',
+  'admission form':'admissionFee', 'admission form -ar':'admissionFee', 'admission form-ar':'admissionFee', 'admission form fee':'admissionFee',
   'muqaddam fees':'mqmFee',
   'session fees':'sessionFee', 'session fee':'sessionFee',
   'books & sty':'booksSty', 'books & stationeries':'booksSty',
@@ -10275,7 +10276,15 @@ const DUE_ACCOUNT_NORM_MAP = (()=>{
   m[normDueAccount('Books & Stationeries')] = 'booksSty';
   return m;
 })();
-function dueAccountKey(label){ return DUE_ACCOUNT_NORM_MAP[normDueAccount(label)] || null; }
+/* Admission Form dues belong to Admission Fee (the app already treats them as
+   one "Admission Fee & Form" category). Any account label naming Admission
+   (Fee, Form, -AR, ...) therefore lands on admissionFee, and the import then
+   adds a student's form due onto that same Student ID's fee due (see
+   parseDuesRegisterFile: rows with the same Student ID are summed). */
+function dueAccountKey(label){
+  const n = normDueAccount(label);
+  return DUE_ACCOUNT_NORM_MAP[n] || (/admission/.test(n) ? 'admissionFee' : null);
+}
 // Section titles for the Due List export, matching the accountant's own template wording
 const DUE_LIST_SECTION_TITLE = {
   tuitionFee:'Tuition Fee', admissionFee:'Admission Fee & Admission Form', transportFee:'Transport Fee Due',
