@@ -3277,6 +3277,12 @@ function migrateState(){
     state.withdrawNotesheetLog.forEach(log=>{
       if(log.migratedToML) return;
       log.migratedToML = true;
+      // The generator already posts its own Monthly Ledger row (same id as the
+      // log). Without this check every freshly generated notesheet got a
+      // SECOND row the next time the app loaded/imported/restored.
+      const wLabel = `Withdraw Notesheet ${log.summaryLabel||''}`;
+      const alreadyPosted = Object.values((state.monthlyLedger && state.monthlyLedger.months) || {}).some(r=>(r.expenditureEntries||[]).some(e=>e.id===log.id || (log.summaryLabel && e.desc===wLabel)));
+      if(alreadyPosted) return;
       const attribDate = log.generatedDate || log.endDate;
       if(!attribDate || !Array.isArray(log.categories) || log.categories.length===0) return;
       const [y, m] = attribDate.split('-');
@@ -3293,6 +3299,26 @@ function migrateState(){
       if(Object.keys(amounts).length) mlRec.expenditureEntries.push({id:uid(), date:attribDate, desc:`Withdraw Notesheet ${log.summaryLabel||''}`, amounts});
     });
   }
+  // One-time tidy-up of duplicates the old behaviour already created: if a
+  // notesheet has several Monthly Ledger rows with the same name AND the same
+  // total, keep one (the row sharing the log's id when present).
+  try{
+    const mlMonths = (state.monthlyLedger && state.monthlyLedger.months) || {};
+    const sumAmt = e=>Object.values(e.amounts||{}).reduce((s,v)=>s+(Number(v)||0),0);
+    (state.withdrawNotesheetLog||[]).forEach(log=>{
+      if(!log.summaryLabel) return;
+      const label = `Withdraw Notesheet ${log.summaryLabel}`;
+      const found = [];
+      Object.values(mlMonths).forEach(r=>(r.expenditureEntries||[]).forEach(e=>{ if(e.desc===label) found.push({r,e}); }));
+      if(found.length<2) return;
+      const keep = found.find(x=>x.e.id===log.id) || found[0];
+      found.forEach(x=>{
+        if(x!==keep && Math.abs(sumAmt(x.e)-sumAmt(keep.e))<0.5){
+          x.r.expenditureEntries = x.r.expenditureEntries.filter(en=>en!==x.e);
+        }
+      });
+    });
+  }catch(err){ /* never block loading over this */ }
   if(!state.loanRecovery) state.loanRecovery = JSON.parse(JSON.stringify(LOAN_RECOVERY_DEFAULT));
   Object.keys(state.monthlyLedger.months||{}).forEach(k=>{ ensureLoanRecoveryEntry(k, state.monthlyLedger.months[k]); });
   reconcileNotesheetEntryMonths();
@@ -13941,7 +13967,7 @@ async function exportNotesheets(startDate, endDate, shouldSave, previewOnly, inc
     // notesheet's date and generating again.
     const withdrawLogId = uid();
     state.withdrawNotesheetLog.push({
-      id:withdrawLogId, generatedAt:new Date().toISOString(), generatedDate: finalAttribDate, startDate, endDate,
+      id:withdrawLogId, migratedToML:true, generatedAt:new Date().toISOString(), generatedDate: finalAttribDate, startDate, endDate,
       summaryLabel:`${state.summaryCounterYear}-${summaryNum}`,
       categories: summaryRows.map(r=>({label:r.label, total:r.total})),
       grandTotal, fileName, fileBase64: await workbookToBase64(wb)
@@ -14428,14 +14454,41 @@ if(typeof navigator!=='undefined' && 'serviceWorker' in navigator && typeof loca
   navigator.serviceWorker.register('./sw.js').catch(()=>{ /* no sw.js next to this file (yet) - fine, app still works online */ });
 }
 
+/* Startup safety net: a failure while the app starts used to leave a blank
+   page with no clue why. Now the failing step and error are shown on screen
+   (saved data is never touched), and a stuck/failed file reconnect can no
+   longer stop the screen from being drawn. */
+let bootDone = false;
+function showStartupError(err, where){
+  try{
+    if(document.getElementById('startup-error')) return;
+    const box = document.createElement('div');
+    box.id = 'startup-error';
+    box.style.cssText = 'position:fixed;inset:0;z-index:99999;overflow:auto;padding:24px;background:#fff;color:#222;font:14px/1.5 system-ui,sans-serif;';
+    box.innerHTML = '<h2 style="margin:0 0 8px;color:#b42318;">The ledger could not start</h2><p>Your saved data has NOT been changed. Please send a screenshot of this message so it can be fixed.</p><p><b>Step:</b> <span class="se-step"></span></p><pre class="se-msg" style="white-space:pre-wrap;background:#f6f6f6;padding:12px;border-radius:8px;"></pre>';
+    box.querySelector('.se-step').textContent = where || 'startup';
+    box.querySelector('.se-msg').textContent = (err && (err.stack || err.message)) || String(err);
+    document.body.appendChild(box);
+  }catch(e){}
+}
+window.addEventListener('error', e=>{ if(!bootDone) showStartupError(e.error || e.message, 'script error while starting'); });
+window.addEventListener('unhandledrejection', e=>{ if(!bootDone) showStartupError(e.reason, 'background error while starting'); });
 (async function boot(){
-  await loadState();
-  locked = !!state.lockPasswordHash;
-  await tryReconnectFile();
-  fsStartWatchers();
-  wireDelegation();
-  render();
-  loadExcelJS().catch(()=>{});
+  let step = 'loading saved data';
+  try{
+    await loadState();
+    locked = !!state.lockPasswordHash;
+    step = 'reconnecting the data file';
+    try{ await Promise.race([tryReconnectFile(), new Promise(r=>setTimeout(r, 4000))]); }catch(e){ console.error(e); }
+    step = 'starting background checks';
+    try{ fsStartWatchers(); }catch(e){ console.error(e); }
+    step = 'wiring buttons';
+    wireDelegation();
+    step = 'drawing the screen';
+    render();
+    bootDone = true;
+    loadExcelJS().catch(()=>{ /* optional */ });
+  }catch(err){ showStartupError(err, step); }
 })();
 </script>
 </body>
