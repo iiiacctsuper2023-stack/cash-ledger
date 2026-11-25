@@ -12,7 +12,10 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj4KPHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIHJ4PSIyOCIgZmlsbD0iIzFCNEI0MyIvPgo8dGV4dCB4PSIxMDAiIHk9IjEzOCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSIxMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNFQURGQzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuCnszwvdGV4dD4KPC9zdmc+">
 <meta name="theme-color" content="#1B4B43">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Fonts load in the background (media=print trick) so a slow/blocked Google Fonts connection can no longer hold the whole app on a white screen; text shows in fallback fonts first, then swaps. -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
 <style>
   :root{
     --paper:#F3F7F0;
@@ -14479,7 +14482,8 @@ window.addEventListener('unhandledrejection', e=>{ if(!bootDone) showStartupErro
     await loadState();
     locked = !!state.lockPasswordHash;
     step = 'reconnecting the data file';
-    try{ await Promise.race([tryReconnectFile(), new Promise(r=>setTimeout(r, 4000))]); }catch(e){ console.error(e); }
+    // Reconnecting the saved data file runs in the background: it must never delay the first screen.
+    tryReconnectFile().then(()=>{ try{ fsRefreshUi(); }catch(e){} }).catch(e=>console.error(e));
     step = 'starting background checks';
     try{ fsStartWatchers(); }catch(e){ console.error(e); }
     step = 'wiring buttons';
